@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="CAD">
+<meta name="theme-color" content="#1f2937">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg">
+<link rel="apple-touch-icon" href="icon.svg">
+<title>iPad CAD</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #111827; --muted: #6b7280; --grid: #e5e7eb; --grid2: #d1d5db;
+  --panel: #f3f4f6; --line: #d1d5db; --accent: #2563eb; --accent-fg: #fff; --warn: #dc2626;
+  --btn: #ffffff; --sel: #f59e0b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111827; --fg: #f3f4f6; --muted: #9ca3af; --grid: #1f2937; --grid2: #374151;
+    --panel: #1f2937; --line: #374151; --accent: #3b82f6; --btn: #111827; --sel: #fbbf24;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111827; --fg: #f3f4f6; --muted: #9ca3af; --grid: #1f2937; --grid2: #374151;
+  --panel: #1f2937; --line: #374151; --accent: #3b82f6; --btn: #111827; --sel: #fbbf24;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 14px/1.3 -apple-system, system-ui, "Segoe UI", sans-serif; overflow: hidden; overscroll-behavior: none; }
+body { display: grid; grid-template-rows: auto 1fr auto; height: 100dvh; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+#bar { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 8px; background: var(--panel); border-bottom: 1px solid var(--line); align-items: center; }
+#bar .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
+button, select, input { font: inherit; color: var(--fg); }
+button { min-height: 40px; min-width: 40px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--btn); cursor: pointer; touch-action: manipulation; }
+button:hover { border-color: var(--muted); }
+button.on, button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+button:disabled { opacity: .4; }
+main { display: grid; grid-template-columns: 1fr 280px; min-height: 0; }
+#stage { position: relative; min-width: 0; min-height: 0; }
+#cv { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; display: block; }
+#panel { overflow-y: auto; background: var(--panel); border-left: 1px solid var(--line); padding: 8px; -webkit-overflow-scrolling: touch; }
+#panel h3 { margin: 12px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+#panel h3:first-child { margin-top: 0; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.row { display: flex; gap: 6px; align-items: center; margin: 4px 0; flex-wrap: wrap; }
+.row label { flex: 1 1 90px; color: var(--muted); }
+.row input[type=number], .row input[type=text], .row select { flex: 1 1 90px; min-width: 0; min-height: 36px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--btn); }
+.row input[type=range] { flex: 2 1 120px; }
+.sw { display: flex; flex-wrap: wrap; gap: 6px; }
+.sw button { width: 34px; height: 34px; min-width: 34px; min-height: 34px; padding: 0; border-radius: 17px; border-width: 2px; }
+.sw button.on { outline: 3px solid var(--accent); outline-offset: 1px; }
+#status { padding: 5px 10px; border-top: 1px solid var(--line); background: var(--panel); color: var(--muted); font-variant-numeric: tabular-nums; min-height: 28px; }
+#toast { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 8px 14px; border-radius: 10px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90%; z-index: 5; }
+#toast.show { opacity: .95; }
+dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--fg); padding: 16px; min-width: 260px; }
+dialog::backdrop { background: rgba(0,0,0,.4); }
+dialog input { width: 100%; min-height: 44px; font-size: 18px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--btn); }
+dialog .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+canvas.preview { width: 100%; height: 24px; display: block; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+small { color: var(--muted); }
+@media (max-width: 760px) { main { grid-template-columns: 1fr; grid-template-rows: 1fr 40%; } #panel { border-left: 0; border-top: 1px solid var(--line); } }
+</style>
+</head>
+<body>
+<header id="bar">
+  <button data-tool="select" title="Seleccionar / arrastrar (V)">Seleccionar</button>
+  <button data-tool="point" title="Punto (P)">Punto</button>
+  <button data-tool="line" title="Línea (L)">Línea</button>
+  <button data-tool="circle" title="Círculo (C)">Círculo</button>
+  <button data-tool="intersect" title="Intersección de 2 elementos (I)">Intersección</button>
+  <span class="sep"></span>
+  <button id="undo" title="Deshacer (Ctrl+Z)">↶</button>
+  <button id="redo" title="Rehacer (Ctrl+Y)">↷</button>
+  <button id="del" title="Borrar selección (Supr)">Borrar</button>
+  <button id="fit" title="Ajustar vista">Ajustar</button>
+</header>
+<main>
+  <div id="stage"><canvas id="cv"></canvas><div id="toast"></div></div>
+  <aside id="panel">
+    <h3>Restricciones (sobre la selección)</h3>
+    <div class="grid2">
+      <button data-con="H">Horizontal</button><button data-con="V">Vertical</button>
+      <button data-con="PAR">Paralela ∥</button><button data-con="PERP">Perpendicular ⟂</button>
+      <button data-con="COI">Coincidente</button><button data-con="MID">Punto medio</button>
+      <button data-con="EQ">Igual =</button><button data-con="TAN">Tangente</button>
+      <button data-con="FIX">Fijar / soltar</button><button data-con="ONC">Punto sobre…</button>
+    </div>
+    <h3>Cotas</h3>
+    <div class="grid2">
+      <button data-con="DIM">Distancia</button><button data-con="ANG">Ángulo</button>
+      <button data-con="RAD">Radio</button><button id="mkint">Intersección</button>
+    </div>
+
+    <h3>Estilo (selección y nuevos)</h3>
+    <div class="sw" id="swatches"></div>
+    <div class="row"><label for="colorPick">Otro color</label><input type="color" id="colorPick" value="#2563eb"></div>
+    <div class="row"><label for="ltype">Tipo de línea</label><select id="ltype"></select></div>
+    <canvas class="preview" id="ltprev"></canvas>
+    <div class="row"><label for="weight">Grosor</label><select id="weight"><option value="1">Fino</option><option value="2" selected>Normal</option><option value="3.5">Grueso</option></select></div>
+
+    <h3>Nuevo tipo de línea</h3>
+    <div class="row"><label for="ltName">Nombre</label><input type="text" id="ltName" placeholder="mi tipo"></div>
+    <div class="row"><label for="ltPat">Patrón</label><input type="text" id="ltPat" placeholder="12 -3 2 -3"></div>
+    <small>+ trazo, − hueco, 0 punto. Ej.: <code>12 -3 2 -3</code> es eje.</small>
+    <canvas class="preview" id="ltnewprev"></canvas>
+    <div class="row"><button id="ltAdd">Crear tipo</button><button id="ltDel">Quitar tipo</button></div>
+
+    <h3>Relleno / achurado</h3>
+    <div class="row"><label for="hKind">Tipo</label><select id="hKind"><option value="lines">Líneas</option><option value="cross">Cruzado</option><option value="solid">Sólido</option></select></div>
+    <div class="row"><label for="hAngle">Ángulo °</label><input type="number" id="hAngle" value="45" step="5"></div>
+    <div class="row"><label for="hSpace">Separación</label><input type="number" id="hSpace" value="8" min="2" step="1"></div>
+    <div class="row"><label for="hAlpha">Opacidad</label><input type="range" id="hAlpha" min="0.1" max="1" step="0.05" value="0.45"></div>
+    <div class="row"><button id="mkhatch">Crear relleno (contornos seleccionados)</button></div>
+
+    <h3>Vista</h3>
+    <div class="row"><button id="tGrid" aria-pressed="true">Cuadrícula</button><button id="tSnap" aria-pressed="false">Imán cuadrícula</button></div>
+    <div class="row"><button id="tCons" aria-pressed="true">Ver restricciones</button><button id="tTouch" aria-pressed="false">Dibujar con dedo</button></div>
+    <div class="row"><label for="ltScale">Escala de trazos</label><input type="range" id="ltScale" min="0.5" max="3" step="0.1" value="1"></div>
+
+    <h3>Archivo</h3>
+    <div class="grid2">
+      <button id="fNew">Nuevo</button><button id="fSave">Guardar .json</button>
+      <button id="fLoad">Abrir…</button><button id="fPng">Exportar PNG</button>
+      <button id="fSvg">Exportar SVG</button><button id="fDxf">Exportar DXF</button>
+    </div>
+    <input type="file" id="fileIn" accept=".json,application/json" hidden>
+    <p><small>Se guarda solo en este navegador. Exporta .json para respaldar. v<span id="ver"></span></small></p>
+  </aside>
+</main>
+<footer id="status">Listo</footer>
+<dialog id="dlg"><form method="dialog"><label id="dlgLabel" for="dlgInput"></label><input id="dlgInput" type="text" inputmode="decimal" autocomplete="off"><div class="actions"><button value="cancel" type="button" id="dlgCancel">Cancelar</button><button value="ok" id="dlgOk" class="on">Aceptar</button></div></form></dialog>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
