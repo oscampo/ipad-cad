@@ -10,11 +10,12 @@ export const HELP_HTML = `
 <li><b>Menú (☰)</b>: muestra u oculta el panel de herramientas de la derecha. El primer botón de la barra abre el <b>árbol de elementos</b>.</li>
 <li>La barra inferior explica la herramienta activa y muestra los datos del elemento seleccionado.</li>
 <li>Seleccionar: toca un elemento (toca varios para sumar). Los botones del panel solo se activan si la selección les sirve.</li>
+<li><b>Selección con cuadro</b>: con la herramienta Seleccionar, arrastra desde un lugar vacío. De <b>izquierda a derecha</b> (cuadro azul, línea continua) se seleccionan los elementos que quedan <b>completamente dentro</b>; de <b>derecha a izquierda</b> (cuadro naranja, línea discontinua) también los que el cuadro <b>toca</b>. Con Mayús se suma a la selección. Alcanza puntos, líneas, círculos, arcos, splines y textos (un texto por su punto de inserción). Con el dedo, activa <i>Dedo dibuja</i>, porque si no el dedo desplaza el lienzo.</li>
 </ul></details>
 
 <details><summary>Herramientas de dibujo (barra superior)</summary>
 <ul>
-<li><b>Seleccionar (V)</b>: selecciona y arrastra puntos, líneas o el borde de un círculo; el mecanismo se mueve según las restricciones.</li>
+<li><b>Seleccionar (V)</b>: selecciona, arrastra puntos, líneas o el borde de un círculo (el mecanismo se mueve según las restricciones) y, arrastrando desde un lugar vacío, selecciona con un cuadro.</li>
 <li><b>Punto (P)</b>: sobre una línea o círculo queda restringido a él.</li>
 <li><b>Línea (L)</b>: toca inicio y fin (encadena) o arrastra un segmento. Esc o Seleccionar termina.</li>
 <li><b>Círculo (C)</b>: centro y un punto del borde.</li>
@@ -73,11 +74,14 @@ export const HELP_HTML = `
 
 <details><summary>Splines y trazados (levas y trayectorias)</summary>
 <ul>
-<li>Un spline es un B-spline cúbico que pasa por puntos reales del dibujo. Esos puntos se comportan como puntos libres hasta que los restrinjas; los puntos ligados al spline lo deforman al arrastrarlos.</li>
-<li>El spline es un elemento de primera clase: puede tener puntos sobre él, intersecciones y tangencias con líneas, círculos y arcos.</li>
+<li>Un spline es un <b>B-spline cúbico</b> que pasa por puntos reales del dibujo. Abierto: curvatura nula en los extremos. Cerrado: periódico, suave en toda la vuelta, sin esquina en la unión. Esos puntos se comportan como puntos libres hasta que los restrinjas.</li>
+<li><b>Es un elemento de primera clase</b>: puede tener puntos sobre él, intersecciones y tangencias con líneas, círculos y arcos. El solver las resuelve de forma exacta, no aproximada, junto con el resto del dibujo.</li>
+<li><b>Deformación</b>: arrastrar un punto del spline, o un punto ligado a él, deforma la curva y el resto del dibujo sigue. Un seguidor (punto sobre el spline y sobre una recta, por ejemplo) recorre el perfil mientras mueves la recta.</li>
+<li>Un punto ligado a un spline <b>abierto</b> no puede salirse de sus extremos: si lo intentas, la app avisa de un conflicto y deshace.</li>
+<li>Al soltar un arrastre, un spline con relaciones recalcula sus parámetros internos para que no ondule si los puntos se movieron mucho; puede cambiar ligeramente de forma.</li>
 <li><b>Trazar punto</b>: hace que un punto dibuje su trayectoria al mover el mecanismo. <b>Trazado a spline</b> convierte la trayectoria (la primera vuelta) en un spline editable.</li>
 <li><b>Equidistante</b>: curva paralela a un spline a una distancia dada (por ejemplo el radio del rodillo de una leva). Avisa si la distancia supera el radio de curvatura.</li>
-<li><b>Cerrar / abrir</b> el spline seleccionado.</li>
+<li><b>Cerrar / abrir</b> el spline seleccionado. En el SVG de corte y en el DXF salen como curvas exactas.</li>
 </ul></details>
 
 <details><summary>Texto, estilo y rellenos</summary>
@@ -103,15 +107,19 @@ export const HELP_HTML = `
 <details><summary>Atajos de teclado</summary>
 <p>V seleccionar, P punto, L línea, C círculo, R arco por centro, A arco por 3 puntos, S spline, T texto, I intersección, X recortar, E extender. Ctrl/Cmd+Z deshacer, Ctrl/Cmd+Y (o Ctrl/Cmd+Mayús+Z) rehacer, Supr o Retroceso borra, Esc cancela o termina.</p></details>
 
+<details><summary>Historial de versiones</summary>
+<p><b>v1.0.0</b>: primera versión numerada. Incluye dibujo paramétrico con restricciones y cotas (fórmulas, grados o radianes, ANSI), splines B-spline nativos de PlaneGCS, recortar, extender, dividir, matrices lineal y circular, copia espejo, bloqueo suave, selección con cuadro, árbol de elementos, exportación PNG, SVG, DXF y SVG CUT, y esta ayuda. El detalle está en <a href="https://github.com/oscampo/ipad-cad/blob/main/CHANGELOG.md" target="_blank" rel="noopener">CHANGELOG.md</a>.</p></details>
+
 <details open><summary>Solver y créditos</summary>
 <p>Las restricciones las resuelve <b>PlaneGCS</b>, el solver geométrico 2D del módulo <i>Sketcher</i> de <b>FreeCAD</b>, cuyo código original es de <b>Konstantinos Poulios</b> (© 2011, parte del proyecto FreeCAD, licencia LGPL).</p>
 <p>La app lo usa compilado a WebAssembly mediante el paquete <b>@salusoft89/planegcs</b> (v1.3.0), un build wasm y envoltorio JavaScript de <b>Salusoft89</b>, con licencia LGPL-2.0-or-later: <a href="https://github.com/Salusoft89/planegcs" target="_blank" rel="noopener">github.com/Salusoft89/planegcs</a>. FreeCAD: <a href="https://www.freecad.org" target="_blank" rel="noopener">freecad.org</a>.</p>
-<p>Los splines son <b>B-splines cúbicos</b> que pasan por sus puntos (abiertos, con curvatura nula en los extremos, o cerrados periódicos) y usan los B-splines nativos de PlaneGCS: el punto sobre spline y las tangencias con líneas, círculos y arcos las resuelve el solver de forma exacta, junto con el resto del dibujo.</p>
+<p>Los splines son <b>B-splines cúbicos nativos de PlaneGCS</b>: cada punto del spline queda sobre su nudo, los polos son incógnitas auxiliares del solver y la curva dibujada es la misma que resuelve el solver. El punto sobre spline (<code>point_on_bspline</code>) y las tangencias con líneas, círculos y arcos (<code>angle_via_point_and_param</code>) se resuelven de forma exacta. En los abiertos, la curvatura nula en los extremos se expresa con una restricción de punto medio entre polos.</p>
 <p>Otros componentes: íconos <b>Lucide</b> (licencia ISC) y empaquetado con <b>Vite</b> (licencia MIT).</p></details>
 
 <details><summary>Límites conocidos</summary>
 <ul>
 <li>Un spline no se recorta ni se extiende.</li>
+<li>Una tangencia con un spline puede no converger si el punto de contacto arranca muy lejos de la solución (la app lo arranca en el punto más cercano).</li>
 <li>La división en partes iguales de arcos y círculos no deja restricción de igual ángulo.</li>
 <li>Las copias de las matrices y del espejo no quedan ligadas al original.</li>
 <li>Si el solver no converge o hay restricciones en conflicto, la acción se deshace con un aviso.</li>

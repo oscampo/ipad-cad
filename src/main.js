@@ -10,6 +10,7 @@ import {
 } from './geom.js';
 import { startTrace, recordTraces, traceToSpline, offsetPolyline } from './curves.js';
 import { splitElement } from './split.js';
+import { boxSelect } from './boxsel.js';
 import { trimAt, extendEnd, linearArray, mirrorCopy, circularArray } from './edit.js';
 import { layoutDim, dragDim, dimValue, angSector, angTrue, DIAM } from './dims.js';
 import { textFrame, textHit, textPose, rawAngle, ANCHORS, ANCHOR_NAMES, LINE_SPACING } from './text.js';
@@ -21,7 +22,7 @@ import { parseValue, isPlainNumber } from './expr.js';
 import { HELP_HTML } from './help.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from './lock.js';
 
-const VERSION = '0.1.0';
+const VERSION = '1.0.0';
 const STORE = 'ipad-cad-v1';
 const $ = (id) => document.getElementById(id);
 const cv = $('cv');
@@ -41,7 +42,7 @@ let drag = null;
 let labelHits = [];
 const pointers = new Map();
 let gesture = null;
-let spaceDown = false;
+let spaceDown = false, shiftDown = false;
 let theme = { fg: '#111', bg: '#fff', muted: '#888', grid: '#eee', grid2: '#ddd', accent: '#2563eb', sel: '#f59e0b', warn: '#dc2626' };
 
 // ---------------------------------------------------------------- utilidades
@@ -778,6 +779,12 @@ function drawPreview(c) {
     c.beginPath(); c.arc(q.x * dpr, q.y * dpr, 8 * dpr, 0, 7); c.moveTo((q.x - 13) * dpr, q.y * dpr); c.lineTo((q.x + 13) * dpr, q.y * dpr); c.moveTo(q.x * dpr, (q.y - 13) * dpr); c.lineTo(q.x * dpr, (q.y + 13) * dpr); c.stroke(); c.restore();
   }
   if (pickResolve && pickKind === 'ln' && hover) { const hl = hitCurves(hover.x, hover.y); if (hl?.k === 'ln') axis(hl.id, false, theme.sel, ''); }
+  if (tool === 'select' && drag?.box && drag.boxOn && drag.p1) { // cuadro de seleccion
+    const x = Math.min(drag.p0.x, drag.p1.x) * dpr, y = Math.min(drag.p0.y, drag.p1.y) * dpr, w = Math.abs(drag.p1.x - drag.p0.x) * dpr, h = Math.abs(drag.p1.y - drag.p0.y) * dpr;
+    const crossing = drag.p1.x < drag.p0.x;
+    c.save(); c.globalAlpha = 0.1; c.fillStyle = crossing ? theme.sel : theme.accent; c.fillRect(x, y, w, h); c.globalAlpha = 1;
+    c.strokeStyle = crossing ? theme.sel : theme.accent; c.lineWidth = 1.5 * dpr; c.setLineDash(crossing ? [6 * dpr, 4 * dpr] : []); c.strokeRect(x, y, w, h); c.restore();
+  }
   if (tool === 'trim' && drag?.trail?.length > 1) { // trazo de recorte
     c.strokeStyle = theme.warn; c.lineWidth = 2 * dpr; c.setLineDash([3 * dpr, 4 * dpr]);
     c.beginPath(); drag.trail.forEach((q, i) => (i ? c.lineTo(q.x * dpr, q.y * dpr) : c.moveTo(q.x * dpr, q.y * dpr))); c.stroke();
@@ -1006,6 +1013,7 @@ function toolDown(p) {
   if (tool === 'select') {
     const h = hitTest(p.x, p.y);
     drag = { p0: p, hit: h, started: false };
+    if (!h || h.k === 'ha') drag.box = true; // arrastrar desde un lugar vacio: cuadro de seleccion
     if (h && (h.k === 'pt' || h.k === 'ln' || h.k === 'ci' || h.k === 'ar')) {
       const m = toModel(p.x, p.y);
       drag.m0 = m;
@@ -1027,6 +1035,17 @@ function toolDown(p) {
 }
 
 // Recortar: cada vez que el trazo pasa sobre un elemento, se quita el tramo entre los cruces mas cercanos.
+// Cuadro de seleccion: de izquierda a derecha toma lo que queda completamente dentro; de derecha a
+// izquierda, lo que queda dentro o lo toca. Con Mayus se suma a la seleccion.
+function finishBox(d, p) {
+  const a = toModel(d.p0.x, d.p0.y), b = toModel(p.x, p.y);
+  const found = boxSelect(doc, { x0: a.x, y0: a.y, x1: b.x, y1: b.y }, { cross: p.x < d.p0.x, shown: shownPoints() });
+  const keep = shiftDown ? sel.filter((x) => !found.some((f) => same(f, x))) : [];
+  sel = [...keep, ...found];
+  toast(found.length ? `${found.length} elemento${found.length === 1 ? '' : 's'} seleccionado${found.length === 1 ? '' : 's'}` : 'No hay elementos en el cuadro');
+  afterChange();
+}
+
 function trimStep(p, d) {
   const h = hitCurves(p.x, p.y);
   if (!h) return;
@@ -1053,6 +1072,12 @@ function toolMove(p) {
     return;
   }
   if (tool !== 'select') { if (dist(p, drag.p0) > 8) drag.moved = true; return; }
+  if (drag.box) { // cuadro de seleccion
+    drag.p1 = p;
+    if (dist(p, drag.p0) > 6) drag.boxOn = true;
+    draw();
+    return;
+  }
   if (drag.dim) {
     if (!drag.started) { if (dist(p, drag.p0) < 5) return; drag.started = true; pushUndo(); }
     dragDim(doc, doc.cons[drag.hit.id], view, p);
@@ -1089,6 +1114,7 @@ function toolMove(p) {
 function toolUp(p, q) {
   const d = drag; drag = null;
   if (tool === 'select') {
+    if (d?.box && d.boxOn) { finishBox(d, p); return; }
     if (d?.started) { reparamSplines(doc); afterChange(); return; }
     selectAt(p);
     return;
@@ -1700,7 +1726,7 @@ function createHatch() {
 
 // ---------------------------------------------------------------- estado / ayuda
 const HINTS = {
-  select: 'Toca para seleccionar (varios). Arrastra puntos, líneas o el borde de un círculo; el mecanismo se mueve según las restricciones.',
+  select: 'Toca para seleccionar (varios). Arrastra puntos, líneas o el borde de un círculo para moverlos; arrastra desde un lugar vacío para seleccionar con un cuadro.',
   point: 'Toca para colocar un punto (sobre una línea o círculo queda restringido a él).',
   line: 'Toca inicio y fin (encadena); o arrastra un segmento. Esc/Seleccionar termina.',
   circle: 'Toca el centro y luego un punto del borde.',
@@ -2187,13 +2213,14 @@ window.addEventListener('keydown', (e) => {
   if (e.target.closest?.('input,select,textarea,dialog')) return;
   const k = e.key.toLowerCase();
   if (e.code === 'Space') { spaceDown = true; e.preventDefault(); }
+  if (e.key === 'Shift') shiftDown = true;
   if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
   else if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); }
   else if (k === 'escape') { if (pickResolve) { const r = pickResolve; pickResolve = null; r(null); } else if (pending) { if (tool === 'spline' && pending.ids?.length >= 2) finishSpline(false); else cancelPending(); } else { sel = []; afterChange(); } }
   else if (k === 'delete' || k === 'backspace') $('del').click();
   else if (!e.ctrlKey && !e.metaKey) { const m = { v: 'select', p: 'point', l: 'line', c: 'circle', i: 'intersect', a: 'arc3', r: 'arcc', t: 'text', s: 'spline', x: 'trim', e: 'extend' }[k]; if (m) setTool(m); }
 });
-window.addEventListener('keyup', (e) => { if (e.code === 'Space') spaceDown = false; });
+window.addEventListener('keyup', (e) => { if (e.code === 'Space') spaceDown = false; if (e.key === 'Shift') shiftDown = false; });
 // Area visible real (con teclado en pantalla): los dialogos se acomodan arriba de ella
 function syncViewport() {
   const v = window.visualViewport;

@@ -12,6 +12,7 @@ import { trimAt, extendEnd, cutsOf, linearArray, mirrorCopy, circularArray } fro
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from '../src/lock.js';
 import { initSolver, solve, reparamSplines } from '../src/solver.js';
 import { bsplineThrough, bsplinePoint } from '../src/bspline.js';
+import { boxSelect } from '../src/boxsel.js';
 import { lineLine, lineCircle, circleCircle, signedAngle, dashFromPattern, parsePattern, circumcircle, arcSweepOf, TAU, splineSamples, resamplePolyline, polylineLength, splineBezier, closestOnPolyline, polylineLine, polylineCircle, polylinePolyline } from '../src/geom.js';
 
 await initSolver();
@@ -1292,6 +1293,28 @@ t('spline cerrado nativo: punto sobre la curva, arrastre del punto y de la curva
   // sin relaciones, el spline deja de guardar parametros
   deleteItems(d, Object.keys(d.cons).map((id) => ({ k: 'co', id })));
   assert.equal(d.splines[sp].ts, undefined);
+});
+
+
+t('seleccion por cuadro: ventana (dentro) y cruce (toca)', () => {
+  const d = newDoc();
+  const a = addPoint(d, 1, 1), b = addPoint(d, 4, 1), c = addPoint(d, 8, 8), e = addPoint(d, 20, 20);
+  const inL = addLine(d, a, b, {}), crossL = addLine(d, b, c, {}), outL = addLine(d, c, e, {});
+  const cc = addPoint(d, 3, 3), inC = addCircle(d, cc, 1, {}), bigC = addCircle(d, cc, 3.5, {}), farC = addCircle(d, addPoint(d, 40, 40), 2, {});
+  const ids = (r, o) => boxSelect(d, r, o).map((x) => x.id);
+  const box = { x0: 0, y0: 0, x1: 5, y1: 5 };
+  const win = ids(box, { cross: false });
+  assert.ok(win.includes(inL) && win.includes(inC) && win.includes(a) && win.includes(b));
+  assert.ok(!win.includes(crossL) && !win.includes(bigC) && !win.includes(outL) && !win.includes(farC));
+  const cr = ids(box, { cross: true });
+  assert.ok(cr.includes(crossL) && cr.includes(inL) && cr.includes(inC), 'el cruce incluye lo de dentro');
+  assert.ok(cr.includes(bigC), 'una circunferencia que cruza el borde');
+  assert.ok(!cr.includes(outL) && !cr.includes(farC));
+  const ring = addCircle(d, cc, 8, {});
+  assert.ok(!ids(box, { cross: true }).includes(ring), 'rodear sin tocar no cuenta');
+  assert.deepEqual(ids({ x0: 5, y0: 5, x1: 0, y1: 0 }, { cross: false }), win);
+  assert.ok(!ids(box, { shown: new Set([a]) }).includes(b));
+  assert.ok(!ids({ x0: 2.5, y0: 2.5, x1: 3.5, y1: 3.5 }, { cross: true }).includes(bigC));
 });
 
 console.log(`\n${passed} pruebas pasaron`);
