@@ -18,6 +18,7 @@ import { iconSvg } from './icons.js';
 import { buildTree, kindOf } from './tree.js';
 import { cleanFileBase } from './files.js';
 import { parseValue, isPlainNumber } from './expr.js';
+import { HELP_HTML } from './help.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from './lock.js';
 
 const VERSION = '0.1.0';
@@ -245,6 +246,8 @@ function applyChrome() {
 }
 $('tPanel').onclick = () => { opts.panel = opts.panel === false; applyChrome(); persist(); };
 $('tTree').onclick = () => { opts.tree = !opts.tree; applyChrome(); persist(); };
+$('tHelp').onclick = () => { $('helpBody').innerHTML = HELP_HTML + `<p style="color:var(--muted);font-size:12px">iPad CAD v${VERSION}</p>`; $('dlgH').showModal(); $('helpBody').scrollTop = 0; };
+$('helpClose').onclick = () => $('dlgH').close();
 $('treeClose').onclick = () => { opts.tree = false; applyChrome(); persist(); };
 
 function hydrateIcons() {

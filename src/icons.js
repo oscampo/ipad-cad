@@ -22,6 +22,7 @@ import pencilRuler from 'lucide-static/icons/pencil-ruler.svg?raw';
 import unlock from 'lucide-static/icons/lock-open.svg?raw';
 import menu from 'lucide-static/icons/menu.svg?raw';
 import listTree from 'lucide-static/icons/list-tree.svg?raw';
+import help from 'lucide-static/icons/circle-help.svg?raw';
 
 const S = (inner) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
 
@@ -73,7 +74,7 @@ const custom = {
   labels: S('<path d="M4 7h16M4 12h10M4 17h16"/>'),
 };
 
-const generic = { undo, redo, trash, fit, grid, magnet, eye, hand, save, 'folder-open': folderOpen, 'file-plus': filePlus, image, download, lock, equal, select: pointer, circle, ruler, 'pencil-ruler': pencilRuler, menu, unlock, 'list-tree': listTree };
+const generic = { undo, redo, trash, fit, grid, magnet, eye, hand, save, 'folder-open': folderOpen, 'file-plus': filePlus, image, download, lock, equal, select: pointer, circle, ruler, 'pencil-ruler': pencilRuler, menu, unlock, 'list-tree': listTree, help };
 
 function clean(raw) {
   // quita comentarios de licencia y atributos de tamano; el CSS fija el tamano

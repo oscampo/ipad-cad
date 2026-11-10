@@ -55,6 +55,15 @@ body.nolabels .grid2 { grid-template-columns: repeat(4, 1fr); }
 body.nolabels .grid2 button span { display: none; }
 body.nolabels .grid2 button { justify-content: center; padding: 4px; }
 #bar button { padding: 4px 8px; }
+dialog.help { width: min(760px, calc(100vw - 16px)); max-width: none; padding: 0; }
+dialog.help .hhead { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; padding: 8px 8px 8px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+dialog.help #helpBody { padding: 8px 16px 16px; font-size: 14px; line-height: 1.45; }
+dialog.help details { border-top: 1px solid var(--line); padding: 4px 0; }
+dialog.help summary { cursor: pointer; font-weight: 600; min-height: 36px; display: flex; align-items: center; }
+dialog.help ul { margin: 4px 0 8px; padding-left: 20px; }
+dialog.help li { margin: 3px 0; }
+dialog.help code { background: var(--btn); padding: 1px 5px; border-radius: 4px; }
+dialog.help a { color: var(--accent); }
 .exp3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 6px; }
 .exp3 button { font-size: 13px; font-weight: 600; line-height: 1.1; justify-content: center; text-align: center; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
@@ -123,6 +132,7 @@ body.nopanel #panel { display: none; }
   <button id="fit" data-icon="fit" title="Ajustar vista" aria-label="Ajustar vista"><i></i></button>
   <span class="sep"></span>
   <button id="tPanel" data-icon="menu" title="Mostrar u ocultar el menú de herramientas" aria-label="Menú" aria-pressed="true"><i></i></button>
+  <button id="tHelp" data-icon="help" title="Ayuda y documentación" aria-label="Ayuda"><i></i></button>
 </header>
 <main>
   <div id="stage"><canvas id="cv"></canvas><div id="toast"></div>
@@ -281,6 +291,7 @@ body.nopanel #panel { display: none; }
   <small>El número total incluye el original (instancia 1); el sentido por defecto es antihorario. Con 360° las instancias se reparten en toda la vuelta; con menos, el original y la última quedan en los extremos. Los puntos sobre el centro se comparten. Sin centro elegido se usa el origen.</small>
   <div class="actions"><button type="button" id="cirCancel">Cancelar</button><button id="cirOk" class="on">Crear copias</button></div>
 </form></dialog>
+<dialog id="dlgH" class="help"><div class="hhead"><b>Ayuda</b><button id="helpClose" aria-label="Cerrar">✕</button></div><div id="helpBody"></div></dialog>
 <dialog id="dlgT"><form method="dialog"><label id="dlgTLabel" for="dlgTInput"></label><textarea id="dlgTInput" rows="2" style="width:100%;font-size:18px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--btn);color:var(--fg);font-family:inherit"></textarea><div class="actions"><button value="cancel" type="button" id="dlgTCancel">Cancelar</button><button value="ok" id="dlgTOk" class="on">Aceptar</button></div></form></dialog>
 <dialog id="dlgN"><form method="dialog">
   <label id="nameLabel" for="nameInput">Nombre del archivo</label>
