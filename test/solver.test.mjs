@@ -8,7 +8,7 @@ import { splitElement } from '../src/split.js';
 import { buildTree, conLabel } from '../src/tree.js';
 import { cleanFileBase } from '../src/files.js';
 import { parseValue, evalExpr, isPlainNumber } from '../src/expr.js';
-import { trimAt, extendEnd, cutsOf, linearArray, mirrorCopy } from '../src/edit.js';
+import { trimAt, extendEnd, cutsOf, linearArray, mirrorCopy, circularArray } from '../src/edit.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from '../src/lock.js';
 import { initSolver, solve } from '../src/solver.js';
 import { lineLine, lineCircle, circleCircle, signedAngle, dashFromPattern, parsePattern, circumcircle, arcSweepOf, TAU, splineSamples, resamplePolyline, polylineLength, splineBezier, closestOnPolyline, polylineLine, polylineCircle, polylinePolyline } from '../src/geom.js';
@@ -1214,6 +1214,30 @@ t('SVG corte laser: clases de linea a corte, marcado u omitir', () => {
   assert.match(r.svg, /<g id="corte" fill="none" stroke="#ff0000"/);
   assert.match(r.svg, /<g id="marcado" fill="none" stroke="#0000ff"/);
   assert.equal(exportSVGLaser(d, { modes: { [k(cut)]: 'skip' } }), null);
+});
+
+
+t('matriz circular: 4 instancias a 90, restricciones H/V se intercambian, omitir y centro compartido', () => {
+  const d = newDoc();
+  const o = addPoint(d, 0, 0), a = addPoint(d, 10, 0);
+  const l = addLine(d, o, a, {});
+  addCon(d, { t: 'H', refs: [l] });
+  const r = circularArray(d, [{ k: 'ln', id: l }], { c: { x: 0, y: 0 }, step: Math.PI / 2, n: 4, skip: new Set([3]) });
+  assert.ok(r.ok); assert.equal(r.made.length, 2, 'copias 2 y 4; la 3 se omite');
+  assert.ok(solve(d, []).ok);
+  const ends = r.made.map((m) => d.pts[d.lines[m.id].b]).sort((p, q) => p.y - q.y);
+  near(ends[0].x, 0, 1e-6); near(ends[0].y, -10, 1e-6); near(ends[1].x, 0, 1e-6); near(ends[1].y, 10, 1e-6);
+  assert.ok(r.made.every((m) => d.lines[m.id].a === o), 'el centro se comparte');
+  assert.equal(Object.values(d.cons).filter((k) => k.t === 'V').length, 2, 'H pasa a V a 90 y 270 grados');
+  // angulo cualquiera: no se copia H/V
+  const d2 = newDoc();
+  const l2 = addLine(d2, addPoint(d2, 5, 0), addPoint(d2, 8, 0), {});
+  addCon(d2, { t: 'H', refs: [l2] });
+  const r2 = circularArray(d2, [{ k: 'ln', id: l2 }], { c: { x: 0, y: 0 }, step: (30 * Math.PI) / 180, n: 3 });
+  assert.ok(r2.ok && solve(d2, []).ok);
+  assert.equal(Object.values(d2.cons).filter((k) => k.t === 'H' || k.t === 'V').length, 1);
+  const q = d2.pts[d2.lines[r2.made[1].id].a];
+  near(Math.hypot(q.x, q.y), 5, 1e-9);
 });
 
 console.log(`\n${passed} pruebas pasaron`);

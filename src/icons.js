@@ -49,6 +49,8 @@ const custom = {
   array: S('<rect x="2.5" y="8.5" width="5" height="7" rx="1"/><rect x="9.5" y="8.5" width="5" height="7" rx="1" opacity=".65"/><rect x="16.5" y="8.5" width="5" height="7" rx="1" opacity=".35"/>'),
   // bloqueo suave: tres ramas que salen de un nodo (direcciones que "atrapan" la linea)
   'soft-lock': S('<path d="M4.5 5 12 12.5M19.5 6 12 12.5M12 12.5 6 19"/><circle cx="4.5" cy="5" r="1.9" fill="currentColor"/><circle cx="19.5" cy="6" r="1.9" fill="currentColor"/><circle cx="6" cy="19" r="1.9" fill="currentColor"/><circle cx="12" cy="12.5" r="2.3" fill="currentColor"/>'),
+  // matriz circular: el original y copias girando alrededor de un centro
+  'array-circ': S('<circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="4.5" r="2.2"/><circle cx="18.9" cy="15.5" r="2.2" opacity=".65"/><circle cx="5.1" cy="15.5" r="2.2" opacity=".35"/><path d="M12 12V6.7" opacity=".4" stroke-dasharray="1.5 2.5"/>'),
   // copia espejo: eje discontinuo con un triangulo y su reflejo
   mirror: S('<path d="M12 2v20" stroke-dasharray="2 3"/><path d="M9 7 3 18h6z"/><path d="M15 7l6 11h-6z" opacity=".5"/>'),
   // spline: una "S" girada 90 grados (onda) con puntos en los extremos y en cada seno

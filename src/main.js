@@ -10,7 +10,7 @@ import {
 } from './geom.js';
 import { startTrace, recordTraces, traceToSpline, offsetPolyline } from './curves.js';
 import { splitElement } from './split.js';
-import { trimAt, extendEnd, linearArray, mirrorCopy } from './edit.js';
+import { trimAt, extendEnd, linearArray, mirrorCopy, circularArray } from './edit.js';
 import { layoutDim, dragDim, dimValue, angSector, angTrue, DIAM } from './dims.js';
 import { textFrame, textHit, textPose, rawAngle, ANCHORS, ANCHOR_NAMES, LINE_SPACING } from './text.js';
 import { exportSVG, exportSVGLaser, exportDXF, extraExtents, laserClasses } from './export.js';
@@ -115,6 +115,7 @@ function updateEnabled() {
   $('mkhatch').disabled = ln + crv + n.sp < 1;
   $('mkarr').disabled = !sel.some((x) => ['pt', 'ln', 'ci', 'ar', 'sp', 'tx'].includes(x.k));
   $('mkmir').disabled = $('mkarr').disabled;
+  $('mkcir').disabled = $('mkarr').disabled;
   const selPts = sel.filter((x) => x.k === 'pt').map((x) => x.id);
   $('trTrace').disabled = !selPts.length;
   $('trClear').disabled = !selPts.some((id) => doc.traces[id]?.pts.length > 1);
@@ -768,7 +769,12 @@ function drawPreview(c) {
     c.restore();
   };
   if (arrAxes) { axis(arrAxes.l1, arrAxes.f1, theme.accent, '1'); axis(arrAxes.l2, arrAxes.f2, theme.warn, '2'); }
-  if (pickResolve && hover) { const hl = hitCurves(hover.x, hover.y); if (hl?.k === 'ln') axis(hl.id, false, theme.sel, ''); }
+  if (circC) { // centro de la matriz circular
+    const q = toScreen(circC);
+    c.save(); c.setLineDash([]); c.strokeStyle = theme.warn; c.lineWidth = 2 * dpr;
+    c.beginPath(); c.arc(q.x * dpr, q.y * dpr, 8 * dpr, 0, 7); c.moveTo((q.x - 13) * dpr, q.y * dpr); c.lineTo((q.x + 13) * dpr, q.y * dpr); c.moveTo(q.x * dpr, (q.y - 13) * dpr); c.lineTo(q.x * dpr, (q.y + 13) * dpr); c.stroke(); c.restore();
+  }
+  if (pickResolve && pickKind === 'ln' && hover) { const hl = hitCurves(hover.x, hover.y); if (hl?.k === 'ln') axis(hl.id, false, theme.sel, ''); }
   if (tool === 'trim' && drag?.trail?.length > 1) { // trazo de recorte
     c.strokeStyle = theme.warn; c.lineWidth = 2 * dpr; c.setLineDash([3 * dpr, 4 * dpr]);
     c.beginPath(); drag.trail.forEach((q, i) => (i ? c.lineTo(q.x * dpr, q.y * dpr) : c.moveTo(q.x * dpr, q.y * dpr))); c.stroke();
@@ -966,9 +972,10 @@ function tapSelect(p) {
   if (tool === 'select') selectAt(p);
 }
 
-let pickResolve = null; // si hay una promesa esperando, el siguiente toque elige una linea (direccion de la matriz)
-function pickLine(msg) {
+let pickResolve = null, pickKind = 'ln'; // si hay una promesa esperando, el siguiente toque elige una linea o un punto
+function pickLine(msg, kind = 'ln') {
   setTool('select');
+  pickKind = kind;
   toast(msg + ' (Esc cancela)');
   $('status').textContent = msg;
   return new Promise((res) => { pickResolve = res; });
@@ -976,8 +983,10 @@ function pickLine(msg) {
 
 function selectAt(p) {
   if (pickResolve) {
-    const h = hitCurves(p.x, p.y), r = pickResolve;
+    const r = pickResolve;
     pickResolve = null;
+    if (pickKind === 'pt') { const q = snapAt(p.x, p.y); r({ x: q.x, y: q.y, id: q.type === 'pt' ? q.id : null }); return; }
+    const h = hitCurves(p.x, p.y);
     r(h && h.k === 'ln' ? h : null);
     return;
   }
@@ -1821,6 +1830,7 @@ $('mksplit').onclick = splitSelected;
 // ---- matriz lineal ----
 // Muestra el dialogo con el estado st; devuelve 'ok', 'cancel', 'pick1' o 'pick2' (elegir la linea de una direccion).
 const lineName = (id) => { const l = doc.lines[id]; return `Línea ${id} · L = ${fmt(dist(doc.pts[l.a], doc.pts[l.b]))}`; };
+let circC = null; // centro de la matriz circular mientras se define
 let arrAxes = null; // direcciones elegidas de la matriz: se resaltan en el lienzo mientras se define
 function showArrayDialog(st, count) {
   return new Promise((resolve) => {
@@ -1897,6 +1907,65 @@ async function linearArrayCmd() {
   }
 }
 $('mkarr').onclick = linearArrayCmd;
+
+// ---- matriz circular ----
+function showCircDialog(st, count) {
+  return new Promise((resolve) => {
+    const dlg = $('dlgC');
+    $('cirInfo').textContent = `${count} elemento${count === 1 ? '' : 's'} a copiar`;
+    $('cirC').textContent = st.c ? (st.c.id ? `Punto ${st.c.id} (${fmt(st.c.x)}, ${fmt(st.c.y)})` : `(${fmt(st.c.x)}, ${fmt(st.c.y)})`) : 'Origen (0, 0)';
+    $('cirT').value = st.t; $('cirN').value = st.n; $('cirEq').checked = st.eq; $('cirS').value = st.s; $('cirRev').checked = st.rev; $('cirK').value = st.k;
+    circC = st.c || { x: 0, y: 0 }; draw();
+    const read = () => { st.t = $('cirT').value; st.n = $('cirN').value; st.eq = $('cirEq').checked; st.s = $('cirS').value; st.rev = $('cirRev').checked; st.k = $('cirK').value; };
+    const sync = () => { $('cirStepRow').style.display = $('cirEq').checked ? 'none' : 'flex'; };
+    $('cirEq').onchange = sync; sync();
+    let done = false;
+    const finish = (v) => { if (done) return; done = true; read(); dlg.close(); if (v !== 'pick') circC = null; draw(); resolve(v); };
+    $('cirOk').onclick = (ev) => { ev.preventDefault(); finish('ok'); };
+    $('cirCancel').onclick = () => finish('cancel');
+    $('cirPick').onclick = () => finish('pick');
+    dlg.oncancel = () => finish('cancel');
+    dlg.showModal(); $('cirN').focus();
+  });
+}
+
+async function circularCmd() {
+  const items = sel.filter((x) => ['pt', 'ln', 'ci', 'ar', 'sp', 'tx'].includes(x.k));
+  if (!items.length) { toast('Selecciona lo que quieres copiar'); return; }
+  const st = { c: null, t: '360', n: '', eq: true, s: '', rev: false, k: '' };
+  for (;;) {
+    const act = await showCircDialog(st, items.length);
+    if (act === 'cancel') return;
+    if (act === 'pick') {
+      circC = st.c || { x: 0, y: 0 };
+      const h = await pickLine('Toca el punto (o un lugar libre) que es el centro de la matriz', 'pt');
+      if (h) st.c = h; else toast('No se eligió centro');
+      continue;
+    }
+    let T, n = 4, stepDeg;
+    try { T = parseValue(st.t, { angle: true }); } catch (e) { toast('Ángulo total: ' + e.message); continue; }
+    if (!(T > 0) || T > 360 + 1e-9) { toast('El ángulo total debe estar entre 0° y 360°'); continue; }
+    if (String(st.n).trim() !== '') { n = Number(String(st.n).replace(',', '.')); if (!Number.isInteger(n) || n < 2 || n > 200) { toast('El número total debe ser un entero de 2 a 200'); continue; } }
+    if (st.eq) stepDeg = T >= 360 - 1e-9 ? T / n : T / (n - 1);
+    else {
+      try { stepDeg = parseValue(st.s, { angle: true }); } catch (e) { toast('Ángulo entre instancias: ' + e.message); continue; }
+      if (!(Math.abs(stepDeg) > 1e-9)) { toast('El ángulo entre instancias debe ser distinto de 0'); continue; }
+    }
+    if (st.rev) stepDeg = -stepDeg;
+    const skip = new Set(String(st.k).split(/[\s,;]+/).filter(Boolean).map(Number));
+    if ([...skip].some((v) => !Number.isInteger(v) || v < 2 || v > n)) { toast(`Omitir: números enteros de 2 a ${n} (el 1 es el original)`); continue; }
+    pushUndo();
+    const r = circularArray(doc, items, { c: st.c || { x: 0, y: 0 }, step: (stepDeg * Math.PI) / 180, n, skip });
+    if (!r.ok) { rollback(); toast(r.msg); continue; }
+    if (!solve(doc, []).ok) { rollback(); toast('Conflicto con las restricciones: se deshizo la matriz'); afterChange(); return; }
+    sel = [];
+    const nc = n - 1 - skip.size;
+    toast(`${nc} copia${nc === 1 ? '' : 's'} creada${nc === 1 ? '' : 's'}`);
+    afterChange();
+    return;
+  }
+}
+$('mkcir').onclick = circularCmd;
 
 // ---- copia espejo: elementos seleccionados + toque sobre la linea que hace de eje ----
 async function mirrorCmd() {

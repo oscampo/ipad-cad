@@ -220,7 +220,10 @@ const jclone = (o) => JSON.parse(JSON.stringify(o));
 // Crea una copia. tf(p) da la posicion del punto copiado; reuse(pid) (opcional) devuelve true si el punto
 // no se duplica (se comparte). mirror: la copia es un reflejo (los arcos intercambian extremos para seguir
 // siendo antihorarios, las cotas angulares cambian de signo y los textos reflejan su angulo con axisAng).
-function makeCopy(doc, col, tf, { mirror = false, reuse = null, axisAng = 0 } = {}) {
+// hvAngle: grados a los que va a parar una direccion horizontal (rotacion o reflejo); las restricciones H/V
+// solo siguen valiendo si ese angulo es multiplo de 90 (con 90 se intercambian); si no, no se copian.
+// rotDeg: giro que se suma al angulo de los textos (en el reflejo se usa axisAng).
+function makeCopy(doc, col, tf, { mirror = false, reuse = null, axisAng = 0, hvAngle, rotDeg = 0 } = {}) {
   const { P, L, Ci, Ar, Sp, Tx, cons, hatches } = col;
   const M = {}, made = [];
   for (const pid of P) {
@@ -240,12 +243,17 @@ function makeCopy(doc, col, tf, { mirror = false, reuse = null, axisAng = 0 } = 
   for (const id of Sp) { const { pts, closed, ...st } = doc.splines[id]; M[id] = addSpline(doc, pts.map((p) => M[p]), st, closed); made.push({ k: 'sp', id: M[id] }); }
   for (const id of Tx) {
     const t = doc.texts[id];
-    M[id] = addText(doc, M[t.pt], t.text, { h: t.h, ang: mirror ? 2 * axisAng - t.ang : t.ang, anchor: t.anchor, color: t.color, readable: t.readable });
+    M[id] = addText(doc, M[t.pt], t.text, { h: t.h, ang: mirror ? 2 * axisAng - t.ang : t.ang + rotDeg, anchor: t.anchor, color: t.color, readable: t.readable });
     if (t.ref && M[t.ref]) doc.texts[M[id]].ref = M[t.ref];
     made.push({ k: 'tx', id: M[id] });
   }
   for (const k of cons) {
     const n = { ...jclone(k), refs: k.refs.map((r) => M[r]) };
+    if (hvAngle !== undefined && (n.t === 'H' || n.t === 'V')) {
+      const m = ((hvAngle % 180) + 180) % 180;
+      if (Math.abs(m - 90) < 1e-6) n.t = n.t === 'H' ? 'V' : 'H';
+      else if (m > 1e-6 && 180 - m > 1e-6) continue;
+    }
     if (mirror && n.t === 'ANG' && typeof n.v === 'number') n.v = -n.v;
     addCon(doc, n);
   }
@@ -288,6 +296,25 @@ export function mirrorCopy(doc, items, A, B) {
     return { x: 2 * fx - o.x, y: 2 * fy - o.y };
   };
   const onAxis = (pid) => { const o = doc.pts[pid], r = refl(o); return Math.hypot(r.x - o.x, r.y - o.y) / 2 <= TOL; };
-  const made = makeCopy(doc, col, refl, { mirror: true, reuse: onAxis, axisAng: (Math.atan2(u.y, u.x) * 180) / Math.PI });
+  const made = makeCopy(doc, col, refl, { mirror: true, reuse: onAxis, axisAng: (Math.atan2(u.y, u.x) * 180) / Math.PI, hvAngle: (2 * Math.atan2(u.y, u.x) * 180) / Math.PI });
+  return { ok: true, made };
+}
+
+// ---------------------------------------------------------------- matriz circular
+// c: centro {x,y}; step: angulo entre instancias (rad, con signo); n: instancias totales (incluye el original);
+// skip: Set de numeros de instancia (2..n) que no se crean. Los puntos que coinciden con el centro se comparten.
+export function circularArray(doc, items, { c, step, n, skip = new Set() }) {
+  const col = collect(doc, items);
+  if (!col.P.size) return { ok: false, msg: 'No hay nada que copiar' };
+  if (!(n >= 2) || n > 400) return { ok: false, msg: 'Número de instancias no válido' };
+  const made = [];
+  for (let i = 1; i < n; i++) {
+    if (skip.has(i + 1)) continue;
+    const a = i * step, ca = Math.cos(a), sa = Math.sin(a);
+    const rot = (o) => ({ x: c.x + (o.x - c.x) * ca - (o.y - c.y) * sa, y: c.y + (o.x - c.x) * sa + (o.y - c.y) * ca });
+    const deg = (a * 180) / Math.PI;
+    made.push(...makeCopy(doc, col, rot, { reuse: (pid) => dist(doc.pts[pid], c) <= TOL, hvAngle: deg, rotDeg: deg }));
+  }
+  if (!made.length) return { ok: false, msg: 'Todas las instancias están omitidas' };
   return { ok: true, made };
 }

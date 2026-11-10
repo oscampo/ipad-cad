@@ -151,6 +151,7 @@ body.nopanel #panel { display: none; }
 <button id="mkint" data-icon="intersect" data-hint="2 elementos (líneas, arcos o círculos)" title="Intersección: 2 elementos (líneas, arcos o círculos)"><i></i><span>Intersección</span></button>
 <button id="mksplit" data-icon="split" data-hint="1 segmento, arco o círculo + los puntos sobre él" title="Dividir: 1 segmento, arco o círculo + los puntos que están sobre él"><i></i><span>Dividir</span></button>
 <button id="mkarr" data-icon="array" data-hint="lo que quieres copiar (puntos, líneas, arcos, círculos, splines, textos)" title="Matriz lineal: copias en una o dos direcciones, con espaciado y número de copias"><i></i><span>Matriz lineal</span></button>
+<button id="mkcir" data-icon="array-circ" data-hint="lo que quieres copiar; eliges centro, ángulo y número" title="Matriz circular: copias alrededor de un centro"><i></i><span>Matriz circular</span></button>
 <button id="mkmir" data-icon="mirror" data-hint="lo que quieres reflejar; luego toca la línea eje" title="Copia espejo: refleja una copia de la selección respecto de una línea"><i></i><span>Copia espejo</span></button>
 </div></details>
 <details class="sec" data-sec="style" open><summary data-icon="palette"><i></i>Estilo (selección y nuevos)</summary>
@@ -264,6 +265,21 @@ body.nopanel #panel { display: none; }
   <small>El número total incluye el original. Si solo escribes el espaciado, el total es 2 (el original y 1 copia). Con dos direcciones se llena la cuadrícula completa. La dirección sale de la línea elegida (de su inicio a su fin); sin línea, la 1 es horizontal y la 2 perpendicular a la 1.</small>
   <div id="arrErr" style="color:var(--warn);font-size:13px"></div>
   <div class="actions"><button type="button" id="arrCancel">Cancelar</button><button id="arrOk" class="on">Crear copias</button></div>
+</form></dialog>
+<dialog id="dlgC"><form method="dialog">
+  <p style="margin:0 0 6px"><b>Matriz circular</b> <span id="cirInfo" style="color:var(--muted);font-size:13px"></span></p>
+  <fieldset style="border:1px solid var(--line);border-radius:8px;margin:0 0 8px;padding:6px 8px">
+    <legend style="font-size:13px">Centro</legend>
+    <div class="row"><span id="cirC" style="flex:1"></span><button type="button" id="cirPick">Elegir punto</button></div>
+  </fieldset>
+  <div class="row"><label for="cirT">Ángulo total (°)</label><input id="cirT" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
+  <div class="row"><label for="cirN">Número total</label><input id="cirN" type="number" min="2" max="200" step="1" placeholder="4"></div>
+  <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin:4px 0"><input type="checkbox" id="cirEq" style="width:22px;height:22px;min-height:22px;margin:0">Separación igual (reparte el ángulo total entre las instancias)</label>
+  <div class="row" id="cirStepRow"><label for="cirS">Ángulo entre instancias (°)</label><input id="cirS" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
+  <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin:4px 0"><input type="checkbox" id="cirRev" style="width:22px;height:22px;min-height:22px;margin:0">Invertir sentido (horario)</label>
+  <div class="row"><label for="cirK">Omitir instancias</label><input id="cirK" type="text" inputmode="text" autocomplete="off" placeholder="ej. 3, 5"></div>
+  <small>El número total incluye el original (instancia 1); el sentido por defecto es antihorario. Con 360° las instancias se reparten en toda la vuelta; con menos, el original y la última quedan en los extremos. Los puntos sobre el centro se comparten. Sin centro elegido se usa el origen.</small>
+  <div class="actions"><button type="button" id="cirCancel">Cancelar</button><button id="cirOk" class="on">Crear copias</button></div>
 </form></dialog>
 <dialog id="dlgT"><form method="dialog"><label id="dlgTLabel" for="dlgTInput"></label><textarea id="dlgTInput" rows="2" style="width:100%;font-size:18px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--btn);color:var(--fg);font-family:inherit"></textarea><div class="actions"><button value="cancel" type="button" id="dlgTCancel">Cancelar</button><button value="ok" id="dlgTOk" class="on">Aceptar</button></div></form></dialog>
 <dialog id="dlgN"><form method="dialog">
