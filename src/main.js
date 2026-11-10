@@ -10,7 +10,7 @@ import {
 } from './geom.js';
 import { startTrace, recordTraces, traceToSpline, offsetPolyline } from './curves.js';
 import { splitElement } from './split.js';
-import { trimAt, extendEnd, linearArray } from './edit.js';
+import { trimAt, extendEnd, linearArray, mirrorCopy } from './edit.js';
 import { layoutDim, dragDim, dimValue, angSector, angTrue, DIAM } from './dims.js';
 import { textFrame, textHit, textPose, rawAngle, ANCHORS, ANCHOR_NAMES, LINE_SPACING } from './text.js';
 import { exportSVG, exportSVGLaser, exportDXF, extraExtents } from './export.js';
@@ -114,6 +114,7 @@ function updateEnabled() {
   $('mksplit').disabled = !(ln + crv === 1 && !n.sp); // con puntos: divide en ellos; sin puntos: en n partes iguales
   $('mkhatch').disabled = ln + crv + n.sp < 1;
   $('mkarr').disabled = !sel.some((x) => ['pt', 'ln', 'ci', 'ar', 'sp', 'tx'].includes(x.k));
+  $('mkmir').disabled = $('mkarr').disabled;
   const selPts = sel.filter((x) => x.k === 'pt').map((x) => x.id);
   $('trTrace').disabled = !selPts.length;
   $('trClear').disabled = !selPts.some((id) => doc.traces[id]?.pts.length > 1);
@@ -754,6 +755,20 @@ function drawConstraints(c, o) {
 function drawPreview(c) {
   c.save();
   c.setLineDash([6 * dpr, 4 * dpr]); c.lineWidth = 1.5 * dpr; c.strokeStyle = theme.accent;
+  const axis = (id, flip, color, tag) => {
+    const l = doc.lines[id]; if (!l) return;
+    let a = toScreen(doc.pts[l.a]), b = toScreen(doc.pts[l.b]);
+    if (flip) [a, b] = [b, a];
+    const L = Math.hypot(b.x - a.x, b.y - a.y) || 1, ux = (b.x - a.x) / L, uy = (b.y - a.y) / L;
+    c.save(); c.setLineDash([]); c.strokeStyle = color; c.fillStyle = color; c.lineWidth = 4 * dpr; c.globalAlpha = 0.85; c.lineCap = 'round';
+    c.beginPath(); c.moveTo(a.x * dpr, a.y * dpr); c.lineTo(b.x * dpr, b.y * dpr); c.stroke();
+    const h = 11 * dpr; // punta de flecha en el extremo final (sentido de copiado)
+    c.beginPath(); c.moveTo(b.x * dpr + ux * h, b.y * dpr + uy * h); c.lineTo(b.x * dpr - ux * h * 0.2 - uy * h * 0.7, b.y * dpr - uy * h * 0.2 + ux * h * 0.7); c.lineTo(b.x * dpr - ux * h * 0.2 + uy * h * 0.7, b.y * dpr - uy * h * 0.2 - ux * h * 0.7); c.closePath(); c.fill();
+    c.globalAlpha = 1; c.font = `bold ${13 * dpr}px system-ui`; c.fillText(tag, ((a.x + b.x) / 2 + 8) * dpr, ((a.y + b.y) / 2 - 8) * dpr);
+    c.restore();
+  };
+  if (arrAxes) { axis(arrAxes.l1, arrAxes.f1, theme.accent, '1'); axis(arrAxes.l2, arrAxes.f2, theme.warn, '2'); }
+  if (pickResolve && hover) { const hl = hitCurves(hover.x, hover.y); if (hl?.k === 'ln') axis(hl.id, false, theme.sel, ''); }
   if (tool === 'trim' && drag?.trail?.length > 1) { // trazo de recorte
     c.strokeStyle = theme.warn; c.lineWidth = 2 * dpr; c.setLineDash([3 * dpr, 4 * dpr]);
     c.beginPath(); drag.trail.forEach((q, i) => (i ? c.lineTo(q.x * dpr, q.y * dpr) : c.moveTo(q.x * dpr, q.y * dpr))); c.stroke();
@@ -1805,10 +1820,15 @@ $('mksplit').onclick = splitSelected;
 
 // ---- matriz lineal ----
 // Muestra el dialogo con el estado st; devuelve 'ok', 'cancel', 'pick1' o 'pick2' (elegir la linea de una direccion).
+const lineName = (id) => { const l = doc.lines[id]; return `Línea ${id} · L = ${fmt(dist(doc.pts[l.a], doc.pts[l.b]))}`; };
+let arrAxes = null; // direcciones elegidas de la matriz: se resaltan en el lienzo mientras se define
 function showArrayDialog(st, count) {
   return new Promise((resolve) => {
     const dlg = $('dlgA');
-    const name = (id) => (id && doc.lines[id] ? `Línea ${id}` : null);
+    const name = (id) => (id && doc.lines[id] ? lineName(id) : null);
+    const upd = () => { read(); arrAxes = { l1: st.l1, l2: st.l2, f1: st.f1, f2: st.f2 }; draw(); };
+    $('arrF1').onchange = upd; $('arrF2').onchange = upd;
+    arrAxes = { l1: st.l1, l2: st.l2, f1: st.f1, f2: st.f2 }; draw();
     $('arrInfo').textContent = `${count} elemento${count === 1 ? '' : 's'} a copiar`;
     $('arrD1').textContent = name(st.l1) || 'Horizontal (eje X)';
     $('arrD2').textContent = name(st.l2) || 'Perpendicular a la dirección 1';
@@ -1817,7 +1837,7 @@ function showArrayDialog(st, count) {
     $('arrErr').textContent = '';
     const read = () => { st.s1 = $('arrS1').value; st.n1 = $('arrN1').value; st.f1 = $('arrF1').checked; st.s2 = $('arrS2').value; st.n2 = $('arrN2').value; st.f2 = $('arrF2').checked; };
     let done = false;
-    const finish = (v) => { if (done) return; done = true; read(); dlg.close(); resolve(v); };
+    const finish = (v) => { if (done) return; done = true; read(); dlg.close(); if (v === 'ok' || v === 'cancel') arrAxes = null; draw(); resolve(v); };
     $('arrOk').onclick = (ev) => { ev.preventDefault(); finish('ok'); };
     $('arrCancel').onclick = () => finish('cancel');
     $('arrPick1').onclick = () => finish('pick1');
@@ -1833,8 +1853,9 @@ function readArrayDir(lineId, base, sTxt, nTxt, flip) {
   let s;
   try { s = parseValue(sTxt); } catch (e) { return { err: 'Espaciado: ' + e.message }; }
   if (!(Math.abs(s) > 1e-9)) return { err: 'El espaciado debe ser distinto de 0' };
-  let n = 2; // solo el espaciado: 2 copias
-  if (String(nTxt).trim() !== '') { n = Number(String(nTxt).replace(',', '.')); if (!Number.isInteger(n) || n < 1 || n > 200) return { err: 'Las copias deben ser un entero de 1 a 200' }; }
+  let n = 2; // solo el espaciado: 2 en total, con el original
+  if (String(nTxt).trim() !== '') { n = Number(String(nTxt).replace(',', '.')); if (!Number.isInteger(n) || n < 2 || n > 200) return { err: 'El número total debe ser un entero de 2 a 200' }; }
+  n -= 1; // copias nuevas
   let u = base;
   if (lineId) {
     const l = doc.lines[lineId], A = doc.pts[l.a], B = doc.pts[l.b], len = dist(A, B);
@@ -1876,6 +1897,23 @@ async function linearArrayCmd() {
   }
 }
 $('mkarr').onclick = linearArrayCmd;
+
+// ---- copia espejo: elementos seleccionados + toque sobre la linea que hace de eje ----
+async function mirrorCmd() {
+  const items = sel.filter((x) => ['pt', 'ln', 'ci', 'ar', 'sp', 'tx'].includes(x.k));
+  if (!items.length) { toast('Selecciona lo que quieres reflejar'); return; }
+  const h = await pickLine('Toca la línea que hace de eje de simetría');
+  if (!h) { toast('Copia espejo cancelada'); return; }
+  const l = doc.lines[h.id];
+  pushUndo();
+  const r = mirrorCopy(doc, items.filter((x) => x.id !== h.id), doc.pts[l.a], doc.pts[l.b]);
+  if (!r.ok) { rollback(); toast(r.msg); return; }
+  if (!solve(doc, []).ok) { rollback(); toast('Conflicto con las restricciones: se deshizo la copia espejo'); afterChange(); return; }
+  sel = r.made;
+  toast(`Copia espejo creada respecto de ${lineName(h.id)}`);
+  afterChange();
+}
+$('mkmir').onclick = mirrorCmd;
 $('mkint').onclick = () => {
   const it = sel.filter((s) => s.k === 'ln' || s.k === 'ci' || s.k === 'ar' || s.k === 'sp');
   if (it.length !== 2) { toast('Selecciona 2 elementos (líneas, arcos, círculos o splines)'); return; }

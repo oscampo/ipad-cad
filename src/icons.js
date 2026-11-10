@@ -47,6 +47,8 @@ const custom = {
   extend: S('<path d="M20 3v18"/><path d="M3 12h7"/><path d="M12.5 12h.01M15 12h.01"/><path d="M16.5 8.5 20 12l-3.5 3.5"/>'),
   // matriz lineal: el original y copias que se van atenuando
   array: S('<rect x="2.5" y="8.5" width="5" height="7" rx="1"/><rect x="9.5" y="8.5" width="5" height="7" rx="1" opacity=".65"/><rect x="16.5" y="8.5" width="5" height="7" rx="1" opacity=".35"/>'),
+  // copia espejo: eje discontinuo con un triangulo y su reflejo
+  mirror: S('<path d="M12 2v20" stroke-dasharray="2 3"/><path d="M9 7 3 18h6z"/><path d="M15 7l6 11h-6z" opacity=".5"/>'),
   // spline: una "S" girada 90 grados (onda) con puntos en los extremos y en cada seno
   spline: S('<path d="M3 16C3 9 5 6 8 6c5 0 3 12 8 12 3 0 5-6 5-10"/><circle cx="3" cy="16" r="1.6" fill="currentColor"/><circle cx="8" cy="6" r="1.6" fill="currentColor"/><circle cx="16" cy="18" r="1.6" fill="currentColor"/><circle cx="21" cy="8" r="1.6" fill="currentColor"/>'),
   // abrir/cerrar spline: triangulo de lados curvos con uno discontinuo

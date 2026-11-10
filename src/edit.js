@@ -197,10 +197,9 @@ export function extendEnd(doc, kind, id, near, { dropLength = false } = {}) {
   return { ok: true, field };
 }
 
-// ---------------------------------------------------------------- matriz lineal
-// items: [{k,id}] a copiar. dirs: [{u:{x,y} unitario, s: espaciado, n: copias}] (1 o 2 direcciones).
-// Con dos direcciones se crea la cuadricula completa. Devuelve los elementos nuevos.
-export function linearArray(doc, items, dirs) {
+// ---------------------------------------------------------------- copias (matriz lineal y espejo)
+// Reune lo que se copia: puntos, elementos y las restricciones/rellenos que quedan completos dentro del conjunto.
+function collect(doc, items) {
   const P = new Set(), L = [], Ci = [], Ar = [], Sp = [], Tx = [];
   for (const { k, id } of items) {
     if (k === 'pt' && doc.pts[id]) P.add(id);
@@ -210,10 +209,56 @@ export function linearArray(doc, items, dirs) {
     else if (k === 'sp' && doc.splines[id]) { Sp.push(id); for (const p of doc.splines[id].pts) P.add(p); }
     else if (k === 'tx' && doc.texts[id]) { Tx.push(id); P.add(doc.texts[id].pt); }
   }
-  if (!P.size) return { ok: false, msg: 'No hay nada que copiar' };
   const inSet = new Set([...P, ...L, ...Ci, ...Ar, ...Sp, ...Tx]);
   const cons = Object.values(doc.cons).filter((k) => (k.refs || []).length && k.refs.every((r) => inSet.has(r)));
   const hatches = Object.values(doc.hatches || {}).filter((h) => h.ids.length && h.ids.every((i) => inSet.has(i)));
+  return { P, L, Ci, Ar, Sp, Tx, cons, hatches };
+}
+
+const jclone = (o) => JSON.parse(JSON.stringify(o));
+
+// Crea una copia. tf(p) da la posicion del punto copiado; reuse(pid) (opcional) devuelve true si el punto
+// no se duplica (se comparte). mirror: la copia es un reflejo (los arcos intercambian extremos para seguir
+// siendo antihorarios, las cotas angulares cambian de signo y los textos reflejan su angulo con axisAng).
+function makeCopy(doc, col, tf, { mirror = false, reuse = null, axisAng = 0 } = {}) {
+  const { P, L, Ci, Ar, Sp, Tx, cons, hatches } = col;
+  const M = {}, made = [];
+  for (const pid of P) {
+    if (reuse && reuse(pid)) { M[pid] = pid; continue; }
+    const o = doc.pts[pid], q = tf(o), np = addPoint(doc, q.x, q.y, !!o.auto);
+    const { x, y, ...flags } = o;
+    Object.assign(doc.pts[np], flags);
+    M[pid] = np;
+  }
+  for (const id of L) { const { a, b, ...st } = doc.lines[id]; M[id] = addLine(doc, M[a], M[b], st); made.push({ k: 'ln', id: M[id] }); }
+  for (const id of Ci) { const { c, r, ...st } = doc.circles[id]; M[id] = addCircle(doc, M[c], r, st); made.push({ k: 'ci', id: M[id] }); }
+  for (const id of Ar) {
+    const { c, a, b, r, ...st } = doc.arcs[id];
+    M[id] = mirror ? addArc(doc, M[c], M[b], M[a], r, st) : addArc(doc, M[c], M[a], M[b], r, st);
+    made.push({ k: 'ar', id: M[id] });
+  }
+  for (const id of Sp) { const { pts, closed, ...st } = doc.splines[id]; M[id] = addSpline(doc, pts.map((p) => M[p]), st, closed); made.push({ k: 'sp', id: M[id] }); }
+  for (const id of Tx) {
+    const t = doc.texts[id];
+    M[id] = addText(doc, M[t.pt], t.text, { h: t.h, ang: mirror ? 2 * axisAng - t.ang : t.ang, anchor: t.anchor, color: t.color, readable: t.readable });
+    if (t.ref && M[t.ref]) doc.texts[M[id]].ref = M[t.ref];
+    made.push({ k: 'tx', id: M[id] });
+  }
+  for (const k of cons) {
+    const n = { ...jclone(k), refs: k.refs.map((r) => M[r]) };
+    if (mirror && n.t === 'ANG' && typeof n.v === 'number') n.v = -n.v;
+    addCon(doc, n);
+  }
+  for (const h of hatches) doc.hatches[nextId(doc, 'h')] = { ...jclone(h), ids: h.ids.map((x) => M[x]) };
+  return made;
+}
+
+// ---------------------------------------------------------------- matriz lineal
+// items: [{k,id}] a copiar. dirs: [{u:{x,y} unitario, s: espaciado, n: copias nuevas}] (1 o 2 direcciones).
+// Con dos direcciones se crea la cuadricula completa. Devuelve los elementos nuevos.
+export function linearArray(doc, items, dirs) {
+  const col = collect(doc, items);
+  if (!col.P.size) return { ok: false, msg: 'No hay nada que copiar' };
   const [d1, d2] = dirs;
   const n1 = d1.n, n2 = d2 ? d2.n : 0;
   if ((n1 + 1) * (n2 + 1) - 1 > 400) return { ok: false, msg: 'Demasiadas copias (máximo 400)' };
@@ -222,26 +267,27 @@ export function linearArray(doc, items, dirs) {
     for (let j = 0; j <= n2; j++) {
       if (!i && !j) continue;
       const dx = i * d1.s * d1.u.x + (d2 ? j * d2.s * d2.u.x : 0), dy = i * d1.s * d1.u.y + (d2 ? j * d2.s * d2.u.y : 0);
-      const M = {};
-      for (const pid of P) {
-        const o = doc.pts[pid], np = addPoint(doc, o.x + dx, o.y + dy, !!o.auto);
-        const { x, y, ...flags } = o;
-        Object.assign(doc.pts[np], flags);
-        M[pid] = np;
-      }
-      for (const id of L) { const { a, b, ...st } = doc.lines[id]; M[id] = addLine(doc, M[a], M[b], st); made.push({ k: 'ln', id: M[id] }); }
-      for (const id of Ci) { const { c, r, ...st } = doc.circles[id]; M[id] = addCircle(doc, M[c], r, st); made.push({ k: 'ci', id: M[id] }); }
-      for (const id of Ar) { const { c, a, b, r, ...st } = doc.arcs[id]; M[id] = addArc(doc, M[c], M[a], M[b], r, st); made.push({ k: 'ar', id: M[id] }); }
-      for (const id of Sp) { const { pts, closed, ...st } = doc.splines[id]; M[id] = addSpline(doc, pts.map((p) => M[p]), st, closed); made.push({ k: 'sp', id: M[id] }); }
-      for (const id of Tx) {
-        const t = doc.texts[id];
-        M[id] = addText(doc, M[t.pt], t.text, { h: t.h, ang: t.ang, anchor: t.anchor, color: t.color, readable: t.readable });
-        if (t.ref && M[t.ref]) doc.texts[M[id]].ref = M[t.ref];
-        made.push({ k: 'tx', id: M[id] });
-      }
-      for (const k of cons) addCon(doc, { ...JSON.parse(JSON.stringify(k)), refs: k.refs.map((r) => M[r]) });
-      for (const h of hatches) doc.hatches[nextId(doc, 'h')] = { ...JSON.parse(JSON.stringify(h)), ids: h.ids.map((x) => M[x]) };
+      made.push(...makeCopy(doc, col, (o) => ({ x: o.x + dx, y: o.y + dy })));
     }
   }
+  return { ok: true, made };
+}
+
+// ---------------------------------------------------------------- copia espejo
+// Refleja una copia de items respecto de la recta que pasa por A y B. Los puntos que ya estan sobre el eje
+// se comparten (la copia queda unida al original por ahi). El eje no se copia.
+export function mirrorCopy(doc, items, A, B) {
+  const len = dist(A, B);
+  if (len < 1e-9) return { ok: false, msg: 'El eje no tiene longitud' };
+  const u = { x: (B.x - A.x) / len, y: (B.y - A.y) / len };
+  const col = collect(doc, items);
+  if (!col.P.size) return { ok: false, msg: 'No hay nada que reflejar' };
+  const refl = (o) => {
+    const t = (o.x - A.x) * u.x + (o.y - A.y) * u.y;
+    const fx = A.x + t * u.x, fy = A.y + t * u.y;
+    return { x: 2 * fx - o.x, y: 2 * fy - o.y };
+  };
+  const onAxis = (pid) => { const o = doc.pts[pid], r = refl(o); return Math.hypot(r.x - o.x, r.y - o.y) / 2 <= TOL; };
+  const made = makeCopy(doc, col, refl, { mirror: true, reuse: onAxis, axisAng: (Math.atan2(u.y, u.x) * 180) / Math.PI });
   return { ok: true, made };
 }

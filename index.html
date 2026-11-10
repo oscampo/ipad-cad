@@ -141,7 +141,7 @@ body.nopanel #panel { display: none; }
 <button data-con="ONC" data-icon="con-onc" data-hint="punto(s) + 1 línea, arco, círculo o spline" title="Punto sobre: punto(s) + 1 línea, arco, círculo o spline"><i></i><span>Punto sobre</span></button>
 <button data-con="FIX" data-icon="lock" data-hint="puntos, líneas o círculos" title="Fijar / soltar: puntos, líneas o círculos"><i></i><span>Fijar / soltar</span></button>
 </div></details>
-<details class="sec" data-sec="dims" open><summary data-icon="ruler"><i></i>Cotas, intersección, división y matriz</summary>
+<details class="sec" data-sec="dims" open><summary data-icon="ruler"><i></i>Cotas, intersección, división y copias</summary>
 <div class="grid2">
 <button data-con="DIM" data-icon="dim-dist" data-hint="2 puntos, 1 línea, o punto + línea" title="Distancia: 2 puntos, 1 línea, o punto + línea"><i></i><span>Distancia</span></button>
 <button data-con="ANG" data-icon="dim-ang" data-hint="2 líneas" title="Ángulo: 2 líneas"><i></i><span>Ángulo</span></button>
@@ -149,6 +149,7 @@ body.nopanel #panel { display: none; }
 <button id="mkint" data-icon="intersect" data-hint="2 elementos (líneas, arcos o círculos)" title="Intersección: 2 elementos (líneas, arcos o círculos)"><i></i><span>Intersección</span></button>
 <button id="mksplit" data-icon="split" data-hint="1 segmento, arco o círculo + los puntos sobre él" title="Dividir: 1 segmento, arco o círculo + los puntos que están sobre él"><i></i><span>Dividir</span></button>
 <button id="mkarr" data-icon="array" data-hint="lo que quieres copiar (puntos, líneas, arcos, círculos, splines, textos)" title="Matriz lineal: copias en una o dos direcciones, con espaciado y número de copias"><i></i><span>Matriz lineal</span></button>
+<button id="mkmir" data-icon="mirror" data-hint="lo que quieres reflejar; luego toca la línea eje" title="Copia espejo: refleja una copia de la selección respecto de una línea"><i></i><span>Copia espejo</span></button>
 </div></details>
 <details class="sec" data-sec="style" open><summary data-icon="palette"><i></i>Estilo (selección y nuevos)</summary>
     <div class="sw" id="swatches"></div>
@@ -244,17 +245,17 @@ body.nopanel #panel { display: none; }
     <legend style="font-size:13px">Dirección 1</legend>
     <div class="row"><span id="arrD1" style="flex:1"></span><button type="button" id="arrPick1">Elegir línea</button></div>
     <div class="row"><label for="arrS1">Espaciado</label><input id="arrS1" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="ej. 10 o 2*5"></div>
-    <div class="row"><label for="arrN1">Copias</label><input id="arrN1" type="number" min="1" max="200" step="1" placeholder="2"></div>
+    <div class="row"><label for="arrN1">Número total</label><input id="arrN1" type="number" min="2" max="200" step="1" placeholder="2"></div>
     <label style="display:flex;gap:8px;align-items:center;font-size:13px"><input type="checkbox" id="arrF1" style="width:22px;height:22px;min-height:22px;margin:0">Invertir sentido</label>
   </fieldset>
   <fieldset style="border:1px solid var(--line);border-radius:8px;margin:0 0 8px;padding:6px 8px">
     <legend style="font-size:13px">Dirección 2 (opcional)</legend>
     <div class="row"><span id="arrD2" style="flex:1"></span><button type="button" id="arrPick2">Elegir línea</button></div>
     <div class="row"><label for="arrS2">Espaciado</label><input id="arrS2" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="vacío = sin 2.ª dirección"></div>
-    <div class="row"><label for="arrN2">Copias</label><input id="arrN2" type="number" min="1" max="200" step="1" placeholder="2"></div>
+    <div class="row"><label for="arrN2">Número total</label><input id="arrN2" type="number" min="2" max="200" step="1" placeholder="2"></div>
     <label style="display:flex;gap:8px;align-items:center;font-size:13px"><input type="checkbox" id="arrF2" style="width:22px;height:22px;min-height:22px;margin:0">Invertir sentido</label>
   </fieldset>
-  <small>Las copias no cuentan el original. Si solo escribes el espaciado, se crean 2 copias. Con dos direcciones se llena la cuadrícula completa. La dirección sale de la línea elegida (de su inicio a su fin); sin línea, la 1 es horizontal y la 2 perpendicular a la 1.</small>
+  <small>El número total incluye el original. Si solo escribes el espaciado, el total es 2 (el original y 1 copia). Con dos direcciones se llena la cuadrícula completa. La dirección sale de la línea elegida (de su inicio a su fin); sin línea, la 1 es horizontal y la 2 perpendicular a la 1.</small>
   <div id="arrErr" style="color:var(--warn);font-size:13px"></div>
   <div class="actions"><button type="button" id="arrCancel">Cancelar</button><button id="arrOk" class="on">Crear copias</button></div>
 </form></dialog>

@@ -8,7 +8,7 @@ import { splitElement } from '../src/split.js';
 import { buildTree, conLabel } from '../src/tree.js';
 import { cleanFileBase } from '../src/files.js';
 import { parseValue, evalExpr, isPlainNumber } from '../src/expr.js';
-import { trimAt, extendEnd, cutsOf, linearArray } from '../src/edit.js';
+import { trimAt, extendEnd, cutsOf, linearArray, mirrorCopy } from '../src/edit.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from '../src/lock.js';
 import { initSolver, solve } from '../src/solver.js';
 import { lineLine, lineCircle, circleCircle, signedAngle, dashFromPattern, parsePattern, circumcircle, arcSweepOf, TAU, splineSamples, resamplePolyline, polylineLength, splineBezier, closestOnPolyline, polylineLine, polylineCircle, polylinePolyline } from '../src/geom.js';
@@ -1169,6 +1169,35 @@ t('matriz lineal: una y dos direcciones, con restricciones internas', () => {
   assert.ok(r2.ok); assert.equal(r2.made.length, 5); assert.equal(Object.keys(d2.lines).length, 6);
   assert.equal(linearArray(d2, [{ k: 'ln', id: l2 }], [{ u: { x: 1, y: 0 }, s: 1, n: 500 }]).ok, false);
   void cutsOf;
+});
+
+
+t('copia espejo: puntos, arco (sigue antihorario), cota angular y puntos sobre el eje compartidos', () => {
+  const d = newDoc();
+  const o = addPoint(d, 0, 0), a = addPoint(d, 10, 0), b = addPoint(d, 4, 6);
+  const l1 = addLine(d, o, a, {}), l2 = addLine(d, o, b, {});
+  addCon(d, { t: 'H', refs: [l1] });
+  const ang = (Math.atan2(6, 4) * 180) / Math.PI;
+  addCon(d, { t: 'ANG', refs: [l1, l2], v: ang });
+  const c = addPoint(d, 5, 5), s = addPoint(d, 8, 5), e = addPoint(d, 5, 8);
+  const ar = addArc(d, c, s, e, 3, {});
+  const axA = addPoint(d, 0, -20), axB = addPoint(d, 0, 20);
+  const axis = addLine(d, axA, axB, {}); // eje: la recta x = 0
+  const r = mirrorCopy(d, [{ k: 'ln', id: l1 }, { k: 'ln', id: l2 }, { k: 'ar', id: ar }], d.pts[axA], d.pts[axB]);
+  assert.ok(r.ok);
+  assert.ok(solve(d, []).ok);
+  const nl1 = r.made.filter((m) => m.k === 'ln').map((m) => d.lines[m.id]);
+  // el punto o esta sobre el eje: se comparte
+  assert.ok(nl1.every((q) => q.a === o || q.b === o));
+  const far = nl1.map((q) => d.pts[q.a === o ? q.b : q.a]).sort((m, n) => m.y - n.y);
+  near(far[0].x, -10, 1e-6); near(far[0].y, 0, 1e-6); near(far[1].x, -4, 1e-6); near(far[1].y, 6, 1e-6);
+  const na = d.arcs[r.made.find((m) => m.k === 'ar').id];
+  near(arcOf(d, na).sweep, Math.PI / 2, 1e-6, 'sigue siendo un cuarto de arco');
+  near(d.pts[na.c].x, -5, 1e-6);
+  // la cota angular copiada cambia de signo y el solver la acepta
+  const angs = Object.values(d.cons).filter((k) => k.t === 'ANG');
+  assert.equal(angs.length, 2); near(angs[0].v, -angs[1].v, 1e-6);
+  void axis;
 });
 
 console.log(`\n${passed} pruebas pasaron`);
