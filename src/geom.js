@@ -169,3 +169,37 @@ export function resamplePolyline(P, n) {
   out.push({ x: P[P.length - 1].x, y: P[P.length - 1].y });
   return out;
 }
+
+// El mismo spline que splineSamples, pero como tramos de Bezier cubica exactos
+// (p0, c1, c2, p1): cada tramo de una Catmull-Rom centripeta es un polinomio cubico.
+// Sirve para exportar curvas suaves (SVG para corte laser) sin facetas.
+export function splineBezier(P, closed = false) {
+  const n = P.length;
+  if (n < 2) return [];
+  const lerp = (a, b, k) => ({ x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k });
+  if (n === 2 && !closed) return [{ p0: P[0], c1: lerp(P[0], P[1], 1 / 3), c2: lerp(P[0], P[1], 2 / 3), p1: P[1] }];
+  const refl = (a, b) => ({ x: 2 * a.x - b.x, y: 2 * a.y - b.y });
+  const at = (i) => {
+    if (closed) return P[((i % n) + n) % n];
+    if (i < 0) return refl(P[0], P[1]);
+    if (i >= n) return refl(P[n - 1], P[n - 2]);
+    return P[i];
+  };
+  const knot = (a, b) => Math.sqrt(Math.max(Math.hypot(b.x - a.x, b.y - a.y), 1e-9));
+  const segs = closed ? n : n - 1, out = [];
+  for (let i = 0; i < segs; i++) {
+    const p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2);
+    const t1 = knot(p0, p1), t2 = t1 + knot(p1, p2), t3 = t2 + knot(p2, p3), t0 = 0, dt = t2 - t1;
+    const m = (a, b, ta, tb) => ({ x: (b.x - a.x) / (tb - ta), y: (b.y - a.y) / (tb - ta) });
+    const a01 = m(p0, p1, t0, t1), a02 = m(p0, p2, t0, t2), a12 = m(p1, p2, t1, t2);
+    const a13 = m(p1, p3, t1, t3), a23 = m(p2, p3, t2, t3);
+    const m1 = { x: a01.x - a02.x + a12.x, y: a01.y - a02.y + a12.y };
+    const m2 = { x: a12.x - a13.x + a23.x, y: a12.y - a13.y + a23.y };
+    out.push({
+      p0: p1, p1: p2,
+      c1: { x: p1.x + (m1.x * dt) / 3, y: p1.y + (m1.y * dt) / 3 },
+      c2: { x: p2.x - (m2.x * dt) / 3, y: p2.y - (m2.y * dt) / 3 },
+    });
+  }
+  return out;
+}

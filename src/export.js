@@ -1,5 +1,5 @@
-import { hatchLoops, allLtypes, arcOf, splinePolyline } from './model.js';
-import { dashFromPattern, norm } from './geom.js';
+import { hatchLoops, allLtypes, arcOf, arcSamples, splinePolyline } from './model.js';
+import { dashFromPattern, norm, splineBezier } from './geom.js';
 import { textFrame, textCorners, textPose, LINE_SPACING } from './text.js';
 import { layoutDim } from './dims.js';
 
@@ -235,4 +235,52 @@ export function exportDXF(doc, viewScale = 5, vis = {}) {
   for (const p of Object.values(doc.pts)) if (!p.auto) { g(0, 'POINT'); g(8, '0'); g(10, p.x); g(20, p.y); g(30, 0); }
   g(0, 'ENDSEC'); g(0, 'EOF');
   return rows.join('\r\n') + '\r\n';
+}
+
+// SVG para corte laser: a escala real (1 unidad del dibujo = unit mm), solo la geometria que se
+// corta (lineas, circulos, arcos y splines como curvas Bezier exactas), un solo color y grosor
+// de trazo fino, sin cotas, textos, puntos ni rellenos. El origen queda en la esquina superior
+// izquierda del contenido.
+// o: { unit (mm por unidad), stroke (mm), color, onlyContinuous (omite ejes, ocultas, etc.) }
+export function exportSVGLaser(doc, o = {}) {
+  const unit = Number(o.unit) > 0 ? Number(o.unit) : 1;
+  const stroke = Number(o.stroke) > 0 ? Number(o.stroke) : 0.1;
+  const color = o.color || '#ff0000';
+  const keep = (e) => o.onlyContinuous === false || (e.ltype ?? 'continua') === 'continua';
+  const lines = Object.values(doc.lines).filter(keep), circles = Object.values(doc.circles).filter(keep);
+  const arcs = Object.values(doc.arcs || {}).filter(keep), splines = Object.values(doc.splines || {}).filter(keep);
+  const xs = [], ys = [];
+  const add = (x, y) => { xs.push(x); ys.push(y); };
+  for (const l of lines) { add(doc.pts[l.a].x, doc.pts[l.a].y); add(doc.pts[l.b].x, doc.pts[l.b].y); }
+  for (const c of circles) { const p = doc.pts[c.c]; add(p.x - c.r, p.y - c.r); add(p.x + c.r, p.y + c.r); }
+  for (const a of arcs) for (const q of arcSamples(doc, a)) add(q.x, q.y);
+  for (const sp of splines) for (const q of splinePolyline(doc, sp, 24)) add(q.x, q.y);
+  if (!xs.length) return null;
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const f = (v) => Math.round(v * 1e4) / 1e4;
+  const X = (x) => f((x - x0) * unit), Y = (y) => f((y1 - y) * unit);
+  const W = f((x1 - x0) * unit), H = f((y1 - y0) * unit);
+  const out = [];
+  for (const l of lines) out.push(`<path d="M${X(doc.pts[l.a].x)} ${Y(doc.pts[l.a].y)} L${X(doc.pts[l.b].x)} ${Y(doc.pts[l.b].y)}"/>`);
+  for (const c of circles) { const p = doc.pts[c.c]; out.push(`<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="${f(c.r * unit)}"/>`); }
+  for (const a of arcs) {
+    const p = doc.pts[a.c], { a0, sweep } = arcOf(doc, a), r = f(a.r * unit);
+    const pt = (t) => `${X(p.x + a.r * Math.cos(t))} ${Y(p.y + a.r * Math.sin(t))}`;
+    if (sweep > Math.PI * 2 - 1e-6) out.push(`<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="${r}"/>`);
+    else out.push(`<path d="M${pt(a0)} A${r} ${r} 0 ${sweep > Math.PI ? 1 : 0} 0 ${pt(a0 + sweep)}"/>`);
+  }
+  for (const sp of splines) {
+    const segs = splineBezier(sp.pts.map((id) => doc.pts[id]), sp.closed);
+    if (!segs.length) continue;
+    const q = (pt) => `${X(pt.x)} ${Y(pt.y)}`;
+    out.push(`<path d="M${q(segs[0].p0)} ${segs.map((b) => `C${q(b.c1)} ${q(b.c2)} ${q(b.p1)}`).join(' ')}${sp.closed ? ' Z' : ''}"/>`);
+  }
+  const svg = [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}mm" height="${H}mm" viewBox="0 0 ${W} ${H}">`,
+    `<g fill="none" stroke="${color}" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round">`,
+    ...out,
+    '</g>',
+    '</svg>',
+  ].join('\n');
+  return { svg, width: W, height: H, count: out.length };
 }

@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { newDoc, addPoint, addLine, addCircle, addArc, addCon, addText, addSpline, deleteItems, hatchLoops, arcOf, cleanup, splinePolyline } from '../src/model.js';
-import { startTrace, recordTraces, traceToSpline } from '../src/curves.js';
+import { startTrace, recordTraces, traceToSpline, offsetPolyline } from '../src/curves.js';
+import { camProfile, displacement } from '../src/cam.js';
 import { layoutDim, dragDim, dimValue, dimText } from '../src/dims.js';
 import { textFrame, textCorners, textHit, textPose, rawAngle } from '../src/text.js';
-import { exportSVG, exportDXF, dimLayouts, extraExtents } from '../src/export.js';
+import { exportSVG, exportSVGLaser, exportDXF, dimLayouts, extraExtents } from '../src/export.js';
 import { splitElement } from '../src/split.js';
 import { initSolver, solve } from '../src/solver.js';
-import { lineLine, lineCircle, circleCircle, signedAngle, dashFromPattern, parsePattern, circumcircle, arcSweepOf, TAU, splineSamples, resamplePolyline, polylineLength } from '../src/geom.js';
+import { lineLine, lineCircle, circleCircle, signedAngle, dashFromPattern, parsePattern, circumcircle, arcSweepOf, TAU, splineSamples, resamplePolyline, polylineLength, splineBezier } from '../src/geom.js';
 
 await initSolver();
 const near = (a, b, eps = 1e-6, msg) => assert.ok(Math.abs(a - b) < eps, `${msg || ''} ${a} vs ${b}`);
@@ -625,6 +626,93 @@ t('exportar: splines y trazados salen en SVG y DXF', () => {
   assert.equal(rows.filter((r) => r === 'POLYLINE').length, 2);
   assert.equal(rows.filter((r) => r === 'SEQEND').length, 2);
   assert.equal(rows.filter((r) => r === 'VERTEX').length, 2 * 0 + 2 * 16 + 1 + 3);
+});
+
+
+t('spline a Bezier: cada tramo coincide con la curva muestreada (abierta y cerrada)', () => {
+  const P = [{ x: 0, y: 0 }, { x: 10, y: 8 }, { x: 25, y: 2 }, { x: 31, y: 12 }, { x: 45, y: 4 }];
+  for (const closed of [false, true]) {
+    const S = splineSamples(P, closed, 16), B = splineBezier(P, closed);
+    assert.equal(B.length, closed ? P.length : P.length - 1);
+    B.forEach((b, i) => {
+      for (let k = 0; k <= 16; k++) {
+        const u = k / 16, w = 1 - u;
+        const x = w * w * w * b.p0.x + 3 * w * w * u * b.c1.x + 3 * w * u * u * b.c2.x + u * u * u * b.p1.x;
+        const y = w * w * w * b.p0.y + 3 * w * w * u * b.c1.y + 3 * w * u * u * b.c2.y + u * u * u * b.p1.y;
+        near(x, S[i * 16 + k].x, 1e-9, 'x'); near(y, S[i * 16 + k].y, 1e-9, 'y');
+      }
+    });
+  }
+  assert.equal(splineBezier([P[0]], false).length, 0);
+  assert.equal(splineBezier([P[0], P[1]], false).length, 1);
+});
+
+t('corte laser: escala real en mm, solo trazo continuo, curvas Bezier, sin cotas ni textos', () => {
+  const d = newDoc();
+  const ids = [[0, 0], [30, 10], [60, 0], [30, -10]].map(([x, y]) => addPoint(d, x, y, false));
+  addSpline(d, ids, { color: 'auto', ltype: 'continua', w: 2, ls: 1 }, true);
+  const c = addPoint(d, 30, 0, false);
+  addCircle(d, c, 5, { color: 'auto', ltype: 'continua', w: 2 });
+  const e = addPoint(d, 0, 20, false), f = addPoint(d, 60, 20, false);
+  addLine(d, e, f, { color: 'auto', ltype: 'eje', w: 2 }); // eje: no se corta
+  addCon(d, { t: 'DIST', refs: [e, f], v: 60 });
+  addText(d, c, 'no sale', { h: 3 });
+  const L = exportSVGLaser(d, { unit: 2, stroke: 0.1, color: '#ff0000' });
+  assert.ok(L.svg.includes('<path d="M') && L.svg.includes(' C') && L.svg.includes(' Z'), 'spline cerrada como Bezier');
+  assert.ok(L.svg.includes('<circle'));
+  assert.equal(L.count, 2, 'spline + circulo; el eje se omite');
+  assert.ok(!L.svg.includes('<text') && !L.svg.includes('<polygon'));
+  assert.ok(L.svg.includes('stroke="#ff0000"') && L.svg.includes('stroke-width="0.1"'));
+  assert.ok(/width="[\d.]+mm" height="[\d.]+mm"/.test(L.svg), 'dimensiones en mm');
+  // la spline cerrada abarca 60 x ~20 unidades => 120 x ~40 mm con unit=2
+  near(L.width, 120, 0.5); assert.ok(L.height > 30 && L.height < 50);
+  const all = exportSVGLaser(d, { onlyContinuous: false });
+  assert.equal(all.count, 3, 'sin filtro entra tambien el eje');
+  assert.equal(exportSVGLaser(newDoc()), null);
+});
+
+t('equidistante: circulo hacia afuera/adentro y deteccion de socavado', () => {
+  const circle = (r, n = 120) => Array.from({ length: n }, (_, i) => ({ x: r * Math.cos((i / n) * 2 * Math.PI), y: r * Math.sin((i / n) * 2 * Math.PI) }));
+  const out = offsetPolyline(circle(10), 3, true);
+  out.pts.forEach((q) => near(Math.hypot(q.x, q.y), 13, 0.02, 'hacia afuera'));
+  assert.equal(out.undercut, 0);
+  const inn = offsetPolyline(circle(10), -4, true);
+  inn.pts.forEach((q) => near(Math.hypot(q.x, q.y), 6, 0.02, 'hacia adentro'));
+  assert.equal(inn.undercut, 0);
+  near(inn.minRadius, 10, 0.1, 'radio minimo ~ el del circulo');
+  // sentido horario: mismo resultado (d>0 sigue siendo hacia afuera)
+  const cw = offsetPolyline(circle(10).reverse(), 3, true);
+  cw.pts.forEach((q) => near(Math.hypot(q.x, q.y), 13, 0.02));
+  // radio de offset mayor que el de curvatura => socavado
+  const bad = offsetPolyline(circle(10), -12, true);
+  assert.ok(bad.undercut > 50, 'se invierte: ' + bad.undercut);
+});
+
+t('leva: radios, cierre, leyes de movimiento y angulo de presion', () => {
+  const base = { rb: 25, rr: 0, h: 12, rise: 120, dwellHigh: 30, fall: 120, law: 'cicloidal', ccw: true, n: 360 };
+  for (const law of ['cicloidal', 'armonico', 'parabolico', 'uniforme']) {
+    near(displacement({ ...base, law }, 0), 0, 1e-12); near(displacement({ ...base, law }, 120), 12, 1e-9);
+    near(displacement({ ...base, law }, 150), 12, 1e-9, 'reposo arriba'); near(displacement({ ...base, law }, 270), 0, 1e-9);
+    near(displacement({ ...base, law }, 330), 0, 1e-9, 'reposo abajo');
+  }
+  near(displacement(base, 60), 6, 1e-9, 'a mitad de la subida lleva la mitad');
+  const c = camProfile(base);
+  assert.equal(c.pitch.length, 360);
+  const radii = c.pitch.map((q) => Math.hypot(q.x, q.y));
+  near(Math.min(...radii), 25, 1e-9); near(Math.max(...radii), 37, 1e-9);
+  assert.ok(c.maxPressureDeg > 10 && c.maxPressureDeg < 35, 'angulo de presion plausible: ' + c.maxPressureDeg);
+  // con rodillo: el perfil queda rr por dentro de la curva primitiva y el sentido de giro invierte el perfil
+  const r = camProfile({ ...base, rr: 5, n: 720 });
+  assert.equal(r.undercut, 0);
+  const pr = r.profile.map((q) => Math.hypot(q.x, q.y));
+  near(Math.min(...pr), 25, 0.05, 'base del perfil = radio base'); near(Math.max(...pr), 37, 0.3);
+  const cw = camProfile({ ...base, ccw: false });
+  assert.ok(Math.abs(c.pitch[90].y + cw.pitch[90].y) < 1e-9 && Math.abs(c.pitch[90].x - cw.pitch[90].x) < 1e-9, 'horario = imagen especular');
+  // una carrera brusca con rodillo grande se socava
+  const harsh = camProfile({ rb: 12, rr: 11, h: 15, rise: 40, dwellHigh: 0, fall: 40, law: 'cicloidal' });
+  assert.ok(harsh.undercut > 0 || harsh.minRadius < 11, 'detecta socavado');
+  assert.ok(camProfile({ ...base, rise: 300 }).error, 'subida+reposo+bajada > 360');
+  assert.ok(camProfile({ ...base, h: 0 }).error);
 });
 
 console.log(`\n${passed} pruebas pasaron`);

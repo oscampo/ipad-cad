@@ -6,13 +6,14 @@ import {
 } from './model.js';
 import {
   dist, closestOnSeg, lineLine, lineCircle, circleCircle, signedAngle, dashFromPattern, parsePattern,
-  arcThrough3, inSweep, TAU, splineSamples,
+  arcThrough3, inSweep, TAU, splineSamples, resamplePolyline,
 } from './geom.js';
-import { startTrace, recordTraces, traceToSpline } from './curves.js';
+import { startTrace, recordTraces, traceToSpline, offsetPolyline } from './curves.js';
+import { camProfile, LAWS } from './cam.js';
 import { splitElement } from './split.js';
 import { layoutDim, dragDim, dimValue } from './dims.js';
 import { textFrame, textHit, textPose, rawAngle, ANCHORS, ANCHOR_NAMES, LINE_SPACING } from './text.js';
-import { exportSVG, exportDXF, extraExtents } from './export.js';
+import { exportSVG, exportSVGLaser, exportDXF, extraExtents } from './export.js';
 import { iconSvg } from './icons.js';
 
 const VERSION = '0.1.0';
@@ -113,6 +114,7 @@ function updateEnabled() {
   $('trClear').disabled = !selPts.some((id) => doc.traces[id]?.pts.length > 1);
   $('trSpline').disabled = !(selPts.length === 1 && doc.traces[selPts[0]]?.pts.length >= 3);
   $('spClose').disabled = !n.sp;
+  $('spOffset').disabled = !n.sp;
   $('del').disabled = !sel.length;
   $('txAlign').disabled = !(sel.some((x) => x.k === 'tx') && ln === 1);
   $('txFree').disabled = !sel.some((x) => x.k === 'tx' && doc.texts[x.id]?.ref);
@@ -1419,6 +1421,87 @@ $('colorPick').oninput = (e) => applyStyle('color', e.target.value);
 ['hKind', 'hAngle', 'hSpace', 'hAlpha'].forEach((id) => { $(id).onchange = updateHatchFromPanel; });
 $('hAlpha').oninput = updateHatchFromPanel;
 $('mkhatch').onclick = createHatch;
+
+// ---- equidistante de un spline (p. ej. radio del rodillo de una leva) ----
+function newControlPoints(P, closed, N, c = { x: 0, y: 0 }) {
+  const R = closed ? resamplePolyline([...P, P[0]], N + 1).slice(0, -1) : resamplePolyline(P, N);
+  return R.map((q) => { const id = addPoint(doc, c.x + q.x, c.y + q.y, true); doc.pts[id].splOnly = true; return id; });
+}
+$('spOffset').onclick = () => {
+  const spId = sel.find((x) => x.k === 'sp')?.id;
+  if (!spId) { toast('Selecciona un spline'); return; }
+  const d = Number(String($('spOffD').value).replace(',', '.'));
+  if (!Number.isFinite(d) || d === 0) { toast('Escribe la distancia (positiva = hacia afuera en curvas cerradas)'); return; }
+  const sp = doc.splines[spId];
+  const dense = splinePolyline(doc, sp, 24);
+  const o = offsetPolyline(sp.closed ? dense.slice(0, -1) : dense, d, sp.closed);
+  if (!o) { toast('El spline necesita al menos 3 puntos'); return; }
+  pushUndo();
+  const ids = newControlPoints(o.pts, sp.closed, Math.max(48, sp.pts.length * 3));
+  const nid = addSpline(doc, ids, { color: sp.color, ltype: sp.ltype, w: sp.w, ls: sp.ls }, sp.closed);
+  sel = [{ k: 'sp', id: nid }];
+  afterChange();
+  if (o.undercut > 0) toast(`La equidistante se socava en ${o.undercut} tramos: la distancia supera el radio de curvatura (mínimo ${fmt(o.minRadius)}). Revisa la curva.`);
+  else toast('Equidistante creada');
+};
+
+// ---- generador de levas ----
+const CAM_DEFAULTS = { rb: 25, rr: 6, h: 12, rise: 120, dwellHigh: 30, fall: 120, bore: 6, law: 'cicloidal', ccw: true, nPts: 90 };
+function openCamDialog() {
+  const v = { ...CAM_DEFAULTS, ...(opts.cam || {}) };
+  $('camLaw').innerHTML = Object.entries(LAWS).map(([k, l]) => `<option value="${k}">${l.label}</option>`).join('');
+  for (const k of ['rb', 'rr', 'h', 'rise', 'dwellHigh', 'fall', 'bore', 'nPts']) $('cam_' + k).value = String(v[k]);
+  $('camLaw').value = v.law; $('camDir').value = v.ccw ? 'ccw' : 'cw'; $('camMsg').textContent = '';
+  $('dlgC').showModal();
+}
+$('camGen').onclick = openCamDialog;
+$('camCancel').onclick = () => $('dlgC').close();
+$('camOk').onclick = (ev) => {
+  ev.preventDefault();
+  const num = (id) => Number(String($(id).value).replace(',', '.'));
+  const v = { rb: num('cam_rb'), rr: num('cam_rr') || 0, h: num('cam_h'), rise: num('cam_rise'), dwellHigh: num('cam_dwellHigh') || 0, fall: num('cam_fall'), bore: num('cam_bore') || 0, law: $('camLaw').value, ccw: $('camDir').value === 'ccw', nPts: Math.max(24, Math.round(num('cam_nPts') || 90)) };
+  const res = camProfile({ ...v, n: 720 });
+  if (res.error) { $('camMsg').textContent = res.error; return; }
+  opts.cam = v;
+  pushUndo();
+  // centro: el punto seleccionado, o un punto nuevo en el centro de la vista
+  let cid = sel.find((x) => x.k === 'pt')?.id;
+  if (!cid) { const m = toModel(cv.getBoundingClientRect().width / 2, cv.getBoundingClientRect().height / 2); cid = addPoint(doc, m.x, m.y, false); }
+  const c = doc.pts[cid];
+  const st = style();
+  const ids = newControlPoints(res.profile, true, v.nPts, c);
+  const profile = addSpline(doc, ids, { color: st.color, ltype: 'continua', w: st.w, ls: st.ls }, true);
+  if (v.rr > 0) { // curva primitiva (trayectoria del centro del rodillo) como linea de construccion
+    addSpline(doc, newControlPoints(res.pitch, true, v.nPts, c), { color: st.color, ltype: 'fantasma', w: 1, ls: 1 }, true);
+  }
+  if (v.bore > 0) addCircle(doc, cid, v.bore / 2, { color: st.color, ltype: 'continua', w: st.w, ls: st.ls });
+  sel = [{ k: 'sp', id: profile }];
+  $('dlgC').close();
+  afterChange();
+  const warn = [];
+  if (res.maxPressureDeg > 30) warn.push(`ángulo de presión alto (${res.maxPressureDeg.toFixed(0)}°, conviene ≤ 30°)`);
+  if (res.undercut > 0) warn.push('perfil socavado: reduce el rodillo o suaviza la subida');
+  toast(`Leva creada. Ángulo de presión máx. ${res.maxPressureDeg.toFixed(1)}°` + (warn.length ? `. Atención: ${warn.join('; ')}` : ''));
+};
+
+// ---- SVG para corte laser ----
+$('fLaser').onclick = () => {
+  const v = { unit: 1, stroke: 0.1, color: '#ff0000', onlyContinuous: true, ...(opts.laser || {}) };
+  $('lsUnit').value = String(v.unit); $('lsStroke').value = String(v.stroke); $('lsColor').value = v.color; $('lsCont').checked = !!v.onlyContinuous;
+  $('dlgL').showModal();
+};
+$('lsCancel').onclick = () => $('dlgL').close();
+$('lsOk').onclick = (ev) => {
+  ev.preventDefault();
+  const o = { unit: Number(String($('lsUnit').value).replace(',', '.')), stroke: Number(String($('lsStroke').value).replace(',', '.')), color: $('lsColor').value, onlyContinuous: $('lsCont').checked };
+  if (!(o.unit > 0) || !(o.stroke > 0)) { toast('La escala y el grosor deben ser positivos'); return; }
+  const r = exportSVGLaser(doc, o);
+  if (!r) { toast('No hay geometría para cortar' + (o.onlyContinuous ? ' (solo se exporta trazo continuo)' : '')); return; }
+  opts.laser = o; persist();
+  download('corte-laser.svg', new Blob([r.svg], { type: 'image/svg+xml' }));
+  $('dlgL').close();
+  toast(`SVG de ${r.width.toFixed(1)} × ${r.height.toFixed(1)} mm con ${r.count} elementos`);
+};
 $('trTrace').onclick = () => {
   const pts = sel.filter((x) => x.k === 'pt').map((x) => x.id);
   if (!pts.length) { toast('Selecciona uno o más puntos'); return; }

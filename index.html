@@ -147,6 +147,11 @@ small { color: var(--muted); }
       <button id="trSpline" data-icon="spline" title="Convertir la trayectoria de un punto en un spline editable"><i></i><span>Trazado a spline</span></button>
       <button id="spClose" data-icon="spline" title="Cerrar o abrir el spline seleccionado"><i></i><span>Cerrar / abrir</span></button>
     </div>
+    <div class="row"><label for="spOffD">Equidistante (distancia)</label><input type="number" id="spOffD" value="3" step="any"></div>
+    <div class="grid2">
+      <button id="spOffset" data-icon="spline" title="Crear la curva paralela a la seleccionada a esa distancia (positiva = hacia afuera en curvas cerradas); sirve para el radio del rodillo de una leva"><i></i><span>Equidistante</span></button>
+      <button id="camGen" data-icon="hatch" title="Generar una leva de disco con seguidor en línea, con o sin rodillo"><i></i><span>Generar leva…</span></button>
+    </div>
     <div class="row"><label for="trN">Puntos del spline</label><input type="number" id="trN" value="16" min="3" max="200" step="1"></div>
     <small>Selecciona un punto, pulsa "Trazar punto" y arrastra el mecanismo: el punto deja su trayectoria. Luego puedes convertirla en un spline.</small>
 </details>
@@ -185,6 +190,7 @@ small { color: var(--muted); }
       <button id="fPng" data-icon="image"><i></i><span>PNG</span></button>
       <button id="fSvg" data-icon="svg"><i></i><span>SVG</span></button>
       <button id="fDxf" data-icon="dxf"><i></i><span>DXF</span></button>
+      <button id="fLaser" data-icon="svg" title="SVG a escala real en mm, solo la geometría que se corta"><i></i><span>SVG corte láser</span></button>
     </div>
     <input type="file" id="fileIn" accept=".json,application/json" hidden>
     <p><small>Se guarda solo en este navegador. Guarda un .json para respaldar. v<span id="ver"></span></small></p>
@@ -192,6 +198,31 @@ small { color: var(--muted); }
   </aside>
 </main>
 <footer id="status">Listo</footer>
+<dialog id="dlgL"><form method="dialog">
+  <p style="margin:0 0 8px"><b>SVG para corte láser</b></p>
+  <div class="row"><label for="lsUnit">1 unidad del dibujo =</label><input type="number" id="lsUnit" step="any" min="0"><span>mm</span></div>
+  <div class="row"><label for="lsStroke">Grosor de línea (mm)</label><input type="number" id="lsStroke" step="any" min="0"></div>
+  <div class="row"><label for="lsColor">Color de corte</label><input type="color" id="lsColor"></div>
+  <label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;font-size:13px"><input type="checkbox" id="lsCont" style="width:22px;height:22px;min-height:22px;flex:none;margin:0"><span>Solo trazo continuo (omite ejes, ocultas y otras líneas de construcción)</span></label>
+  <small>Se exportan líneas, círculos, arcos y splines (como curvas Bézier). No salen cotas, textos, puntos ni rellenos.</small>
+  <div class="actions"><button type="button" id="lsCancel">Cancelar</button><button id="lsOk" class="on">Descargar</button></div>
+</form></dialog>
+<dialog id="dlgC"><form method="dialog">
+  <p style="margin:0 0 8px"><b>Generar leva de disco</b> <small>(seguidor de traslación en línea)</small></p>
+  <div class="row"><label for="cam_rb">Radio base</label><input type="number" id="cam_rb" step="any" min="0"></div>
+  <div class="row"><label for="cam_rr">Radio del rodillo (0 = punta)</label><input type="number" id="cam_rr" step="any" min="0"></div>
+  <div class="row"><label for="cam_h">Carrera</label><input type="number" id="cam_h" step="any" min="0"></div>
+  <div class="row"><label for="cam_rise">Subida °</label><input type="number" id="cam_rise" step="any" min="0"></div>
+  <div class="row"><label for="cam_dwellHigh">Reposo arriba °</label><input type="number" id="cam_dwellHigh" step="any" min="0"></div>
+  <div class="row"><label for="cam_fall">Bajada °</label><input type="number" id="cam_fall" step="any" min="0"></div>
+  <div class="row"><label for="camLaw">Ley de movimiento</label><select id="camLaw"></select></div>
+  <div class="row"><label for="camDir">Giro de la leva</label><select id="camDir"><option value="ccw">Antihorario</option><option value="cw">Horario</option></select></div>
+  <div class="row"><label for="cam_bore">Ø agujero del eje</label><input type="number" id="cam_bore" step="any" min="0"></div>
+  <div class="row"><label for="cam_nPts">Puntos del spline</label><input type="number" id="cam_nPts" step="1" min="24"></div>
+  <small>El resto del giro (360° − subida − reposo − bajada) es reposo abajo. Se crea el perfil (a cortar), la curva primitiva como línea de construcción si hay rodillo, y el agujero. Se centra en el punto seleccionado o en el centro de la vista.</small>
+  <p id="camMsg" style="color:var(--warn);margin:8px 0 0"></p>
+  <div class="actions"><button type="button" id="camCancel">Cancelar</button><button id="camOk" class="on">Generar</button></div>
+</form></dialog>
 <dialog id="dlgT"><form method="dialog"><label id="dlgTLabel" for="dlgTInput"></label><textarea id="dlgTInput" rows="3" style="width:100%;font-size:18px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--btn);color:var(--fg);font-family:inherit"></textarea><div class="actions"><button value="cancel" type="button" id="dlgTCancel">Cancelar</button><button value="ok" id="dlgTOk" class="on">Aceptar</button></div></form></dialog>
 <dialog id="dlg"><form method="dialog"><label id="dlgLabel" for="dlgInput"></label><input id="dlgInput" type="text" inputmode="decimal" autocomplete="off"><label id="dlgRefRow" style="display:flex;gap:8px;align-items:flex-start;margin-top:10px;font-size:13px"><input type="checkbox" id="dlgRef" style="width:22px;height:22px;min-height:22px;flex:none;margin:0"><span>Solo lectura (referencia): mide y muestra el valor en cursiva, sin restringir la geometría</span></label><div class="actions"><button value="cancel" type="button" id="dlgCancel">Cancelar</button><button value="ok" id="dlgOk" class="on">Aceptar</button></div></form></dialog>
 <script type="module" src="/src/main.js"></script>
