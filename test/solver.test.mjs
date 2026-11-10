@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { newDoc, addPoint, addLine, addCircle, addArc, addCon, addText, addSpline, deleteItems, hatchLoops, arcOf, cleanup, splinePolyline } from '../src/model.js';
-import { startTrace, recordTraces, traceToSpline, offsetPolyline } from '../src/curves.js';
+import { startTrace, recordTraces, traceToSpline, offsetPolyline, firstLap } from '../src/curves.js';
 import { layoutDim, dragDim, dimValue, dimText } from '../src/dims.js';
 import { textFrame, textCorners, textHit, textPose, rawAngle } from '../src/text.js';
 import { exportSVG, exportSVGLaser, exportDXF, dimLayouts, extraExtents } from '../src/export.js';
@@ -783,6 +783,57 @@ t('relacion: circulo tangente a spline y borrado limpia las relaciones', () => {
   deleteItems(d, [{ k: 'sp', id: sp }]);
   assert.equal(Object.values(d.cons).filter((k) => k.t === 'TANCS').length, 0, 'la relacion muere con el spline');
   assert.ok(solve(d, []).ok);
+});
+
+
+t('trazado a spline: varias vueltas usan solo la primera (sin enredarse)', () => {
+  const d = newDoc();
+  const p = addPoint(d, 30, 0, false);
+  startTrace(d, p);
+  // 4 vueltas a una elipse 30 x 18, con desfase y ruido distinto en cada vuelta
+  for (let lap = 0; lap < 4; lap++) {
+    for (let i = 1; i <= 90; i++) {
+      const a = ((i + lap * 0.37) / 90) * 2 * Math.PI;
+      d.pts[p].x = 30 * Math.cos(a) + 0.05 * Math.sin(7 * a + lap); d.pts[p].y = 18 * Math.sin(a);
+      recordTraces(d, 0.01);
+    }
+  }
+  const sp = traceToSpline(d, p, 16);
+  const S = d.splines[sp];
+  assert.equal(S.closed, true);
+  // 16 puntos de una sola vuelta: todos sobre la elipse y avanzando en un solo sentido
+  const ang = S.pts.map((id) => Math.atan2(d.pts[id].y / 18, d.pts[id].x / 30));
+  S.pts.forEach((id) => near(Math.hypot(d.pts[id].x / 30, d.pts[id].y / 18), 1, 0.03, 'sobre la elipse'));
+  let turns = 0;
+  for (let i = 0; i < ang.length; i++) { let da = ang[(i + 1) % ang.length] - ang[i]; while (da < -Math.PI) da += 2 * Math.PI; while (da > Math.PI) da -= 2 * Math.PI; assert.ok(da > 0, 'avanza siempre'); turns += da; }
+  near(turns, 2 * Math.PI, 1e-6, 'una sola vuelta');
+});
+
+t('trazado a spline: ida y vuelta sale abierta y una vuelta incompleta usa todo el trazado', () => {
+  const line = Array.from({ length: 60 }, (_, i) => ({ x: i, y: 0.01 * (i % 3) }));
+  const back = line.slice(0, -1).reverse();
+  const lap = firstLap([...line, ...back, ...line]);
+  assert.equal(lap.closed, false);
+  near(lap.pts[lap.pts.length - 1].x, 59, 1e-9, 'llega al extremo');
+  assert.equal(firstLap(line), null, 'una trayectoria abierta no tiene vuelta');
+});
+
+t('arrastrar un punto ligado a un spline deforma la curva y el punto llega al destino', () => {
+  const d = newDoc();
+  const ids = [[0, 0], [10, 8], [20, 0], [30, 8], [40, 0]].map(([x, y]) => addPoint(d, x, y, false));
+  const sp = addSpline(d, ids, { color: 'auto', ltype: 'continua', w: 2, ls: 1 }, false);
+  d.pts[ids[0]].fixed = d.pts[ids[4]].fixed = true;
+  const f = closestOnPolyline(splinePolyline(d, d.splines[sp], 32), { x: 15, y: 5 });
+  const p = addPoint(d, f.x, f.y, false);
+  addCon(d, { t: 'PONS', refs: [p, sp] });
+  assert.ok(solve(d, []).ok);
+  const before = ids.map((i) => ({ ...d.pts[i] }));
+  const tx = f.x, ty = f.y + 6;
+  for (let i = 1; i <= 6; i++) assert.ok(solve(d, [{ id: p, x: tx, y: f.y + i }]).ok);
+  assert.ok(distToSpl(d, sp, d.pts[p]) < 1e-3, 'sigue sobre la curva');
+  near(d.pts[p].y, ty, 0.5, 'llega cerca del destino: ' + d.pts[p].y);
+  assert.ok(ids.some((i, k) => Math.hypot(d.pts[i].x - before[k].x, d.pts[i].y - before[k].y) > 1), 'la curva se deformo');
+  near(d.pts[ids[0]].x, 0, 1e-9); near(d.pts[ids[4]].y, 0, 1e-9);
 });
 
 console.log(`\n${passed} pruebas pasaron`);

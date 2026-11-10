@@ -35,7 +35,7 @@ const custom = {
   // colineal: extremo de una linea, tramo punteado, inicio de otra linea
   'con-col': S('<path d="M1.5 12H6"/><circle cx="7.6" cy="12" r="1.7" fill="currentColor"/><path d="M11 12h.01M14 12h.01"/><circle cx="16.4" cy="12" r="1.7" fill="currentColor"/><path d="M18 12h4.5"/>'),
   'arc-c': S('<path d="M5 19V5M5 19h14" opacity=".4"/><path d="M19 19A14 14 0 0 0 5 5"/><circle cx="5" cy="19" r="1.8" fill="currentColor"/><circle cx="19" cy="19" r="1.8" fill="currentColor"/><circle cx="5" cy="5" r="1.8" fill="currentColor"/>'),
-  'arc-3': S('<path d="M4 19Q12 1 20 19"/><circle cx="4" cy="19" r="1.8" fill="currentColor"/><circle cx="12" cy="10" r="1.8" fill="currentColor"/><circle cx="20" cy="19" r="1.8" fill="currentColor"/>'),
+  'arc-3': S('<path d="M3 20V7M3 20h13" opacity=".3" stroke-dasharray="1 3"/><path d="M3 7A13 13 0 0 1 16 20"/><circle cx="3" cy="7" r="1.8" fill="currentColor"/><circle cx="12.2" cy="10.8" r="1.8" fill="currentColor"/><circle cx="16" cy="20" r="1.8" fill="currentColor"/>'),
   // dividir: tramos separados por puntos (_._._)
   split: S('<path d="M1.5 14H6"/><circle cx="8" cy="14" r="1.7" fill="currentColor"/><path d="M10 14h4"/><circle cx="16" cy="14" r="1.7" fill="currentColor"/><path d="M18 14h4.5"/>'),
   // spline: una "S" girada 90 grados (onda) con puntos en los extremos y en cada seno

@@ -140,6 +140,35 @@ function splineResidual(doc, res) {
   return worst;
 }
 
+// Arrastrar un punto ligado a un spline (PONS) deforma el spline: los dos puntos de control del tramo
+// donde cae el punto se desplazan (repartiendo el desplazamiento segun su cercania) para que la curva
+// pase por el destino. Devuelve las posiciones iniciales para la resolucion, o null si no aplica.
+function splineDragPos(doc, live) {
+  let pos = null;
+  for (const t of live) {
+    const P0 = doc.pts[t.id];
+    for (const k of Object.values(doc.cons)) {
+      if (k.t !== 'PONS' || k.ref || k.refs[0] !== t.id) continue;
+      const sp = doc.splines?.[k.refs[1]];
+      if (!sp || sp.pts.includes(t.id) || sp.pts.length < 2) continue;
+      const per = 32, n = sp.pts.length;
+      const f = closestOnPolyline(splineSamples(sp.pts.map((id) => pos?.pts?.[id] || doc.pts[id]), sp.closed, per), P0);
+      if (!f) continue;
+      const span = Math.floor(f.i / per), us = ((f.i % per) + f.u) / per;
+      const ends = [[sp.pts[span % n], 1 - us], [sp.pts[(span + 1) % n], us]].filter(([id]) => !doc.pts[id].fixed);
+      const den = ends.reduce((a, [, w]) => a + w * w, 0);
+      if (den < 1e-9) continue;
+      const dx = t.x - P0.x, dy = t.y - P0.y;
+      pos ||= { pts: {} };
+      for (const [id, w] of ends) {
+        const cur = pos.pts[id] || doc.pts[id];
+        pos.pts[id] = { x: cur.x + (w / den) * dx, y: cur.y + (w / den) * dy };
+      }
+    }
+  }
+  return pos;
+}
+
 // Una o varias pasadas del solver (varias si hay relaciones con splines).
 function solveLoop(doc, pos, extra) {
   const spl = hasSpl(doc);
@@ -215,7 +244,7 @@ export function solve(doc, targets = []) {
       extra.push({ id: `__t${i}`, type: 'point', x: t.x, y: t.y, fixed: true });
       extra.push({ id: `__d${i}`, type: 'p2p_distance', p1_id: t.id, p2_id: `__t${i}`, distance: 0, scale: 0.02 });
     });
-    const r1 = solveLoop(doc, null, extra);
+    const r1 = solveLoop(doc, splineDragPos(doc, live), extra);
     pos = { pts: r1.pts, circles: r1.circles, arcs: r1.arcs };
   }
   const res = solveLoop(doc, pos, null);

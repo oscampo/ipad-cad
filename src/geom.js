@@ -243,7 +243,7 @@ export function closestOnPolyline(P, p) {
     const l = Math.hypot(tx, ty) || 1; tx /= l; ty /= l;
     k = Math.atan2(n0.tx * n1.ty - n0.ty * n1.tx, n0.tx * n1.tx + n0.ty * n1.ty) / ((n0.L + n1.L) / 2);
   }
-  return { x: best.x, y: best.y, d: best.d, tx, ty, k };
+  return { x: best.x, y: best.y, d: best.d, tx, ty, k, i: best.i, u: best.u };
 }
 
 // Cruces de la poligonal con la recta infinita por a y b.

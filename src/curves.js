@@ -34,13 +34,50 @@ export function recordTraces(doc, minDist) {
 // Convierte el trazado de un punto en un spline que pasa por n puntos repartidos a lo largo de la
 // trayectoria. Si la trayectoria vuelve a donde empezo, el spline es cerrado. Los puntos de control
 // son puntos reales (se pueden arrastrar para retocar la curva) y solo se ven con el spline seleccionado.
+// Si el trazado da varias vueltas, se queda con la primera: repartir los n puntos a lo largo de todas las
+// vueltas los dejaria en fases distintas y la curva saldria enredada. Devuelve { pts, closed } o null si no
+// hay una vuelta completa (trayectoria abierta o de ida y vuelta).
+export function firstLap(pts) {
+  const p0 = pts[0];
+  let xs0 = Infinity, xs1 = -Infinity, ys0 = Infinity, ys1 = -Infinity;
+  for (const q of pts) { xs0 = Math.min(xs0, q.x); xs1 = Math.max(xs1, q.x); ys0 = Math.min(ys0, q.y); ys1 = Math.max(ys1, q.y); }
+  const D = Math.hypot(xs1 - xs0, ys1 - ys0);
+  if (!(D > 0)) return null;
+  const dd = (q) => Math.hypot(q.x - p0.x, q.y - p0.y);
+  const tol = D * 0.05;
+  let left = false, end = -1;
+  for (let j = 1; j < pts.length; j++) {
+    const d = dd(pts[j]);
+    if (d > D * 0.25) left = true;
+    else if (left && d < tol) {
+      end = j;
+      while (end + 1 < pts.length && dd(pts[end + 1]) < dd(pts[end])) end++; // el punto mas cercano al inicio
+      break;
+    }
+  }
+  if (end < 0) return null;
+  const lap = pts.slice(0, end + 1);
+  // ida y vuelta por el mismo camino (area casi nula): no es una curva cerrada, sirve la ida
+  let area = 0;
+  for (let i = 0; i < lap.length; i++) { const a = lap[i], b = lap[(i + 1) % lap.length]; area += a.x * b.y - b.x * a.y; }
+  const L = polylineLength(lap);
+  if (Math.abs(area / 2) < 0.005 * L * L) {
+    let far = 0;
+    lap.forEach((q, i) => { if (dd(q) > dd(lap[far])) far = i; });
+    return { pts: lap.slice(0, far + 1), closed: false };
+  }
+  return { pts: lap, closed: true };
+}
+
 export function traceToSpline(doc, pid, n = 16) {
   const tr = doc.traces[pid];
   if (!tr || tr.pts.length < 3 || n < 3) return null;
-  const L = polylineLength(tr.pts);
-  const a = tr.pts[0], b = tr.pts[tr.pts.length - 1];
-  const closed = L > 0 && Math.hypot(a.x - b.x, a.y - b.y) < L * 0.02;
-  let P = resamplePolyline(tr.pts, closed ? n + 1 : n);
+  const lap = firstLap(tr.pts);
+  const src = lap ? lap.pts : tr.pts;
+  const L = polylineLength(src);
+  const a = src[0], b = src[src.length - 1];
+  const closed = lap ? lap.closed : L > 0 && Math.hypot(a.x - b.x, a.y - b.y) < L * 0.02;
+  let P = resamplePolyline(src, closed ? n + 1 : n);
   if (closed) P = P.slice(0, -1);
   const ids = P.map((q) => {
     const id = addPoint(doc, q.x, q.y, true);
