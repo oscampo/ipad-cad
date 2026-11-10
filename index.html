@@ -112,6 +112,8 @@ body.nopanel #panel { display: none; }
   <button data-tool="spline" data-icon="spline" title="Spline por puntos (S)" aria-label="Spline por puntos"><i></i></button>
   <button data-tool="text" data-icon="text" title="Texto (T)" aria-label="Texto"><i></i></button>
   <button data-tool="intersect" data-icon="intersect" title="Intersección de 2 elementos (I)" aria-label="Intersección"><i></i></button>
+  <button data-tool="trim" data-icon="trim" title="Recortar: arrastra sobre los tramos a quitar (X)" aria-label="Recortar"><i></i></button>
+  <button data-tool="extend" data-icon="extend" title="Extender hasta otro elemento (E)" aria-label="Extender"><i></i></button>
   <span class="sep"></span>
   <button id="undo" data-icon="undo" title="Deshacer (Ctrl+Z)" aria-label="Deshacer"><i></i></button>
   <button id="redo" data-icon="redo" title="Rehacer (Ctrl+Y)" aria-label="Rehacer"><i></i></button>
@@ -139,13 +141,14 @@ body.nopanel #panel { display: none; }
 <button data-con="ONC" data-icon="con-onc" data-hint="punto(s) + 1 línea, arco, círculo o spline" title="Punto sobre: punto(s) + 1 línea, arco, círculo o spline"><i></i><span>Punto sobre</span></button>
 <button data-con="FIX" data-icon="lock" data-hint="puntos, líneas o círculos" title="Fijar / soltar: puntos, líneas o círculos"><i></i><span>Fijar / soltar</span></button>
 </div></details>
-<details class="sec" data-sec="dims" open><summary data-icon="ruler"><i></i>Cotas, intersección y división</summary>
+<details class="sec" data-sec="dims" open><summary data-icon="ruler"><i></i>Cotas, intersección, división y matriz</summary>
 <div class="grid2">
 <button data-con="DIM" data-icon="dim-dist" data-hint="2 puntos, 1 línea, o punto + línea" title="Distancia: 2 puntos, 1 línea, o punto + línea"><i></i><span>Distancia</span></button>
 <button data-con="ANG" data-icon="dim-ang" data-hint="2 líneas" title="Ángulo: 2 líneas"><i></i><span>Ángulo</span></button>
 <button data-con="RAD" data-icon="dim-rad" data-hint="arco(s) → R, círculo(s) → ⌀" title="Radio de arco (R) o diámetro de círculo (⌀)"><i></i><span>Radio / ⌀</span></button>
 <button id="mkint" data-icon="intersect" data-hint="2 elementos (líneas, arcos o círculos)" title="Intersección: 2 elementos (líneas, arcos o círculos)"><i></i><span>Intersección</span></button>
 <button id="mksplit" data-icon="split" data-hint="1 segmento, arco o círculo + los puntos sobre él" title="Dividir: 1 segmento, arco o círculo + los puntos que están sobre él"><i></i><span>Dividir</span></button>
+<button id="mkarr" data-icon="array" data-hint="lo que quieres copiar (puntos, líneas, arcos, círculos, splines, textos)" title="Matriz lineal: copias en una o dos direcciones, con espaciado y número de copias"><i></i><span>Matriz lineal</span></button>
 </div></details>
 <details class="sec" data-sec="style" open><summary data-icon="palette"><i></i>Estilo (selección y nuevos)</summary>
     <div class="sw" id="swatches"></div>
@@ -234,6 +237,26 @@ body.nopanel #panel { display: none; }
   <label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;font-size:13px"><input type="checkbox" id="lsCont" style="width:22px;height:22px;min-height:22px;flex:none;margin:0"><span>Solo trazo continuo (omite ejes, ocultas y otras líneas de construcción)</span></label>
   <small>Se exportan líneas, círculos, arcos y splines (como curvas Bézier). No salen cotas, textos, puntos ni rellenos.</small>
   <div class="actions"><button type="button" id="lsCancel">Cancelar</button><button id="lsOk" class="on">Descargar</button></div>
+</form></dialog>
+<dialog id="dlgA"><form method="dialog">
+  <p style="margin:0 0 6px"><b>Matriz lineal</b> <span id="arrInfo" style="color:var(--muted);font-size:13px"></span></p>
+  <fieldset style="border:1px solid var(--line);border-radius:8px;margin:0 0 8px;padding:6px 8px">
+    <legend style="font-size:13px">Dirección 1</legend>
+    <div class="row"><span id="arrD1" style="flex:1"></span><button type="button" id="arrPick1">Elegir línea</button></div>
+    <div class="row"><label for="arrS1">Espaciado</label><input id="arrS1" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="ej. 10 o 2*5"></div>
+    <div class="row"><label for="arrN1">Copias</label><input id="arrN1" type="number" min="1" max="200" step="1" placeholder="2"></div>
+    <label style="display:flex;gap:8px;align-items:center;font-size:13px"><input type="checkbox" id="arrF1" style="width:22px;height:22px;min-height:22px;margin:0">Invertir sentido</label>
+  </fieldset>
+  <fieldset style="border:1px solid var(--line);border-radius:8px;margin:0 0 8px;padding:6px 8px">
+    <legend style="font-size:13px">Dirección 2 (opcional)</legend>
+    <div class="row"><span id="arrD2" style="flex:1"></span><button type="button" id="arrPick2">Elegir línea</button></div>
+    <div class="row"><label for="arrS2">Espaciado</label><input id="arrS2" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="vacío = sin 2.ª dirección"></div>
+    <div class="row"><label for="arrN2">Copias</label><input id="arrN2" type="number" min="1" max="200" step="1" placeholder="2"></div>
+    <label style="display:flex;gap:8px;align-items:center;font-size:13px"><input type="checkbox" id="arrF2" style="width:22px;height:22px;min-height:22px;margin:0">Invertir sentido</label>
+  </fieldset>
+  <small>Las copias no cuentan el original. Si solo escribes el espaciado, se crean 2 copias. Con dos direcciones se llena la cuadrícula completa. La dirección sale de la línea elegida (de su inicio a su fin); sin línea, la 1 es horizontal y la 2 perpendicular a la 1.</small>
+  <div id="arrErr" style="color:var(--warn);font-size:13px"></div>
+  <div class="actions"><button type="button" id="arrCancel">Cancelar</button><button id="arrOk" class="on">Crear copias</button></div>
 </form></dialog>
 <dialog id="dlgT"><form method="dialog"><label id="dlgTLabel" for="dlgTInput"></label><textarea id="dlgTInput" rows="2" style="width:100%;font-size:18px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--btn);color:var(--fg);font-family:inherit"></textarea><div class="actions"><button value="cancel" type="button" id="dlgTCancel">Cancelar</button><button value="ok" id="dlgTOk" class="on">Aceptar</button></div></form></dialog>
 <dialog id="dlgN"><form method="dialog">

@@ -41,6 +41,12 @@ const custom = {
   'arc-3': S('<path d="M3 20V7M3 20h13" opacity=".3" stroke-dasharray="1 3"/><path d="M3 7A13 13 0 0 1 16 20"/><circle cx="3" cy="7" r="1.8" fill="currentColor"/><circle cx="12.2" cy="10.8" r="1.8" fill="currentColor"/><circle cx="16" cy="20" r="1.8" fill="currentColor"/>'),
   // dividir: tramos separados por puntos (_._._)
   split: S('<path d="M1.5 14H6"/><circle cx="8" cy="14" r="1.7" fill="currentColor"/><path d="M10 14h4"/><circle cx="16" cy="14" r="1.7" fill="currentColor"/><path d="M18 14h4.5"/>'),
+  // recortar: una linea cruzada por otra; el tramo de un lado queda discontinuo (quitado)
+  trim: S('<path d="M12 3v18"/><path d="M3 12h9"/><path d="M15 12h.01M18.5 12h.01M22 12h.01" opacity=".6"/>'),
+  // extender: la linea se alarga (flecha, tramo punteado) hasta tocar la otra
+  extend: S('<path d="M20 3v18"/><path d="M3 12h7"/><path d="M12.5 12h.01M15 12h.01"/><path d="M16.5 8.5 20 12l-3.5 3.5"/>'),
+  // matriz lineal: el original y copias que se van atenuando
+  array: S('<rect x="2.5" y="8.5" width="5" height="7" rx="1"/><rect x="9.5" y="8.5" width="5" height="7" rx="1" opacity=".65"/><rect x="16.5" y="8.5" width="5" height="7" rx="1" opacity=".35"/>'),
   // spline: una "S" girada 90 grados (onda) con puntos en los extremos y en cada seno
   spline: S('<path d="M3 16C3 9 5 6 8 6c5 0 3 12 8 12 3 0 5-6 5-10"/><circle cx="3" cy="16" r="1.6" fill="currentColor"/><circle cx="8" cy="6" r="1.6" fill="currentColor"/><circle cx="16" cy="18" r="1.6" fill="currentColor"/><circle cx="21" cy="8" r="1.6" fill="currentColor"/>'),
   // abrir/cerrar spline: triangulo de lados curvos con uno discontinuo

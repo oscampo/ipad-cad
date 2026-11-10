@@ -10,6 +10,7 @@ import {
 } from './geom.js';
 import { startTrace, recordTraces, traceToSpline, offsetPolyline } from './curves.js';
 import { splitElement } from './split.js';
+import { trimAt, extendEnd, linearArray } from './edit.js';
 import { layoutDim, dragDim, dimValue, angSector, angTrue, DIAM } from './dims.js';
 import { textFrame, textHit, textPose, rawAngle, ANCHORS, ANCHOR_NAMES, LINE_SPACING } from './text.js';
 import { exportSVG, exportSVGLaser, exportDXF, extraExtents } from './export.js';
@@ -112,6 +113,7 @@ function updateEnabled() {
   $('mkint').disabled = ln + crv + n.sp !== 2;
   $('mksplit').disabled = !(ln + crv === 1 && !n.sp); // con puntos: divide en ellos; sin puntos: en n partes iguales
   $('mkhatch').disabled = ln + crv + n.sp < 1;
+  $('mkarr').disabled = !sel.some((x) => ['pt', 'ln', 'ci', 'ar', 'sp', 'tx'].includes(x.k));
   const selPts = sel.filter((x) => x.k === 'pt').map((x) => x.id);
   $('trTrace').disabled = !selPts.length;
   $('trClear').disabled = !selPts.some((id) => doc.traces[id]?.pts.length > 1);
@@ -369,7 +371,19 @@ function hitTest(sx, sy) {
   for (const [id, t] of Object.entries(doc.texts)) {
     if (opts.texts && doc.pts[t.pt] && textHit(doc, t, m, measureRel, 2 / view.s)) return { k: 'tx', id };
   }
-  bd = 11;
+  best = hitCurves(sx, sy);
+  if (best) return best;
+  for (const [id, h] of Object.entries(doc.hatches)) {
+    const path = hatchPath(h);
+    if (path && ctx.isPointInPath(path, sx * dpr, sy * dpr, 'evenodd')) return { k: 'ha', id };
+  }
+  return null;
+}
+
+// Solo lineas, circulos, arcos y splines (sin puntos): para recortar, extender y elegir direcciones.
+function hitCurves(sx, sy) {
+  const m = toModel(sx, sy);
+  let best = null, bd = 11;
   for (const [id, l] of Object.entries(doc.lines)) {
     const c = closestOnSeg(m, doc.pts[l.a], doc.pts[l.b]);
     const d = dist(toScreen(c), { x: sx, y: sy });
@@ -389,12 +403,7 @@ function hitTest(sx, sy) {
     const d = distToPolyline(splinePolyline(doc, sp, 12).map(toScreen), sx, sy);
     if (d < bd) { bd = d; best = { k: 'sp', id }; }
   }
-  if (best) return best;
-  for (const [id, h] of Object.entries(doc.hatches)) {
-    const path = hatchPath(h);
-    if (path && ctx.isPointInPath(path, sx * dpr, sy * dpr, 'evenodd')) return { k: 'ha', id };
-  }
-  return null;
+  return best;
 }
 
 function gridStep() {
@@ -745,6 +754,11 @@ function drawConstraints(c, o) {
 function drawPreview(c) {
   c.save();
   c.setLineDash([6 * dpr, 4 * dpr]); c.lineWidth = 1.5 * dpr; c.strokeStyle = theme.accent;
+  if (tool === 'trim' && drag?.trail?.length > 1) { // trazo de recorte
+    c.strokeStyle = theme.warn; c.lineWidth = 2 * dpr; c.setLineDash([3 * dpr, 4 * dpr]);
+    c.beginPath(); drag.trail.forEach((q, i) => (i ? c.lineTo(q.x * dpr, q.y * dpr) : c.moveTo(q.x * dpr, q.y * dpr))); c.stroke();
+    c.strokeStyle = theme.accent; c.lineWidth = 1.5 * dpr; c.setLineDash([6 * dpr, 4 * dpr]);
+  }
   if (hover) {
     let s = snapAt(hover.x, hover.y);
     // bloqueo suave de la linea que se esta dibujando (pendiente o arrastrando)
@@ -937,7 +951,21 @@ function tapSelect(p) {
   if (tool === 'select') selectAt(p);
 }
 
+let pickResolve = null; // si hay una promesa esperando, el siguiente toque elige una linea (direccion de la matriz)
+function pickLine(msg) {
+  setTool('select');
+  toast(msg + ' (Esc cancela)');
+  $('status').textContent = msg;
+  return new Promise((res) => { pickResolve = res; });
+}
+
 function selectAt(p) {
+  if (pickResolve) {
+    const h = hitCurves(p.x, p.y), r = pickResolve;
+    pickResolve = null;
+    r(h && h.k === 'ln' ? h : null);
+    return;
+  }
   const h = hitTest(p.x, p.y);
   if (!h) { sel = []; afterChange(); return; }
   if (h.k === 'co') { sel = [h]; afterChange(); editDimension(h.id); return; }
@@ -967,11 +995,36 @@ function toolDown(p) {
     }
   } else {
     drag = { p0: p, moved: false };
+    if (tool === 'trim') { drag.trail = [p]; drag.last = p; trimStep(p, drag); }
   }
+}
+
+// Recortar: cada vez que el trazo pasa sobre un elemento, se quita el tramo entre los cruces mas cercanos.
+function trimStep(p, d) {
+  const h = hitCurves(p.x, p.y);
+  if (!h) return;
+  if (h.k === 'sp') { toast('Los splines no se recortan'); return; }
+  const bak = snapshot();
+  if (!d.undone) { pushUndo(); d.undone = true; }
+  const fail = (msg) => { doc = JSON.parse(bak); if (!d.trimmed) { undoStack.pop(); d.undone = false; } toast(msg); };
+  const r = trimAt(doc, h.k, h.id, toModel(p.x, p.y));
+  if (!r.ok) { fail(r.msg); return; }
+  if (!solve(doc, []).ok) { fail('No se pudo recortar: conflicto con las restricciones'); return; }
+  d.trimmed = true;
+  sel = [];
+  if (r.dropped?.length) toast('Se perdieron restricciones sobre el tramo recortado: ' + [...new Set(r.dropped)].join(', '));
+  draw();
 }
 
 function toolMove(p) {
   if (!drag) return;
+  if (tool === 'trim') {
+    const a = drag.last, n = Math.max(1, Math.ceil(dist(a, p) / 4));
+    for (let i = 1; i <= n; i++) trimStep({ x: a.x + ((p.x - a.x) * i) / n, y: a.y + ((p.y - a.y) * i) / n }, drag);
+    drag.last = p; drag.trail.push(p); drag.moved = true;
+    draw();
+    return;
+  }
   if (tool !== 'select') { if (dist(p, drag.p0) > 8) drag.moved = true; return; }
   if (drag.dim) {
     if (!drag.started) { if (dist(p, drag.p0) < 5) return; drag.started = true; pushUndo(); }
@@ -1013,6 +1066,8 @@ function toolUp(p, q) {
     selectAt(p);
     return;
   }
+  if (tool === 'trim') { if (d?.trimmed) afterChange(); else draw(); return; }
+  if (tool === 'extend') { extendAt(p); return; }
   const moved = d?.moved;
   const sDown = snapAt(q.down.x, q.down.y), sUp = snapAt(p.x, p.y);
   if (tool === 'point') {
@@ -1108,6 +1163,27 @@ function toolUp(p, q) {
     if (pending.items.length === 2) { const it = pending.items; pending = null; sel = []; makeIntersections(it); }
     else { toast('Toca el segundo elemento'); afterChange(); }
   }
+}
+
+// Extender: toca un segmento o arco cerca del extremo que se alarga; llega hasta el primer elemento que encuentre.
+function extendAt(p) {
+  const h = hitCurves(p.x, p.y);
+  if (!h) { toast('Toca el segmento o arco cerca del extremo que quieres alargar'); return; }
+  if (h.k === 'sp') { toast('Los splines no se extienden'); return; }
+  if (h.k === 'ci') { toast('Un círculo no se extiende'); return; }
+  const near = toModel(p.x, p.y), bak = snapshot();
+  pushUndo();
+  let r = extendEnd(doc, h.k, h.id, near);
+  let ok = r.ok && solve(doc, []).ok;
+  if (r.ok && !ok) { // quizá chocó con una cota de longitud: se reintenta liberándola
+    doc = JSON.parse(bak);
+    r = extendEnd(doc, h.k, h.id, near, { dropLength: true });
+    ok = r.ok && solve(doc, []).ok;
+    if (ok) toast('Se quitaron las restricciones de longitud del segmento para poder extenderlo');
+  }
+  if (!ok) { doc = JSON.parse(bak); undoStack.pop(); updateButtons(); toast(r.ok ? 'No se pudo extender: conflicto con las restricciones' : r.msg); draw(); return; }
+  sel = [{ k: h.k, id: h.id }];
+  afterChange();
 }
 
 function finishSpline(closed) {
@@ -1606,6 +1682,8 @@ const HINTS = {
   spline: 'Spline por puntos: toca los puntos por donde pasa la curva. Tocar de nuevo el último (o Esc) termina; tocar el primero la cierra.',
   arcc: 'Arco por centro y extremos: toca el centro, el inicio y el fin (sentido antihorario).',
   arc3: 'Arco por 3 puntos: toca el inicio, un punto intermedio y el fin.',
+  trim: 'Recortar: mantén presionado y arrastra sobre los tramos que quieres quitar (entre cruces con otros elementos). Un toque recorta un solo tramo.',
+  extend: 'Extender: toca un segmento o arco cerca del extremo que quieres alargar hasta el primer elemento que encuentre.',
 };
 function ltLabel(o) {
   const lt = allLtypes(doc)[o.ltype] || allLtypes(doc).continua;
@@ -1724,6 +1802,80 @@ function setTool(t) {
 document.querySelectorAll('[data-tool]').forEach((b) => { b.onclick = () => setTool(b.dataset.tool); });
 document.querySelectorAll('[data-con]').forEach((b) => { b.onclick = () => applyCon(b.dataset.con); });
 $('mksplit').onclick = splitSelected;
+
+// ---- matriz lineal ----
+// Muestra el dialogo con el estado st; devuelve 'ok', 'cancel', 'pick1' o 'pick2' (elegir la linea de una direccion).
+function showArrayDialog(st, count) {
+  return new Promise((resolve) => {
+    const dlg = $('dlgA');
+    const name = (id) => (id && doc.lines[id] ? `Línea ${id}` : null);
+    $('arrInfo').textContent = `${count} elemento${count === 1 ? '' : 's'} a copiar`;
+    $('arrD1').textContent = name(st.l1) || 'Horizontal (eje X)';
+    $('arrD2').textContent = name(st.l2) || 'Perpendicular a la dirección 1';
+    $('arrS1').value = st.s1; $('arrN1').value = st.n1; $('arrF1').checked = st.f1;
+    $('arrS2').value = st.s2; $('arrN2').value = st.n2; $('arrF2').checked = st.f2;
+    $('arrErr').textContent = '';
+    const read = () => { st.s1 = $('arrS1').value; st.n1 = $('arrN1').value; st.f1 = $('arrF1').checked; st.s2 = $('arrS2').value; st.n2 = $('arrN2').value; st.f2 = $('arrF2').checked; };
+    let done = false;
+    const finish = (v) => { if (done) return; done = true; read(); dlg.close(); resolve(v); };
+    $('arrOk').onclick = (ev) => { ev.preventDefault(); finish('ok'); };
+    $('arrCancel').onclick = () => finish('cancel');
+    $('arrPick1').onclick = () => finish('pick1');
+    $('arrPick2').onclick = () => finish('pick2');
+    dlg.oncancel = () => finish('cancel');
+    dlg.showModal(); $('arrS1').focus();
+  });
+}
+
+// Lee espaciado y copias de una direccion; devuelve null si esta vacia, o {err} si es invalida.
+function readArrayDir(lineId, base, sTxt, nTxt, flip) {
+  if (!String(sTxt).trim()) return null;
+  let s;
+  try { s = parseValue(sTxt); } catch (e) { return { err: 'Espaciado: ' + e.message }; }
+  if (!(Math.abs(s) > 1e-9)) return { err: 'El espaciado debe ser distinto de 0' };
+  let n = 2; // solo el espaciado: 2 copias
+  if (String(nTxt).trim() !== '') { n = Number(String(nTxt).replace(',', '.')); if (!Number.isInteger(n) || n < 1 || n > 200) return { err: 'Las copias deben ser un entero de 1 a 200' }; }
+  let u = base;
+  if (lineId) {
+    const l = doc.lines[lineId], A = doc.pts[l.a], B = doc.pts[l.b], len = dist(A, B);
+    if (len < 1e-9) return { err: 'La línea de dirección no tiene longitud' };
+    u = { x: (B.x - A.x) / len, y: (B.y - A.y) / len };
+  }
+  if (flip) u = { x: -u.x, y: -u.y };
+  return { u, s, n };
+}
+
+async function linearArrayCmd() {
+  const items = sel.filter((x) => ['pt', 'ln', 'ci', 'ar', 'sp', 'tx'].includes(x.k));
+  if (!items.length) { toast('Selecciona lo que quieres copiar'); return; }
+  const st = { l1: null, l2: null, s1: '', n1: '', f1: false, s2: '', n2: '', f2: false };
+  for (;;) {
+    const act = await showArrayDialog(st, items.length);
+    if (act === 'cancel') return;
+    if (act === 'pick1' || act === 'pick2') {
+      const h = await pickLine(act === 'pick1' ? 'Toca la línea que da la dirección 1' : 'Toca la línea que da la dirección 2');
+      if (h) st[act === 'pick1' ? 'l1' : 'l2'] = h.id; else toast('No se eligió ninguna línea');
+      continue;
+    }
+    const d1 = readArrayDir(st.l1, { x: 1, y: 0 }, st.s1, st.n1, st.f1);
+    if (!d1) { toast('Escribe el espaciado de la dirección 1'); continue; }
+    if (d1.err) { toast(d1.err); continue; }
+    const base2 = { x: -d1.u.y, y: d1.u.x };
+    const d2 = readArrayDir(st.l2, base2, st.s2, st.n2, st.f2);
+    if (d2?.err) { toast(d2.err); continue; }
+    if (d2 && Math.abs(d1.u.x * d2.u.y - d1.u.y * d2.u.x) < 1e-6) { toast('Las dos direcciones no pueden ser paralelas'); continue; }
+    pushUndo();
+    const r = linearArray(doc, items, d2 ? [d1, d2] : [d1]);
+    if (!r.ok) { rollback(); toast(r.msg); continue; }
+    if (!solve(doc, []).ok) { rollback(); toast('Conflicto con las restricciones: se deshizo la matriz'); afterChange(); return; }
+    sel = [];
+    const nc = (d1.n + 1) * ((d2 ? d2.n : 0) + 1) - 1;
+    toast(`${nc} copia${nc === 1 ? '' : 's'} creada${nc === 1 ? '' : 's'}`);
+    afterChange();
+    return;
+  }
+}
+$('mkarr').onclick = linearArrayCmd;
 $('mkint').onclick = () => {
   const it = sel.filter((s) => s.k === 'ln' || s.k === 'ci' || s.k === 'ar' || s.k === 'sp');
   if (it.length !== 2) { toast('Selecciona 2 elementos (líneas, arcos, círculos o splines)'); return; }
@@ -1901,9 +2053,9 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') { spaceDown = true; e.preventDefault(); }
   if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
   else if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); }
-  else if (k === 'escape') { if (pending) { if (tool === 'spline' && pending.ids?.length >= 2) finishSpline(false); else cancelPending(); } else { sel = []; afterChange(); } }
+  else if (k === 'escape') { if (pickResolve) { const r = pickResolve; pickResolve = null; r(null); } else if (pending) { if (tool === 'spline' && pending.ids?.length >= 2) finishSpline(false); else cancelPending(); } else { sel = []; afterChange(); } }
   else if (k === 'delete' || k === 'backspace') $('del').click();
-  else if (!e.ctrlKey && !e.metaKey) { const m = { v: 'select', p: 'point', l: 'line', c: 'circle', i: 'intersect', a: 'arc3', r: 'arcc', t: 'text', s: 'spline' }[k]; if (m) setTool(m); }
+  else if (!e.ctrlKey && !e.metaKey) { const m = { v: 'select', p: 'point', l: 'line', c: 'circle', i: 'intersect', a: 'arc3', r: 'arcc', t: 'text', s: 'spline', x: 'trim', e: 'extend' }[k]; if (m) setTool(m); }
 });
 window.addEventListener('keyup', (e) => { if (e.code === 'Space') spaceDown = false; });
 // Area visible real (con teclado en pantalla): los dialogos se acomodan arriba de ella

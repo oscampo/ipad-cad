@@ -8,6 +8,7 @@ import { splitElement } from '../src/split.js';
 import { buildTree, conLabel } from '../src/tree.js';
 import { cleanFileBase } from '../src/files.js';
 import { parseValue, evalExpr, isPlainNumber } from '../src/expr.js';
+import { trimAt, extendEnd, cutsOf, linearArray } from '../src/edit.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from '../src/lock.js';
 import { initSolver, solve } from '../src/solver.js';
 import { lineLine, lineCircle, circleCircle, signedAngle, dashFromPattern, parsePattern, circumcircle, arcSweepOf, TAU, splineSamples, resamplePolyline, polylineLength, splineBezier, closestOnPolyline, polylineLine, polylineCircle, polylinePolyline } from '../src/geom.js';
@@ -1062,6 +1063,112 @@ t('dividir en n partes iguales: lineas, arcos y circulos', () => {
   assert.ok(r2.ok); assert.equal(r2.pieces.length, 6);
   assert.ok(solve(d, []).ok);
   r2.pieces.forEach((id) => near(arcOf(d, d.arcs[id]).sweep, Math.PI / 3, 1e-6));
+});
+
+
+t('recortar: tramo de una linea entre dos cruces', () => {
+  const d = newDoc();
+  const a = addPoint(d, 0, 0), b = addPoint(d, 30, 0);
+  const l = addLine(d, a, b, {});
+  const v1 = addLine(d, addPoint(d, 10, -5), addPoint(d, 10, 5), {});
+  const v2 = addLine(d, addPoint(d, 20, -5), addPoint(d, 20, 5), {});
+  const r = trimAt(d, 'ln', l, { x: 15, y: 0 });
+  assert.ok(r.ok && !r.deleted && r.pieces.length === 2);
+  assert.ok(solve(d, []).ok);
+  const xs = r.pieces.map((id) => [d.pts[d.lines[id].a].x, d.pts[d.lines[id].b].x].sort((m, n) => m - n));
+  near(xs[0][0], 0); near(xs[0][1], 10, 1e-6); near(xs[1][0], 20, 1e-6); near(xs[1][1], 30);
+  assert.ok(Object.values(d.cons).some((k) => k.t === 'PONL' && k.refs[1] === v1));
+  assert.ok(Object.values(d.cons).some((k) => k.t === 'PONL' && k.refs[1] === v2));
+  assert.ok(!(l in d.lines));
+});
+t('recortar: un extremo, sin cruces y circulo', () => {
+  let d = newDoc();
+  const l = addLine(d, addPoint(d, 0, 0), addPoint(d, 30, 0), {});
+  addLine(d, addPoint(d, 10, -5), addPoint(d, 10, 5), {});
+  let r = trimAt(d, 'ln', l, { x: 25, y: 0 }); // a la derecha del unico cruce: queda el tramo izquierdo
+  assert.ok(r.ok && r.pieces.length === 1);
+  const q = d.lines[r.pieces[0]];
+  near(Math.max(d.pts[q.a].x, d.pts[q.b].x), 10, 1e-6);
+  // sin cruces: se borra completo
+  d = newDoc();
+  const l2 = addLine(d, addPoint(d, 0, 0), addPoint(d, 5, 0), {});
+  r = trimAt(d, 'ln', l2, { x: 2, y: 0 });
+  assert.ok(r.ok && r.deleted); assert.equal(Object.keys(d.lines).length, 0);
+  // circulo cortado por una recta: queda un arco
+  d = newDoc();
+  const c = addPoint(d, 0, 0), ci = addCircle(d, c, 10, {});
+  addLine(d, addPoint(d, -20, 0), addPoint(d, 20, 0), {});
+  r = trimAt(d, 'ci', ci, { x: 0, y: -10 }); // quita la mitad inferior
+  assert.ok(r.ok && r.pieces.length === 1);
+  assert.ok(solve(d, []).ok);
+  near(arcOf(d, d.arcs[r.pieces[0]]).sweep, Math.PI, 1e-6);
+});
+t('recortar: arco entre dos lineas', () => {
+  const d = newDoc();
+  const c = addPoint(d, 0, 0), a = addPoint(d, 10, 0), b = addPoint(d, -10, 0);
+  const ar = addArc(d, c, a, b, 10, {});
+  addLine(d, addPoint(d, 7.0710678, -2), addPoint(d, 7.0710678, 20), {});
+  addLine(d, addPoint(d, -7.0710678, -2), addPoint(d, -7.0710678, 20), {});
+  const r = trimAt(d, 'ar', ar, { x: 0, y: 10 }); // la parte alta, entre las dos verticales
+  assert.ok(r.ok && r.pieces.length === 2);
+  assert.ok(solve(d, []).ok);
+  r.pieces.forEach((id) => near(arcOf(d, d.arcs[id]).sweep, Math.PI / 4, 1e-4));
+});
+t('extender: segmento hasta otra linea (punto compartido => punto nuevo)', () => {
+  const d = newDoc();
+  const a = addPoint(d, 0, 0), b = addPoint(d, 10, 0);
+  const l = addLine(d, a, b, {});
+  const other = addLine(d, b, addPoint(d, 10, 8), {}); // b es compartido con otra linea
+  const wall = addLine(d, addPoint(d, 25, -5), addPoint(d, 25, 5), {});
+  const r = extendEnd(d, 'ln', l, { x: 9, y: 0 });
+  assert.ok(r.ok);
+  assert.ok(solve(d, []).ok);
+  assert.notEqual(d.lines[l].b, b, 'se creo un punto nuevo');
+  near(d.pts[d.lines[l].b].x, 25, 1e-6); near(d.pts[d.lines[l].b].y, 0, 1e-6);
+  near(d.pts[b].x, 10); // el punto compartido no se movio
+  assert.ok(Object.values(d.cons).some((k) => k.t === 'PONL' && k.refs[1] === wall));
+  void other;
+});
+t('extender: extremo libre se mueve; arco hasta una linea; sin destino avisa', () => {
+  let d = newDoc();
+  const a = addPoint(d, 0, 0), b = addPoint(d, 10, 0);
+  const l = addLine(d, a, b, {});
+  addLine(d, addPoint(d, 18, -5), addPoint(d, 18, 5), {});
+  assert.ok(extendEnd(d, 'ln', l, { x: 10, y: 0 }).ok);
+  assert.equal(d.lines[l].b, b, 'mismo punto');
+  near(d.pts[b].x, 18, 1e-6);
+  assert.equal(extendEnd(d, 'ln', l, { x: 0, y: 0 }).ok, false, 'hacia la izquierda no hay nada');
+  // arco 0..90 grados que se alarga hasta la recta x = -5
+  d = newDoc();
+  const c = addPoint(d, 0, 0), s = addPoint(d, 10, 0), e = addPoint(d, 0, 10);
+  const ar = addArc(d, c, s, e, 10, {});
+  addLine(d, addPoint(d, -5, -20), addPoint(d, -5, 20), {});
+  const r = extendEnd(d, 'ar', ar, { x: 0, y: 9 });
+  assert.ok(r.ok && r.field === 'b');
+  assert.ok(solve(d, []).ok);
+  near(d.pts[d.arcs[ar].b].x, -5, 1e-4);
+  assert.equal(extendEnd(d, 'ci', 'x', { x: 0, y: 0 }).ok, false);
+});
+t('matriz lineal: una y dos direcciones, con restricciones internas', () => {
+  const d = newDoc();
+  const a = addPoint(d, 0, 0), b = addPoint(d, 4, 0);
+  const l = addLine(d, a, b, {});
+  addCon(d, { t: 'H', refs: [l] });
+  const c = addPoint(d, 0, 2), ci = addCircle(d, c, 1, {});
+  const r = linearArray(d, [{ k: 'ln', id: l }, { k: 'ci', id: ci }], [{ u: { x: 1, y: 0 }, s: 10, n: 2 }]);
+  assert.ok(r.ok); assert.equal(r.made.length, 4);
+  assert.equal(Object.keys(d.lines).length, 3); assert.equal(Object.keys(d.circles).length, 3);
+  assert.equal(Object.values(d.cons).filter((k) => k.t === 'H').length, 3, 'la restriccion se copia');
+  const xs = Object.values(d.lines).map((q) => d.pts[q.a].x).sort((m, n) => m - n);
+  assert.deepEqual(xs, [0, 10, 20]);
+  assert.ok(solve(d, []).ok);
+  // dos direcciones: cuadricula 3 x 2 menos el original = 5 copias
+  const d2 = newDoc();
+  const l2 = addLine(d2, addPoint(d2, 0, 0), addPoint(d2, 1, 0), {});
+  const r2 = linearArray(d2, [{ k: 'ln', id: l2 }], [{ u: { x: 1, y: 0 }, s: 5, n: 2 }, { u: { x: 0, y: 1 }, s: 3, n: 1 }]);
+  assert.ok(r2.ok); assert.equal(r2.made.length, 5); assert.equal(Object.keys(d2.lines).length, 6);
+  assert.equal(linearArray(d2, [{ k: 'ln', id: l2 }], [{ u: { x: 1, y: 0 }, s: 1, n: 500 }]).ok, false);
+  void cutsOf;
 });
 
 console.log(`\n${passed} pruebas pasaron`);
