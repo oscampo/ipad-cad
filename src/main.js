@@ -257,8 +257,56 @@ function applyStroke(c, color, w, ltype, o, ls = 1) {
   c.strokeStyle = colorOf(color, o);
   c.lineWidth = w * dpr;
   c.lineCap = 'butt';
-  const d = dashFromPattern(lt.pattern, 0.6).map((x) => Math.max(x, 0.01) * 3 * opts.ltScale * (ls || 1) * dpr);
+  const k = (Number(opts.ltScale) || 1) * (Number(ls) || 1);
+  const d = dashFromPattern(lt.pattern, 0.6).map((x) => Math.max(x, 0.01) * 3 * k * dpr);
   c.setLineDash(d);
+  return d;
+}
+
+// Segmento con patron dibujado tramo a tramo (px de dispositivo).
+function strokeLine(c, x1, y1, x2, y2, dash) {
+  c.setLineDash([]);
+  const L = Math.hypot(x2 - x1, y2 - y1), period = dash.reduce((t, v) => t + v, 0);
+  c.beginPath();
+  if (!dash.length || !(period > 0) || !(L > 0) || L / period > 20000) {
+    c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke();
+    return;
+  }
+  const ux = (x2 - x1) / L, uy = (y2 - y1) / L;
+  let t = 0, i = 0;
+  while (t < L) {
+    const len = dash[i % dash.length];
+    if (!(len > 0)) break;
+    if (i % 2 === 0) { const t2 = Math.min(L, t + len); c.moveTo(x1 + ux * t, y1 + uy * t); c.lineTo(x1 + ux * t2, y1 + uy * t2); }
+    t += len; i++;
+  }
+  c.stroke();
+}
+
+// Arco (o circulo completo) con patron, dibujado tramo a tramo: no depende del trazo
+// punteado nativo sobre curvas, que en algunos navegadores (Safari) no se ve.
+// Coordenadas en px de dispositivo; a0 y sweep en el sentido del modelo (antihorario).
+function strokeArc(c, cx, cy, r, a0, sweep, dash) {
+  c.setLineDash([]);
+  const L = r * sweep, period = dash.reduce((t, v) => t + v, 0);
+  c.beginPath();
+  if (!dash.length || !(period > 0) || L / period > 20000) {
+    c.arc(cx, cy, r, -a0, -(a0 + sweep), true);
+    c.stroke();
+    return;
+  }
+  let t = 0, i = 0;
+  while (t < L) {
+    const len = dash[i % dash.length];
+    if (!(len > 0)) break;
+    if (i % 2 === 0) {
+      const t1 = a0 + t / r, t2 = a0 + Math.min(L, t + len) / r;
+      c.moveTo(cx + r * Math.cos(-t1), cy + r * Math.sin(-t1));
+      c.arc(cx, cy, r, -t1, -t2, true);
+    }
+    t += len; i++;
+  }
+  c.stroke();
 }
 
 function draw() { render(ctx, cv.width, cv.height, view, { fg: theme.fg, bg: theme.bg, grid: opts.grid, cons: opts.cons, ui: true }); }
@@ -278,22 +326,22 @@ export function render(c, W, H, v, o) {
     const p = doc.pts[ci.c];
     const s = toScreen(p);
     if (o.ui && isSel('ci', id)) { c.setLineDash([]); c.strokeStyle = theme.sel + '88'; c.lineWidth = (ci.w + 6) * dpr; c.beginPath(); c.arc(s.x * dpr, s.y * dpr, ci.r * v.s * dpr, 0, 7); c.stroke(); }
-    applyStroke(c, ci.color, ci.w, ci.ltype, o, ci.ls);
-    c.beginPath(); c.arc(s.x * dpr, s.y * dpr, ci.r * v.s * dpr, 0, Math.PI * 2); c.stroke();
+    const dsh = applyStroke(c, ci.color, ci.w, ci.ltype, o, ci.ls);
+    strokeArc(c, s.x * dpr, s.y * dpr, ci.r * v.s * dpr, 0, Math.PI * 2, dsh);
   }
   for (const [id, ar] of Object.entries(doc.arcs)) {
     const sc = toScreen(doc.pts[ar.c]);
     const { a0, sweep } = arcOf(doc, ar);
     const trace = () => { c.beginPath(); c.arc(sc.x * dpr, sc.y * dpr, ar.r * v.s * dpr, -a0, -(a0 + sweep), true); };
     if (o.ui && isSel('ar', id)) { c.setLineDash([]); c.strokeStyle = theme.sel + '88'; c.lineWidth = (ar.w + 6) * dpr; trace(); c.stroke(); }
-    applyStroke(c, ar.color, ar.w, ar.ltype, o, ar.ls);
-    trace(); c.stroke();
+    const dsh = applyStroke(c, ar.color, ar.w, ar.ltype, o, ar.ls);
+    strokeArc(c, sc.x * dpr, sc.y * dpr, ar.r * v.s * dpr, a0, sweep, dsh);
   }
   for (const [id, l] of Object.entries(doc.lines)) {
     const a = toScreen(doc.pts[l.a]), b = toScreen(doc.pts[l.b]);
     if (o.ui && isSel('ln', id)) { c.setLineDash([]); c.strokeStyle = theme.sel + '88'; c.lineWidth = (l.w + 6) * dpr; c.beginPath(); c.moveTo(a.x * dpr, a.y * dpr); c.lineTo(b.x * dpr, b.y * dpr); c.stroke(); }
-    applyStroke(c, l.color, l.w, l.ltype, o, l.ls);
-    c.beginPath(); c.moveTo(a.x * dpr, a.y * dpr); c.lineTo(b.x * dpr, b.y * dpr); c.stroke();
+    const dsh = applyStroke(c, l.color, l.w, l.ltype, o, l.ls);
+    strokeLine(c, a.x * dpr, a.y * dpr, b.x * dpr, b.y * dpr, dsh);
   }
   c.setLineDash([]);
   drawTexts(c, o);
@@ -1107,15 +1155,20 @@ const HINTS = {
   arcc: 'Arco por centro y extremos: toca el centro, el inicio y el fin (sentido antihorario).',
   arc3: 'Arco por 3 puntos: toca el inicio, un punto intermedio y el fin.',
 };
+function ltLabel(o) {
+  const lt = allLtypes(doc)[o.ltype] || allLtypes(doc).continua;
+  return `línea ${lt.label.toLowerCase()}${o.ls && o.ls !== 1 ? ' ×' + o.ls : ''}`;
+}
+
 function updateStatus(p) {
   let txt = HINTS[tool];
   if (sel.length === 1) {
     const s = sel[0];
     if (s.k === 'pt') { const q = doc.pts[s.id]; txt = `Punto (${fmt(q.x)}, ${fmt(q.y)})${q.fixed ? ' fijo' : ''}`; }
-    else if (s.k === 'ln') { const [a, b] = lineEnds(s.id).map((i) => doc.pts[i]); txt = `Línea: longitud ${fmt(dist(a, b))}, ángulo ${fmt((Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI)}°`; }
-    else if (s.k === 'ci') txt = `Círculo: radio ${fmt(doc.circles[s.id].r)}`;
+    else if (s.k === 'ln') { const [a, b] = lineEnds(s.id).map((i) => doc.pts[i]); txt = `Línea: longitud ${fmt(dist(a, b))}, ángulo ${fmt((Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI)}°, ${ltLabel(doc.lines[s.id])}`; }
+    else if (s.k === 'ci') txt = `Círculo: radio ${fmt(doc.circles[s.id].r)}, ${ltLabel(doc.circles[s.id])}`;
     else if (s.k === 'tx') { const t = doc.texts[s.id]; txt = `Texto: “${t.text.split('\n')[0].slice(0, 24)}”, ${fmt(t.ang)}°, insercion ${t.anchor}`; }
-    else if (s.k === 'ar') { const g = arcOf(doc, doc.arcs[s.id]); txt = `Arco: radio ${fmt(doc.arcs[s.id].r)}, ${fmt((g.sweep * 180) / Math.PI)}°`; }
+    else if (s.k === 'ar') { const g = arcOf(doc, doc.arcs[s.id]); txt = `Arco: radio ${fmt(doc.arcs[s.id].r)}, ${fmt((g.sweep * 180) / Math.PI)}°, ${ltLabel(doc.arcs[s.id])}`; }
     else if (s.k === 'ha') txt = 'Relleno seleccionado';
     else if (s.k === 'co') txt = 'Restricción/cota seleccionada';
   } else if (sel.length > 1) txt = `${sel.length} elementos seleccionados`;
