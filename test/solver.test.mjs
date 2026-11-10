@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { newDoc, addPoint, addLine, addCircle, addArc, addCon, addText, addSpline, deleteItems, hatchLoops, arcOf, cleanup, splinePolyline } from '../src/model.js';
 import { startTrace, recordTraces, traceToSpline, offsetPolyline, firstLap } from '../src/curves.js';
-import { layoutDim, dragDim, dimValue, dimText } from '../src/dims.js';
+import { layoutDim, dragDim, dimValue, dimText, angSector, angTrue } from '../src/dims.js';
 import { textFrame, textCorners, textHit, textPose, rawAngle } from '../src/text.js';
 import { exportSVG, exportSVGLaser, exportDXF, dimLayouts, extraExtents } from '../src/export.js';
 import { splitElement } from '../src/split.js';
@@ -870,6 +870,65 @@ t('nombres de archivo: limpia caracteres invalidos y la extension tecleada', () 
   assert.equal(cleanFileBase('  ..oculto.. ', 'png'), 'oculto');
   assert.equal(cleanFileBase('   ', 'dxf'), '');
   assert.equal(cleanFileBase('dibujo.svg.svg', 'svg'), 'dibujo.svg');
+});
+
+
+// el caso del dibujo: dos segmentos cortos a la izquierda cuyo punto de corte queda lejos, a la derecha
+function angCase() {
+  const d = newDoc();
+  const a1 = addPoint(d, 0, 0), b1 = addPoint(d, 10, 0), a2 = addPoint(d, 0, 4), b2 = addPoint(d, 10, 2);
+  const l1 = addLine(d, a1, b1, {}), l2 = addLine(d, a2, b2, {});
+  return { d, l1, l2, V0: { x: 20, y: 0 } };
+}
+t('cota angular: siempre positiva, sin importar el orden de seleccion', () => {
+  const { d, l1, l2 } = angCase();
+  const A = Math.atan2(2 - 4, 10) ; // l2 respecto a l1: negativa
+  for (const refs of [[l1, l2], [l2, l1]]) {
+    const k = { t: 'ANG', refs, ref: true };
+    const v = dimValue(d, k);
+    assert.ok(v > 0 && v < 180, 'positiva: ' + v);
+    near(v, (Math.abs(A) * 180) / Math.PI, 1e-6, 'sector que une los segmentos');
+    assert.match(dimText(d, k), /^11\.31/);
+  }
+  void A;
+});
+t('cota angular: el sector donde se coloca decide 11.3 o 168.7 sin cambiar la geometria', () => {
+  const { d, l1, l2, V0 } = angCase();
+  const k = { t: 'ANG', refs: [l1, l2], v: (Math.atan2(2 - 4, 10) * 180) / Math.PI };
+  const VIEW = { s: 10, ox: 0, oy: 0 };
+  const C = { x: V0.x * 10, y: -V0.y * 10 };
+  const base = angSector(d, k).val;
+  near(base, 11.3099, 1e-3);
+  // el arco por defecto y sus extensiones: las rectas terminan antes del vertice, debe haber lineas de extension
+  const L0 = layoutDim(d, k, VIEW);
+  assert.equal(L0.arcs.length, 1);
+  assert.ok(L0.lines.length >= 2, 'lineas de extension hasta el arco');
+  // colocar la cota del otro lado del vertice (hacia la derecha): sector suplementario
+  assert.ok(dragDim(d, k, VIEW, { x: C.x + 150, y: C.y }));
+  near(dimValue(d, k), 180 - base, 1e-3, 'suplementario');
+  // y arriba (entre una recta y la prolongacion de la otra) el otro sector agudo/obtuso
+  dragDim(d, k, VIEW, { x: C.x - 150, y: C.y - 20 });
+  near(dimValue(d, k), base, 1e-3, 'de vuelta al sector de los segmentos');
+  assert.ok(dimValue(d, k) > 0);
+});
+t('cota angular: editar el valor del sector elegido y resolver', () => {
+  const d = newDoc();
+  const o = addPoint(d, 0, 0), a = addPoint(d, 10, 0), b = addPoint(d, 8, 6);
+  d.pts[o].fixed = d.pts[a].fixed = true;
+  const l1 = addLine(d, o, a, {}), l2 = addLine(d, o, b, {});
+  const k = { t: 'ANG', refs: [l1, l2], v: 36.87 };
+  const S = angSector(d, k);
+  near(S.val, 36.87, 1e-6);
+  // el usuario ve el sector suplementario (143.13) y pide 150: la geometria debe quedar con 30 grados entre las rectas
+  k.s1 = 1; k.s2 = -1;
+  near(dimValue(d, k), 143.13, 1e-2);
+  k.v = angTrue(d, k, 150);
+  const id = addCon(d, k);
+  d.cons[id] = k;
+  assert.ok(solve(d, []).ok);
+  const ang = Math.abs((Math.atan2(d.pts[b].y, d.pts[b].x) * 180) / Math.PI);
+  near(ang, 30, 1e-3, 'rectas a 30 grados');
+  near(dimValue(d, k), 150, 1e-3, 'se sigue mostrando el sector suplementario');
 });
 
 console.log(`\n${passed} pruebas pasaron`);

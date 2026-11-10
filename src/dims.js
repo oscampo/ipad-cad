@@ -22,15 +22,42 @@ function distEnds(doc, k) {
   return [p, footOnLine(p, doc.pts[l.a], doc.pts[l.b])];
 }
 
+// ---- cota angular ----
+// Dos rectas forman 4 sectores (a, 180-a, a, 180-a). k.v es el angulo "verdadero" que ve el solver (con
+// signo, de la direccion de la 1.a recta a la de la 2.a); k.s1 y k.s2 (+1/-1) eligen con que semirrecta de
+// cada recta se acota, es decir en que sector se coloca la cota. El valor que se muestra es siempre
+// positivo (0 a 180): el del sector elegido. Mover la cota a otro sector cambia el valor mostrado
+// (20 o 160) sin tocar la geometria.
+const normA = (a) => { while (a > Math.PI) a -= TAU; while (a <= -Math.PI) a += TAU; return a; };
+export function angSector(doc, k) {
+  const l1 = doc.lines[k.refs[0]], l2 = doc.lines[k.refs[1]];
+  const a1 = doc.pts[l1.a], b1 = doc.pts[l1.b], a2 = doc.pts[l2.a], b2 = doc.pts[l2.b];
+  const d1 = { x: b1.x - a1.x, y: b1.y - a1.y }, d2 = { x: b2.x - a2.x, y: b2.y - a2.y };
+  const V0 = lineLine(a1, b1, a2, b2);
+  const A = k.ref ? signedAngle(d1, d2) : ((k.v || 0) * Math.PI) / 180;
+  let s1 = k.s1 === -1 ? -1 : 1, s2 = k.s2 === -1 ? -1 : 1;
+  if (!k.s1 && !k.s2 && V0) {
+    // por defecto las semirrectas que apuntan hacia donde estan los segmentos: asi las lineas de extension
+    // unen los segmentos con el arco
+    const m1 = { x: (a1.x + b1.x) / 2 - V0.x, y: (a1.y + b1.y) / 2 - V0.y }, m2 = { x: (a2.x + b2.x) / 2 - V0.x, y: (a2.y + b2.y) / 2 - V0.y };
+    s1 = m1.x * d1.x + m1.y * d1.y >= 0 ? 1 : -1;
+    s2 = m2.x * d2.x + m2.y * d2.y >= 0 ? 1 : -1;
+  }
+  const phi = normA(A + Math.PI * ((s2 < 0 ? 1 : 0) - (s1 < 0 ? 1 : 0)));
+  return { V0, d1, d2, s1, s2, phi, val: (Math.abs(phi) * 180) / Math.PI, A };
+}
+// Valor verdadero (grados, para k.v) que corresponde a un valor positivo del sector que se muestra.
+export function angTrue(doc, k, valDeg) {
+  const S = angSector(doc, k);
+  const sg = S.phi < 0 ? -1 : 1;
+  return (normA(sg * (valDeg * Math.PI) / 180 - Math.PI * ((S.s2 < 0 ? 1 : 0) - (S.s1 < 0 ? 1 : 0))) * 180) / Math.PI;
+}
+
 // Valor que muestra una cota. Las de referencia (k.ref) no restringen nada: miden en vivo.
 export function dimValue(doc, k) {
+  if (k.t === 'ANG') return angSector(doc, k).val;
   if (!k.ref) return k.v;
   if (k.t === 'DIST' || k.t === 'DISTPL') { const [p1, p2] = distEnds(doc, k); return Math.hypot(p2.x - p1.x, p2.y - p1.y); }
-  if (k.t === 'ANG') {
-    const l1 = doc.lines[k.refs[0]], l2 = doc.lines[k.refs[1]];
-    const d = (l) => ({ x: doc.pts[l.b].x - doc.pts[l.a].x, y: doc.pts[l.b].y - doc.pts[l.a].y });
-    return (signedAngle(d(l1), d(l2)) * 180) / Math.PI;
-  }
   if (k.t === 'RAD') { const o = doc.circles[k.refs[0]] || doc.arcs[k.refs[0]]; return o ? o.r : k.v; }
   return k.v;
 }
@@ -75,14 +102,13 @@ function layoutDimBase(doc, k, view) {
   if (k.t === 'ANG') {
     const l1 = doc.lines[k.refs[0]], l2 = doc.lines[k.refs[1]];
     const a1 = doc.pts[l1.a], b1 = doc.pts[l1.b], a2 = doc.pts[l2.a], b2 = doc.pts[l2.b];
-    const V0 = lineLine(a1, b1, a2, b2);
+    const S = angSector(doc, k), V0 = S.V0;
     if (!V0) {
       const m = v({ x: (a1.x + b1.x + a2.x + b2.x) / 4, y: (a1.y + b1.y + a2.y + b2.y) / 4 });
       out.label = { x: m.x + 14, y: m.y - 14, text };
       return out;
     }
-    const d1 = { x: b1.x - a1.x, y: b1.y - a1.y }, d2 = { x: b2.x - a2.x, y: b2.y - a2.y };
-    const th1 = Math.atan2(d1.y, d1.x), psi = signedAngle(d1, d2), sgn = psi >= 0 ? 1 : -1;
+    const th1 = Math.atan2(S.d1.y * S.s1, S.d1.x * S.s1), psi = S.phi, sgn = psi >= 0 ? 1 : -1;
     const R = Math.max(14, (k.off ?? 50 / s) * s);
     const C = v(V0);
     out.arcs.push({ cx: C.x, cy: C.y, r: R, a0: -th1, a1: -(th1 + psi), ccw: psi > 0 });
@@ -92,11 +118,14 @@ function layoutDimBase(doc, k, view) {
     const e1 = at(th1), e2 = at(th1 + psi), t1 = tan(th1), t2 = tan(th1 + psi);
     out.arrows.push({ x: e1.x, y: e1.y, dx: -sgn * t1.x, dy: -sgn * t1.y }, { x: e2.x, y: e2.y, dx: sgn * t2.x, dy: sgn * t2.y });
     // lineas de extension: prolongan cada recta hasta pasar el arco si no llega
-    [[th1, a1, b1], [th1 + psi, a2, b2]].forEach(([th, pa, pb]) => {
+    [[th1, a1, b1], [th1 + psi, a2, b2]].forEach(([th, pa_, pb_]) => {
       const ux = Math.cos(th), uy = Math.sin(th);
-      const far = Math.max((pa.x - V0.x) * ux + (pa.y - V0.y) * uy, (pb.x - V0.x) * ux + (pb.y - V0.y) * uy) * s;
-      const from = Math.max(far, 0) + 3, to = R + 6;
-      if (from < to) out.lines.push([C.x + ux * from, C.y - uy * from, C.x + ux * to, C.y - uy * to]);
+      const pa = ((pa_.x - V0.x) * ux + (pa_.y - V0.y) * uy) * s, pb = ((pb_.x - V0.x) * ux + (pb_.y - V0.y) * uy) * s;
+      const near = Math.min(pa, pb), far = Math.max(pa, pb);
+      // el arco queda mas alla del extremo del segmento: se prolonga la recta hasta pasarlo; si queda entre el
+      // vertice y el segmento, se prolonga el segmento hacia el vertice
+      if (far < R) { const from = Math.max(far, 0) + 3, to = R + 6; if (from < to) out.lines.push([C.x + ux * from, C.y - uy * from, C.x + ux * to, C.y - uy * to]); }
+      else if (near > R) { const from = near - 3, to = Math.max(R - 6, 0); if (from > to) out.lines.push([C.x + ux * from, C.y - uy * from, C.x + ux * to, C.y - uy * to]); }
     });
     const thm = th1 + psi / 2;
     out.label = { x: C.x + (R + 13) * Math.cos(thm), y: C.y - (R + 13) * Math.sin(thm), text };
@@ -164,6 +193,15 @@ export function dragDim(doc, k, view, p) {
     if (!V0) return false;
     const C = v(V0);
     k.off = Math.max(14, Math.hypot(p.x - C.x, p.y - C.y) - 13) / s;
+    // el sector donde cae la cota decide que angulo se acota (20 o 160, por ejemplo)
+    const S = angSector(doc, k);
+    const beta = Math.atan2(-(p.y - C.y), p.x - C.x), g1 = Math.atan2(S.d1.y, S.d1.x), g2 = Math.atan2(S.d2.y, S.d2.x);
+    for (const s1 of [1, -1]) for (const s2 of [1, -1]) {
+      const R1 = g1 + (s1 < 0 ? Math.PI : 0), R2 = g2 + (s2 < 0 ? Math.PI : 0);
+      const phi = normA(R2 - R1), tb = normA(beta - R1);
+      if (Math.abs(phi) < 1e-9 || Math.abs(phi) > Math.PI - 1e-9) continue;
+      if (phi > 0 ? tb >= 0 && tb <= phi : tb <= 0 && tb >= phi) { k.s1 = s1; k.s2 = s2; }
+    }
     return true;
   }
   if (k.t === 'RAD') {

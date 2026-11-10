@@ -1,6 +1,7 @@
 // Arbol de elementos del documento (sin DOM): cada elemento con sus puntos y sus relaciones.
 import { dist } from './geom.js';
 import { conRefs } from './model.js';
+import { dimValue } from './dims.js';
 
 const f = (v, d = 2) => String(Math.round(v * 10 ** d) / 10 ** d);
 
@@ -14,7 +15,7 @@ const CON_NAMES = {
 export function conLabel(doc, k) {
   let s = CON_NAMES[k.t] || k.t;
   if (k.t === 'DIST' || k.t === 'DISTPL') s += ` = ${f(k.v)}`;
-  else if (k.t === 'ANG') s += ` = ${f(k.v)}°`;
+  else if (k.t === 'ANG') s += ` = ${f(dimValue(doc, k))}°`;
   else if (k.t === 'RAD') s += (k.refs[0] in doc.circles ? ` φ = ${f(k.v * 2)}` : ` R = ${f(k.v)}`);
   if (k.ref) s += ' (referencia)';
   if (k.hidden) s += ' (auto)';

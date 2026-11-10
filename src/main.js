@@ -10,7 +10,7 @@ import {
 } from './geom.js';
 import { startTrace, recordTraces, traceToSpline, offsetPolyline } from './curves.js';
 import { splitElement } from './split.js';
-import { layoutDim, dragDim, dimValue } from './dims.js';
+import { layoutDim, dragDim, dimValue, angSector, angTrue } from './dims.js';
 import { textFrame, textHit, textPose, rawAngle, ANCHORS, ANCHOR_NAMES, LINE_SPACING } from './text.js';
 import { exportSVG, exportSVGLaser, exportDXF, extraExtents } from './export.js';
 import { iconSvg } from './icons.js';
@@ -1273,9 +1273,14 @@ async function applyCon(kind) {
       if (lns.length !== 2) return bad('Selecciona 2 líneas');
       const dir = (l) => { const [a, b] = lineEnds(l).map((i) => doc.pts[i]); return { x: b.x - a.x, y: b.y - a.y }; };
       const v = (signedAngle(dir(lns[0]), dir(lns[1])) * 180) / Math.PI;
-      const val = await askNumber('Ángulo (°) de la 1.ª a la 2.ª línea seleccionada', Math.round(v * 100) / 100);
+      // sector que se acota: el que une los dos segmentos; luego se puede mover la cota a otro (20° o 160°)
+      const tmp = { t: 'ANG', refs: [lns[0], lns[1]], v };
+      const S = angSector(doc, tmp);
+      tmp.s1 = S.V0 ? S.s1 : 1; tmp.s2 = S.V0 ? S.s2 : 1;
+      const val = await askNumber('Ángulo (°) entre las dos líneas, de 0 a 180', Math.round(angSector(doc, tmp).val * 100) / 100);
       if (val === null) return;
-      list.push({ t: 'ANG', refs: [lns[0], lns[1]], v: val, ...(dlgRef ? { ref: true } : {}) });
+      if (val < 0 || val > 180) return bad('El ángulo debe estar entre 0° y 180°');
+      list.push({ t: 'ANG', refs: [lns[0], lns[1]], v: angTrue(doc, tmp, val), s1: tmp.s1, s2: tmp.s2, ...(dlgRef ? { ref: true } : {}) });
       break;
     }
     case 'RAD': {
@@ -1350,7 +1355,8 @@ async function editDimension(id) {
   if (val0 === null || (!dlgRef && k.t !== 'ANG' && val0 <= 0)) return;
   pushUndo();
   if (dlgRef) { k.ref = true; afterChange(); return; } // es (o pasa a ser) cota de referencia: no toca el solver
-  const val = isC ? val0 / 2 : val0;
+  if (k.t === 'ANG' && (val0 < 0 || val0 > 180)) { rollback(); toast('El ángulo debe estar entre 0° y 180°'); afterChange(); return; }
+  const val = isC ? val0 / 2 : k.t === 'ANG' ? angTrue(doc, { ...k, ref: false, v: k.ref ? (angSector(doc, k).A * 180) / Math.PI : k.v }, val0) : val0;
   k.v = val; delete k.ref;
   const r = solve(doc, []);
   if (!r.ok) { rollback(); toast('Valor imposible con las restricciones actuales. Usa «Solo lectura» para solo medirla'); }
