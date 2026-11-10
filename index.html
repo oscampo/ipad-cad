@@ -66,10 +66,12 @@ body.nolabels .grid2 button { justify-content: center; padding: 4px; }
 #status { padding: 5px 10px; border-top: 1px solid var(--line); background: var(--panel); color: var(--muted); font-variant-numeric: tabular-nums; min-height: 28px; }
 #toast { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 8px 14px; border-radius: 10px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90%; z-index: 5; }
 #toast.show { opacity: .95; }
-dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--fg); padding: 16px; min-width: 260px; }
+dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--fg); padding: 16px; min-width: 260px; max-width: calc(100vw - 16px);
+  /* arriba del todo y con la altura del area visible: el teclado (acoplado o flotante) no tapa el campo ni los botones */
+  top: var(--vvt, 0px); margin: 8px auto auto; max-height: calc(var(--vvh, 100dvh) - 16px); overflow-y: auto; }
 dialog::backdrop { background: rgba(0,0,0,.4); }
 dialog input { width: 100%; min-height: 44px; font-size: 18px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--btn); }
-dialog .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+dialog .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; position: sticky; bottom: -16px; padding: 8px 0 2px; background: var(--panel); }
 .txa { display: grid; grid-template-columns: repeat(3, 44px); gap: 6px; margin: 4px 0 8px; }
 .txa button { padding: 4px; min-width: 44px; }
 canvas.preview { width: 100%; height: 24px; display: block; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
@@ -198,6 +200,7 @@ body.nopanel #panel { display: none; }
     <div class="grid2">
       <button id="tGrid" data-icon="grid" aria-pressed="true"><i></i><span>Cuadrícula</span></button>
       <button id="tSnap" data-icon="magnet" aria-pressed="false"><i></i><span>Imán</span></button>
+      <button id="tLock" data-icon="line" aria-pressed="true" title="Al dibujar líneas, se ajustan a horizontal, vertical, 45°, paralela, perpendicular o tangente"><i></i><span>Bloqueo suave</span></button>
       <button id="tCons" data-icon="eye" aria-pressed="true"><i></i><span>Restricciones</span></button>
       <button id="tPts" data-icon="point" aria-pressed="true"><i></i><span>Puntos</span></button>
       <button id="tDims" data-icon="dim-dist" aria-pressed="true"><i></i><span>Cotas</span></button>
@@ -232,13 +235,13 @@ body.nopanel #panel { display: none; }
   <small>Se exportan líneas, círculos, arcos y splines (como curvas Bézier). No salen cotas, textos, puntos ni rellenos.</small>
   <div class="actions"><button type="button" id="lsCancel">Cancelar</button><button id="lsOk" class="on">Descargar</button></div>
 </form></dialog>
-<dialog id="dlgT"><form method="dialog"><label id="dlgTLabel" for="dlgTInput"></label><textarea id="dlgTInput" rows="3" style="width:100%;font-size:18px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--btn);color:var(--fg);font-family:inherit"></textarea><div class="actions"><button value="cancel" type="button" id="dlgTCancel">Cancelar</button><button value="ok" id="dlgTOk" class="on">Aceptar</button></div></form></dialog>
+<dialog id="dlgT"><form method="dialog"><label id="dlgTLabel" for="dlgTInput"></label><textarea id="dlgTInput" rows="2" style="width:100%;font-size:18px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--btn);color:var(--fg);font-family:inherit"></textarea><div class="actions"><button value="cancel" type="button" id="dlgTCancel">Cancelar</button><button value="ok" id="dlgTOk" class="on">Aceptar</button></div></form></dialog>
 <dialog id="dlgN"><form method="dialog">
   <label id="nameLabel" for="nameInput">Nombre del archivo</label>
   <div style="display:flex;gap:6px;align-items:center"><input id="nameInput" type="text" autocomplete="off" autocapitalize="off" spellcheck="false"><b id="nameExt" style="color:var(--muted)"></b></div>
   <div class="actions"><button type="button" id="nameCancel">Cancelar</button><button id="nameOk" class="on">Guardar</button></div>
 </form></dialog>
-<dialog id="dlg"><form method="dialog"><label id="dlgLabel" for="dlgInput"></label><input id="dlgInput" type="text" inputmode="text" enterkeyhint="done" autocomplete="off" autocapitalize="off" spellcheck="false"><div id="dlgUnitRow" style="display:none;margin-top:6px;align-items:center;gap:8px"><label for="dlgUnit" style="color:var(--muted)">Unidad</label><select id="dlgUnit" style="min-height:36px;padding:2px 8px;border:1px solid var(--line);border-radius:8px;background:var(--btn)"><option value="deg">Grados (°)</option><option value="rad">Radianes (rad)</option></select></div><div id="dlgPrev" style="min-height:20px;margin-top:4px;font-size:13px;color:var(--muted)"></div><div id="dlgKeys" style="display:flex;flex-wrap:wrap;gap:4px"></div><small id="dlgHelp">Admite fórmulas: 3π/4, 10*sin(30), 10+1/3, √2, 2^3. Con la unidad en grados, sin/cos/tan usan grados (radianes si el argumento lleva π); con radianes, todo va en radianes.</small><label id="dlgRefRow" style="display:flex;gap:8px;align-items:flex-start;margin-top:10px;font-size:13px"><input type="checkbox" id="dlgRef" style="width:22px;height:22px;min-height:22px;flex:none;margin:0"><span>Solo lectura (referencia): mide y muestra el valor en cursiva, sin restringir la geometría</span></label><div class="actions"><button value="cancel" type="button" id="dlgCancel">Cancelar</button><button value="ok" id="dlgOk" class="on">Aceptar</button></div></form></dialog>
+<dialog id="dlg"><form method="dialog"><label id="dlgLabel" for="dlgInput"></label><input id="dlgInput" type="text" inputmode="text" enterkeyhint="done" autocomplete="off" autocapitalize="off" spellcheck="false"><div id="dlgUnitRow" style="display:none;margin-top:6px;align-items:center;gap:8px"><label for="dlgUnit" style="color:var(--muted)">Unidad</label><select id="dlgUnit" style="min-height:36px;padding:2px 8px;border:1px solid var(--line);border-radius:8px;background:var(--btn)"><option value="deg">Grados (°)</option><option value="rad">Radianes (rad)</option></select></div><div id="dlgPrev" style="min-height:20px;margin-top:4px;font-size:13px;color:var(--muted)"></div><div id="dlgKeys" style="display:flex;flex-wrap:wrap;gap:4px"></div><details id="dlgHelp" style="margin-top:4px"><summary style="cursor:pointer;color:var(--muted);font-size:12px;min-height:28px">Ayuda de fórmulas</summary><small>Admite fórmulas: 3π/4, 10*sin(30), 10+1/3, √2, 2^3. Con la unidad en grados, sin/cos/tan usan grados (radianes si el argumento lleva π); con radianes, todo va en radianes.</small></details><label id="dlgRefRow" style="display:flex;gap:8px;align-items:flex-start;margin-top:10px;font-size:13px"><input type="checkbox" id="dlgRef" style="width:22px;height:22px;min-height:22px;flex:none;margin:0"><span>Solo lectura (referencia): mide y muestra el valor en cursiva, sin restringir la geometría</span></label><div class="actions"><button value="cancel" type="button" id="dlgCancel">Cancelar</button><button value="ok" id="dlgOk" class="on">Aceptar</button></div></form></dialog>
 <script type="module" src="/src/main.js"></script>
 </body>
 </html>

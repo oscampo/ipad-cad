@@ -17,6 +17,7 @@ import { iconSvg } from './icons.js';
 import { buildTree, kindOf } from './tree.js';
 import { cleanFileBase } from './files.js';
 import { parseValue, isPlainNumber } from './expr.js';
+import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from './lock.js';
 
 const VERSION = '0.1.0';
 const STORE = 'ipad-cad-v1';
@@ -30,7 +31,7 @@ let view = { ox: 200, oy: 300, s: 3 }; // px por unidad; y del modelo hacia arri
 let tool = 'select';
 let sel = []; // [{k:'pt'|'ln'|'ci'|'ha', id}]
 let cur = { color: 'auto', ltype: 'continua', w: 2, ls: 1, tx: { h: null, ang: 0, anchor: 'bl', readable: true } };
-const opts = { grid: true, snap: false, cons: true, pts: true, dims: true, texts: true, touch: false, ltScale: 1, labels: true, sections: {} };
+const opts = { grid: true, snap: false, cons: true, pts: true, dims: true, texts: true, touch: false, ltScale: 1, labels: true, lock: true, sections: {} };
 let undoStack = [], redoStack = [];
 let pending = null; // estado de la herramienta en curso
 let hover = null; // posicion del puntero en pantalla
@@ -109,7 +110,7 @@ function updateEnabled() {
   };
   document.querySelectorAll('[data-con]').forEach((b) => { b.disabled = !rules[b.dataset.con]; });
   $('mkint').disabled = ln + crv + n.sp !== 2;
-  $('mksplit').disabled = !(ln + crv === 1 && pt >= 1);
+  $('mksplit').disabled = !(ln + crv === 1 && !n.sp); // con puntos: divide en ellos; sin puntos: en n partes iguales
   $('mkhatch').disabled = ln + crv + n.sp < 1;
   const selPts = sel.filter((x) => x.k === 'pt').map((x) => x.id);
   $('trTrace').disabled = !selPts.length;
@@ -745,17 +746,27 @@ function drawPreview(c) {
   c.save();
   c.setLineDash([6 * dpr, 4 * dpr]); c.lineWidth = 1.5 * dpr; c.strokeStyle = theme.accent;
   if (hover) {
-    const s = snapAt(hover.x, hover.y);
+    let s = snapAt(hover.x, hover.y);
+    // bloqueo suave de la linea que se esta dibujando (pendiente o arrastrando)
+    const lref = tool === 'line' ? lineStartRef() : null;
+    const lk = lref ? lockFor(lref, hover) : null;
+    if (lk) s = { type: lk.end ? lk.end.type : 'free', x: lk.x, y: lk.y };
     const sp = toScreen(s);
     if (tool !== 'select') {
       c.setLineDash([]); c.beginPath(); c.arc(sp.x * dpr, sp.y * dpr, 7 * dpr, 0, 7);
       c.strokeStyle = s.type === 'free' ? theme.muted : theme.accent; c.stroke();
     }
-    if (tool === 'line' && pending?.start) {
-      const a = toScreen(doc.pts[pending.start]);
+    if (lref) {
+      const S0 = lref.id ? doc.pts[lref.id] : lref.snap;
+      const a = toScreen(S0);
+      if (lk) { // guia de la direccion bloqueada
+        c.save(); c.setLineDash([2 * dpr, 5 * dpr]); c.globalAlpha = 0.7; c.strokeStyle = theme.accent;
+        c.beginPath(); c.moveTo((a.x - lk.u.x * 4000) * dpr, (a.y + lk.u.y * 4000) * dpr); c.lineTo((a.x + lk.u.x * 4000) * dpr, (a.y - lk.u.y * 4000) * dpr); c.stroke(); c.restore();
+      }
       c.setLineDash([6 * dpr, 4 * dpr]); c.strokeStyle = theme.accent;
       c.beginPath(); c.moveTo(a.x * dpr, a.y * dpr); c.lineTo(sp.x * dpr, sp.y * dpr); c.stroke();
-      label(c, fmt(dist(doc.pts[pending.start], s)), (a.x + sp.x) / 2, (a.y + sp.y) / 2 - 14, null, theme.accent);
+      label(c, fmt(dist(S0, s)), (a.x + sp.x) / 2, (a.y + sp.y) / 2 - 14, null, theme.accent);
+      if (lk) label(c, lk.label, sp.x + 16, sp.y - 16, null, theme.accent);
     }
     if (tool === 'arcc' && pending?.center) {
       const cc = toScreen(doc.pts[pending.center]);
@@ -815,6 +826,27 @@ function drawPreview(c) {
 // ---------------------------------------------------------------- entrada
 function pos(e) { const r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
 const style = () => ({ color: cur.color, ltype: cur.ltype, w: cur.w, ls: cur.ls });
+
+// ---- bloqueo suave de lineas ----
+// Inicio de la linea en curso: un punto ya creado (clic-clic) o lo que se toco al empezar a arrastrar.
+function lineStartRef() {
+  if (pending?.start && doc.pts[pending.start]) return { id: pending.start };
+  if (!pending && drag?.moved && !drag.hit) return { snap: snapAt(drag.p0.x, drag.p0.y) };
+  return null;
+}
+function lockFor(ref, scr) {
+  if (opts.lock === false || !ref) return null;
+  const S = ref.id ? doc.pts[ref.id] : ref.snap;
+  const origins = ref.id ? originsOfPoint(doc, ref.id) : originsOfSnap(doc, ref.snap);
+  return lineLock(doc, S, origins, snapAt(scr.x, scr.y), toModel(scr.x, scr.y), view.s, opts.touch ? 12 : 9);
+}
+const lockEnd = (lk) => (lk.end ? { type: lk.end.type, id: lk.end.id, x: lk.x, y: lk.y } : { type: 'free', x: lk.x, y: lk.y });
+// Agrega las restricciones del bloqueo; si chocan con las existentes se quitan y la linea queda como esta.
+function applyLock(lineId, lk) {
+  const ids = lockConstraints(lk, lineId).map((k) => addCon(doc, k));
+  if (!ids.length) return;
+  if (!solve(doc, []).ok) ids.forEach((i) => { delete doc.cons[i]; });
+}
 
 function pointFrom(s) {
   if (s.type === 'pt') return s.id;
@@ -989,15 +1021,22 @@ function toolUp(p, q) {
   }
   if (tool === 'line') {
     if (moved && !pending) {
-      pushUndo(); const a = pointFrom(sDown), b = pointFrom(sUp);
+      pushUndo();
+      const lk = lockFor({ snap: sDown }, p);
+      const a = pointFrom(sDown), b = pointFrom(lk ? lockEnd(lk) : sUp);
       if (a === b) { rollback(); return; }
-      addLine(doc, a, b, style()); finishEdit();
+      const lid = addLine(doc, a, b, style());
+      if (lk) applyLock(lid, lk);
+      finishEdit();
       return;
     }
     if (!pending) { pushUndo(); pending = { start: pointFrom(sUp) }; draw(); return; }
     if (sUp.type === 'pt' && sUp.id === pending.start) { cancelPending(); return; }
-    pushUndo(); const b = pointFrom(sUp);
-    addLine(doc, pending.start, b, style());
+    pushUndo();
+    const lk = lockFor({ id: pending.start }, p);
+    const b = pointFrom(lk ? lockEnd(lk) : sUp);
+    const lid = addLine(doc, pending.start, b, style());
+    if (lk) applyLock(lid, lk);
     pending = { start: b };
     finishEdit(true);
     return;
@@ -1173,6 +1212,8 @@ function askNumber(labelText, initial, refState = false, kind = 'len', unit0 = '
     inp.value = String(initial);
     chk.checked = refState; inp.disabled = refState;
     const unitSel = $('dlgUnit');
+    $('dlgRefRow').style.display = kind === 'int' ? 'none' : 'flex';
+    $('dlgHelp').style.display = kind === 'int' ? 'none' : 'block';
     $('dlgUnitRow').style.display = kind === 'angle' ? 'flex' : 'none';
     unitSel.value = unit0;
     unitSel.onchange = () => { // un numero simple se convierte al cambiar de unidad
@@ -1181,7 +1222,7 @@ function askNumber(labelText, initial, refState = false, kind = 'len', unit0 = '
     };
     const keys = $('dlgKeys');
     keys.textContent = '';
-    for (const [lab, ins] of KEYS) {
+    for (const [lab, ins] of (kind === 'int' ? [] : KEYS)) {
       const b = document.createElement('button');
       b.type = 'button'; b.textContent = lab; b.style.cssText = 'min-height:36px;min-width:40px;padding:2px 8px';
       b.onpointerdown = (e) => e.preventDefault(); // no quita el foco del campo (ni cierra el teclado)
@@ -1362,10 +1403,39 @@ function seedTangent(lnId, spId, tp, poly) {
 }
 
 const SPLIT_LOST = { EQL: 'igual longitud', ANG: 'ángulo', COL: 'colineal', DISTPL: 'distancia a recta' };
+// Divide el elemento seleccionado en n partes iguales: crea los n-1 puntos de division (n en un circulo) y
+// parte en ellos. En lineas las partes quedan con restriccion de igual longitud (oculta).
+async function splitEqual(el) {
+  const n = Math.round(await askNumber('Número de partes iguales', 2, false, 'int'));
+  if (!(n >= 2) || n > 500) { if (n) toast('Escribe un entero entre 2 y 500'); return; }
+  const P = [];
+  if (el.k === 'ln') {
+    const l = doc.lines[el.id], A = doc.pts[l.a], B = doc.pts[l.b];
+    for (let i = 1; i < n; i++) P.push({ x: A.x + ((B.x - A.x) * i) / n, y: A.y + ((B.y - A.y) * i) / n });
+  } else if (el.k === 'ar') {
+    const ar = doc.arcs[el.id], c = doc.pts[ar.c], g = arcOf(doc, ar);
+    for (let i = 1; i < n; i++) { const a = g.a0 + (g.sweep * i) / n; P.push({ x: c.x + ar.r * Math.cos(a), y: c.y + ar.r * Math.sin(a) }); }
+  } else {
+    const ci = doc.circles[el.id], c = doc.pts[ci.c];
+    for (let i = 0; i < n; i++) { const a = (TAU * i) / n; P.push({ x: c.x + ci.r * Math.cos(a), y: c.y + ci.r * Math.sin(a) }); }
+  }
+  pushUndo();
+  const ids = P.map((q) => addPoint(doc, q.x, q.y, true));
+  const res = splitElement(doc, el.id, ids);
+  if (!res.ok) { rollback(); toast(res.msg); afterChange(); return; }
+  if (el.k === 'ln') for (let i = 1; i < res.pieces.length; i++) addCon(doc, { t: 'EQL', refs: [res.pieces[i - 1], res.pieces[i]], hidden: true });
+  const r = solve(doc, []);
+  if (!r.ok) { rollback(); toast('No se pudo dividir: conflicto con las restricciones'); afterChange(); return; }
+  sel = res.pieces.map((id) => ({ k: el.k === 'ln' ? 'ln' : 'ar', id }));
+  toast(`Dividido en ${res.pieces.length} partes iguales` + (el.k === 'ln' ? '' : ' (las restricciones de igual ángulo entre arcos no existen: si mueves el centro o los extremos, las partes ya no serán iguales)'));
+  afterChange();
+}
+
 function splitSelected() {
   const els = sel.filter((x) => x.k === 'ln' || x.k === 'ci' || x.k === 'ar');
   const pts = sel.filter((x) => x.k === 'pt').map((x) => x.id);
-  if (els.length !== 1 || !pts.length) { toast('Selecciona 1 segmento, arco o círculo y los puntos que lo dividen'); return; }
+  if (els.length !== 1) { toast('Selecciona 1 segmento, arco o círculo (y, si quieres, los puntos que lo dividen)'); return; }
+  if (!pts.length) { splitEqual(els[0]); return; }
   pushUndo();
   const res = splitElement(doc, els[0].id, pts);
   if (!res.ok) { rollback(); toast(res.msg); afterChange(); return; }
@@ -1775,7 +1845,7 @@ function toggle(id, key) {
   b.setAttribute('aria-pressed', String(opts[key]));
 }
 toggle('tGrid', 'grid'); toggle('tSnap', 'snap'); toggle('tCons', 'cons'); toggle('tTouch', 'touch');
-toggle('tPts', 'pts'); toggle('tDims', 'dims'); toggle('tTexts', 'texts');
+toggle('tLock', 'lock'); toggle('tPts', 'pts'); toggle('tDims', 'dims'); toggle('tTexts', 'texts');
 $('tLabels').onclick = () => { opts.labels = !opts.labels; applyLabels(); persist(); };
 function applyLabels() {
   document.body.classList.toggle('nolabels', !opts.labels);
@@ -1836,6 +1906,14 @@ window.addEventListener('keydown', (e) => {
   else if (!e.ctrlKey && !e.metaKey) { const m = { v: 'select', p: 'point', l: 'line', c: 'circle', i: 'intersect', a: 'arc3', r: 'arcc', t: 'text', s: 'spline' }[k]; if (m) setTool(m); }
 });
 window.addEventListener('keyup', (e) => { if (e.code === 'Space') spaceDown = false; });
+// Area visible real (con teclado en pantalla): los dialogos se acomodan arriba de ella
+function syncViewport() {
+  const v = window.visualViewport;
+  document.documentElement.style.setProperty('--vvh', (v ? v.height : window.innerHeight) + 'px');
+  document.documentElement.style.setProperty('--vvt', (v ? v.offsetTop : 0) + 'px');
+}
+if (window.visualViewport) { window.visualViewport.addEventListener('resize', syncViewport); window.visualViewport.addEventListener('scroll', syncViewport); }
+syncViewport();
 window.addEventListener('resize', resize);
 new ResizeObserver(resize).observe(cv);
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { readTheme(); syncPanel(); draw(); });
@@ -1850,7 +1928,7 @@ async function boot() {
     const s = JSON.parse(localStorage.getItem(STORE) || 'null');
     if (s?.doc) { loadDoc(s.doc); if (s.view) view = s.view; if (s.cur) cur = { ...cur, ...s.cur }; if (s.opts) Object.assign(opts, s.opts); }
   } catch { /* sin estado previo */ }
-  for (const [id, key] of [['tGrid', 'grid'], ['tSnap', 'snap'], ['tCons', 'cons'], ['tTouch', 'touch'], ['tPts', 'pts'], ['tDims', 'dims'], ['tTexts', 'texts']]) $(id).setAttribute('aria-pressed', String(opts[key]));
+  for (const [id, key] of [['tGrid', 'grid'], ['tSnap', 'snap'], ['tCons', 'cons'], ['tTouch', 'touch'], ['tPts', 'pts'], ['tDims', 'dims'], ['tTexts', 'texts'], ['tLock', 'lock']]) $(id).setAttribute('aria-pressed', String(opts[key]));
   $('ltScale').value = String(opts.ltScale);
   hydrateIcons(); wireLongPressHints(); wireSections(); applyLabels(); applyChrome(); updateEnabled();
   setTool('select');

@@ -8,6 +8,7 @@ import { splitElement } from '../src/split.js';
 import { buildTree, conLabel } from '../src/tree.js';
 import { cleanFileBase } from '../src/files.js';
 import { parseValue, evalExpr, isPlainNumber } from '../src/expr.js';
+import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from '../src/lock.js';
 import { initSolver, solve } from '../src/solver.js';
 import { lineLine, lineCircle, circleCircle, signedAngle, dashFromPattern, parsePattern, circumcircle, arcSweepOf, TAU, splineSamples, resamplePolyline, polylineLength, splineBezier, closestOnPolyline, polylineLine, polylineCircle, polylinePolyline } from '../src/geom.js';
 
@@ -991,6 +992,76 @@ t('cotas de radio y diametro (ANSI): dentro = linea por el interior; fuera = lla
   assert.equal(ra.arrows.length, 1); assert.equal(ra.lines.length, 1);
   const rb = layoutDim(d, { t: 'RAD', refs: [arc], v: 10, lp: 14, ang: Math.PI / 4 }, VIEW);
   assert.equal(rb.lines.length, 2); assert.ok(rb.arrows[0].dx * Math.cos(Math.PI / 4) < 0 || rb.arrows[0].dx < 0);
+});
+
+
+t('bloqueo suave: horizontal, vertical y 45 grados solo cerca de la direccion', () => {
+  const d = newDoc(); const S = { x: 0, y: 0 }, free = { type: 'free' }, none = { lines: [], curves: [] };
+  const h = lineLock(d, S, none, free, { x: 10, y: 0.3 }, 10);
+  assert.equal(h.kind, 'H'); near(h.y, 0); near(h.x, 10, 0.01);
+  assert.equal(lineLock(d, S, none, free, { x: 0.2, y: 8 }, 10).kind, 'V');
+  const dd = lineLock(d, S, none, free, { x: 7, y: 7.4 }, 10);
+  assert.equal(dd.kind, 'D45'); near(dd.x, dd.y, 1e-9);
+  assert.equal(lineLock(d, S, none, free, { x: 10, y: 3 }, 10), null, 'lejos de toda direccion: libre');
+  assert.equal(lineLock(d, S, none, free, { x: 0.5, y: 0.1 }, 10), null, 'muy cerca del inicio no bloquea');
+  assert.equal(lineLock(d, S, none, { type: 'pt', id: 'x' }, { x: 10, y: 0.3 }, 10), null, 'si cae sobre un punto, manda el punto');
+  assert.deepEqual(lockConstraints(h, 'l1'), [{ t: 'H', refs: ['l1'] }]);
+  assert.deepEqual(lockConstraints(dd, 'l1'), [], '45 no lleva restriccion');
+});
+t('bloqueo suave: desde otra linea, paralela y perpendicular con su restriccion', () => {
+  const d = newDoc();
+  const a = addPoint(d, 0, 0), b = addPoint(d, 10, 6);
+  const l = addLine(d, a, b, {});
+  const m = addPoint(d, 5, 3); addCon(d, { t: 'PONL', refs: [m, l] });
+  const o = originsOfPoint(d, m);
+  assert.deepEqual(o.lines, [l]);
+  const S = d.pts[m];
+  const perp = lineLock(d, S, o, { type: 'free' }, { x: 5 - 6 * 0.5, y: 3 + 10 * 0.5 + 0.3 }, 10); // direccion (-0.51, 0.86) ~ perpendicular a (10,6)
+  assert.equal(perp.kind, 'PERP'); assert.equal(perp.ref, l);
+  near(perp.u.x * 10 + perp.u.y * 6, 0, 1e-9);
+  assert.deepEqual(lockConstraints(perp, 'n'), [{ t: 'PERP', refs: ['n', l] }]);
+  const par = lineLock(d, S, o, { type: 'free' }, { x: 5 + 8.6, y: 3 + 5.2 }, 10);
+  assert.equal(par.kind, 'PAR');
+  assert.deepEqual(originsOfSnap(d, { type: 'ln', id: l }).lines, [l]);
+  assert.deepEqual(originsOfPoint(d, a).lines, [l], 'extremo de una linea');
+});
+t('bloqueo suave: tangente desde un circulo y tangente al terminar sobre un circulo', () => {
+  const d = newDoc(); const c = addPoint(d, 0, 10); const ci = addCircle(d, c, 10, {});
+  // inicio sobre el circulo en (0,0): la tangente es horizontal y gana a la H generica
+  const o = originsOfSnap(d, { type: 'ci', id: ci });
+  const t1 = lineLock(d, { x: 0, y: 0 }, o, { type: 'free' }, { x: 12, y: 0.4 }, 10);
+  assert.equal(t1.kind, 'TAN'); assert.equal(t1.ref, ci);
+  assert.deepEqual(lockConstraints(t1, 'n'), [{ t: 'TANLC', refs: ['n', ci] }]);
+  // final sobre el circulo: la linea desde S pasa a ser tangente
+  const S = { x: 30, y: 10 };
+  const T = { x: 10 * Math.cos(Math.acos(10 / 30)), y: 10 + 10 * Math.sin(Math.acos(10 / 30)) };
+  const t2 = lineLock(d, S, { lines: [], curves: [] }, { type: 'ci', id: ci }, { x: T.x + 0.2, y: T.y + 0.1 }, 10);
+  assert.equal(t2.kind, 'TAN'); assert.deepEqual(t2.end, { type: 'ci', id: ci });
+  near(Math.hypot(t2.x - 0, t2.y - 10), 10, 1e-9, 'sobre el circulo');
+  near((t2.x - 0) * (t2.x - S.x) + (t2.y - 10) * (t2.y - S.y), 0, 1e-6, 'radio perpendicular a la linea');
+  assert.equal(lineLock(d, S, { lines: [], curves: [] }, { type: 'ci', id: ci }, { x: -9.9, y: 10 }, 10), null, 'lejos de las tangentes: sin bloqueo');
+});
+t('dividir en n partes iguales: lineas, arcos y circulos', () => {
+  // linea
+  let d = newDoc();
+  const a = addPoint(d, 0, 0), b = addPoint(d, 12, 0);
+  const l = addLine(d, a, b, {});
+  const P = [1, 2, 3].map((i) => addPoint(d, (12 * i) / 4, 0, true));
+  const r = splitElement(d, l, P);
+  assert.ok(r.ok && r.pieces.length === 4);
+  for (let i = 1; i < r.pieces.length; i++) addCon(d, { t: 'EQL', refs: [r.pieces[i - 1], r.pieces[i]], hidden: true });
+  d.pts[a].fixed = true; d.pts[b].fixed = true;
+  b && (d.pts[b].x = 20);
+  assert.ok(solve(d, []).ok);
+  r.pieces.forEach((pid) => { const q = d.lines[pid]; near(Math.hypot(d.pts[q.b].x - d.pts[q.a].x, d.pts[q.b].y - d.pts[q.a].y), 5, 1e-6, 'partes iguales tras estirar'); });
+  // circulo en 6 partes
+  d = newDoc();
+  const c = addPoint(d, 0, 0), ci = addCircle(d, c, 5, {});
+  const Q = Array.from({ length: 6 }, (_, i) => addPoint(d, 5 * Math.cos((i * Math.PI) / 3), 5 * Math.sin((i * Math.PI) / 3), true));
+  const r2 = splitElement(d, ci, Q);
+  assert.ok(r2.ok); assert.equal(r2.pieces.length, 6);
+  assert.ok(solve(d, []).ok);
+  r2.pieces.forEach((id) => near(arcOf(d, d.arcs[id]).sweep, Math.PI / 3, 1e-6));
 });
 
 console.log(`\n${passed} pruebas pasaron`);
