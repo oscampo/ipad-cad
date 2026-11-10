@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { newDoc, addPoint, addLine, addCircle, addArc, addCon, addText, deleteItems, hatchLoops, arcOf } from '../src/model.js';
 import { layoutDim, dragDim } from '../src/dims.js';
 import { textFrame, textCorners, textHit } from '../src/text.js';
-import { exportSVG, exportDXF } from '../src/export.js';
+import { exportSVG, exportDXF, dimLayouts, extraExtents } from '../src/export.js';
 import { splitElement } from '../src/split.js';
 import { initSolver, solve } from '../src/solver.js';
 import { lineLine, lineCircle, circleCircle, signedAngle, dashFromPattern, parsePattern, circumcircle, arcSweepOf, TAU } from '../src/geom.js';
@@ -409,6 +409,42 @@ t('exportar: SVG y DXF incluyen arcos, textos con rotacion y escala de patron', 
   assert.equal(rows.length % 2, 0, 'pares codigo/valor');
   assert.equal(rows.filter((r) => r === 'TEXT').length, 2);
   assert.equal(rows.filter((r) => r === 'ARC').length, 1);
+});
+
+
+t('exportar cotas: SVG y DXF llevan flechas, extension, arcos de angulo y etiquetas; el lienzo no las recorta', () => {
+  const d = newDoc();
+  const o = addPoint(d, 0, 0), a = addPoint(d, 40, 0), b = addPoint(d, 0, 30), c0 = addPoint(d, 80, 10), c1 = addPoint(d, 80, 20);
+  const l1 = addLine(d, o, a, {}), l2 = addLine(d, o, b, {});
+  const C = addCircle(d, c0, 10, {});
+  addCon(d, { t: 'DIST', refs: [o, a], v: 40, off: 8, lt: 0.3 });
+  addCon(d, { t: 'ANG', refs: [l1, l2], v: 90 });
+  addCon(d, { t: 'RAD', refs: [C], v: 10 });
+  addCon(d, { t: 'H', refs: [l1], hidden: true }); // las relaciones no se exportan
+  const view = { s: 6, ox: 0, oy: 0 };
+  const L = dimLayouts(d, view);
+  assert.equal(L.length, 3, 'solo cotas');
+  const nArrows = L.reduce((s, x) => s + x.arrows.length, 0);
+  const svg = exportSVG(d, 1);
+  assert.equal(svg.split('<polygon').length - 1, nArrows, 'una flecha por cabeza');
+  assert.ok(svg.includes('>40</text>') && svg.includes('>90°</text>') && svg.includes('>φ20</text>'), 'etiquetas');
+  assert.ok(/<path d="M[^"]+ A[^"]+" fill="none" stroke="#000000" stroke-width="1"\/>/.test(svg), 'arco de la cota angular');
+  const W = Number(svg.match(/width="([\d.]+)"/)[1]), H = Number(svg.match(/height="([\d.]+)"/)[1]);
+  const tr = svg.match(/<g transform="translate\(([\d.-]+) ([\d.-]+)\)">/);
+  assert.ok(tr, 'grupo con desplazamiento');
+  const ex = extraExtents(d, { s: 6, ox: 20, oy: 20 + 30 * 6 }); // y1 del contenido = 30
+  assert.ok(ex.maxX + 8 + Number(tr[1]) <= W + 1e-6, 'caben las cotas en x');
+  assert.ok(ex.maxY + 8 + Number(tr[2]) <= H + 1e-6, 'caben las cotas en y');
+  assert.ok(ex.minX + Number(tr[1]) >= 8 - 1e-6 || Number(tr[1]) === 0, 'no se recorta por la izquierda');
+  const rows = exportDXF(d, 6).trim().split('\r\n');
+  assert.equal(rows.length % 2, 0);
+  assert.equal(rows.filter((r) => r === 'SOLID').length, nArrows, 'flechas SOLID');
+  const labels = rows.filter((r, i) => rows[i - 1] === '1');
+  assert.ok(['40', '90°', 'φ20'].every((t) => labels.includes(t)), 'etiquetas en DXF');
+  assert.ok(rows.filter((r) => r === 'ARC').length >= 1, 'arco de la cota angular');
+  // coordenadas del DXF en unidades del dibujo: la cota de 40 queda cerca de y=-8/6.. (sobre el eje, desplazada)
+  const idx = rows.findIndex((r, i) => r === 'LINE' && rows[i + 5] === '20');
+  assert.ok(idx >= 0);
 });
 
 console.log(`\n${passed} pruebas pasaron`);

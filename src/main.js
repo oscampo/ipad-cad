@@ -11,7 +11,7 @@ import {
 import { splitElement } from './split.js';
 import { layoutDim, dragDim } from './dims.js';
 import { textFrame, textHit, ANCHORS, ANCHOR_NAMES, LINE_SPACING } from './text.js';
-import { exportSVG, exportDXF } from './export.js';
+import { exportSVG, exportDXF, extraExtents } from './export.js';
 import { iconSvg } from './icons.js';
 
 const VERSION = '0.1.0';
@@ -315,6 +315,7 @@ function draw() { render(ctx, cv.width, cv.height, view, { fg: theme.fg, bg: the
 export function render(c, W, H, v, o) {
   const saveView = view;
   view = v;
+  labelBg = o.bg;
   c.save();
   c.fillStyle = o.bg; c.fillRect(0, 0, W, H);
   if (o.grid) drawGrid(c, W, H);
@@ -345,7 +346,7 @@ export function render(c, W, H, v, o) {
   }
   c.setLineDash([]);
   drawTexts(c, o);
-  if (o.cons) drawConstraints(c, o);
+  if (o.cons || o.dims) drawConstraints(c, o);
   if (o.ui) {
     for (const [id, p] of Object.entries(doc.pts)) {
       const s = toScreen(p);
@@ -411,12 +412,13 @@ function drawHatch(c, id, h, o) {
   c.restore();
 }
 
+let labelBg = '#fff';
 function label(c, text, x, y, id, color) {
   c.save();
   c.font = `${12 * dpr}px -apple-system, system-ui, sans-serif`;
   const w = c.measureText(text).width / dpr + 8, h = 18;
   const bx = x - w / 2, by = y - h / 2;
-  c.fillStyle = theme.bg; c.globalAlpha = 0.85;
+  c.fillStyle = labelBg; c.globalAlpha = 0.85;
   c.beginPath(); c.roundRect(bx * dpr, by * dpr, w * dpr, h * dpr, 4 * dpr); c.fill();
   c.globalAlpha = 1; c.fillStyle = color; c.textBaseline = 'middle'; c.textAlign = 'center';
   c.fillText(text, x * dpr, y * dpr + dpr);
@@ -492,8 +494,10 @@ function drawConstraints(c, o) {
   const used = {};
   for (const [id, k] of Object.entries(doc.cons)) {
     if (k.hidden) continue;
-    const col = isSel('co', id) ? theme.sel : theme.accent;
+    // al exportar (sin interfaz) las cotas van en el color del dibujo y no se pintan los simbolos de relaciones
+    const col = !o.ui ? o.fg : isSel('co', id) ? theme.sel : theme.accent;
     if (k.t === 'DIST' || k.t === 'DISTPL' || k.t === 'ANG' || k.t === 'RAD') { drawDim(c, id, k, col); continue; }
+    if (!o.cons) continue;
     const m = GLYPH[k.t] && midOf(k.refs);
     if (!m) continue;
     const sp = toScreen(m);
@@ -1209,14 +1213,22 @@ function exportPNG() {
   const b = contentBounds();
   if (!b) { toast('No hay nada que exportar'); return; }
   const pad = 20, k = 6;
-  const W = Math.ceil((b.x1 - b.x0) * k + pad * 2), H = Math.ceil((b.y1 - b.y0) * k + pad * 2);
+  let W = Math.ceil((b.x1 - b.x0) * k + pad * 2), H = Math.ceil((b.y1 - b.y0) * k + pad * 2);
+  let v = { s: k, ox: pad - b.x0 * k, oy: H - pad + b.y0 * k };
+  // el lienzo crece para que quepan cotas y textos
+  const ex = extraExtents(doc, v), m = 8;
+  if (ex) {
+    const sx = Math.max(0, m - ex.minX), sy = Math.max(0, m - ex.minY);
+    W = Math.ceil(Math.max(W, ex.maxX + m) + sx); H = Math.ceil(Math.max(H, ex.maxY + m) + sy);
+    v = { s: k, ox: v.ox + sx, oy: v.oy + sy };
+  }
   const off = document.createElement('canvas');
   off.width = Math.min(W * 2, 8000); off.height = Math.min(H * 2, 8000);
   const sc = off.width / W;
   const oc = off.getContext('2d');
   const saveDpr = dpr, saveHits = labelHits, saveSel = sel;
   dpr = sc; sel = [];
-  render(oc, off.width, off.height, { s: k, ox: pad - b.x0 * k, oy: H - pad + b.y0 * k }, { fg: '#000', bg: '#fff', grid: false, cons: false, ui: false });
+  render(oc, off.width, off.height, v, { fg: '#000', bg: '#fff', grid: false, cons: false, dims: true, ui: false });
   dpr = saveDpr; labelHits = saveHits; sel = saveSel;
   off.toBlob((bl) => download('dibujo.png', bl), 'image/png');
 }
@@ -1309,7 +1321,7 @@ $('fileIn').onchange = async (e) => {
 };
 $('fPng').onclick = exportPNG;
 $('fSvg').onclick = () => { const s = exportSVG(doc, opts.ltScale); if (s) download('dibujo.svg', new Blob([s], { type: 'image/svg+xml' })); else toast('No hay nada que exportar'); };
-$('fDxf').onclick = () => { const s = exportDXF(doc); if (s) download('dibujo.dxf', new Blob([s], { type: 'application/dxf' })); else toast('No hay nada que exportar'); };
+$('fDxf').onclick = () => { const s = exportDXF(doc, view.s); if (s) download('dibujo.dxf', new Blob([s], { type: 'application/dxf' })); else toast('No hay nada que exportar'); };
 
 window.addEventListener('keydown', (e) => {
   if (e.target.closest?.('input,select,textarea,dialog')) return;

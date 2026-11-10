@@ -13,7 +13,7 @@ CAD 2D parametrico para iPad (uso personal), inspirado en Updraw. PWA: se instal
 - Cotas con flechas y lineas de extension reposicionables (arrastra la etiqueta): distancia, angulo, R de arco, phi de circulo.
 - Texto con punto de insercion (esquinas, medios de lado o centro de la caja), angulo y altura; el punto es un punto real del dibujo.
 - Escala del patron de linea por elemento.
-- Exportar .json, PNG, SVG, DXF (lineas, arcos, circulos, puntos y textos; las cotas no se exportan todavia).
+- Exportar .json, PNG, SVG, DXF (lineas, arcos, circulos, puntos, textos y cotas; en DXF las cotas salen como geometria: LINE, ARC, SOLID y TEXT, no como entidades DIMENSION).
 
 Desarrollo: `npm install`, `npm run dev`, `npm test`, `npm run build`.
 Apple Pencil dibuja y arrastra; un dedo desplaza y hace zoom (pellizco). Interruptor "Dibujar con dedo".
