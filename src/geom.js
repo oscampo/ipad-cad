@@ -111,3 +111,61 @@ export function arcThrough3(A, M, B) {
   const sAM = norm(ang(M) - ang(A));
   return { c: cc.c, r: cc.r, startIsA: sAM < sAB };
 }
+
+// ---------------------------------------------------------------- splines
+// Curva que pasa por todos los puntos P (Catmull-Rom centripeta: sin bucles ni picos).
+// closed: curva cerrada. per: muestras por tramo. Devuelve la poligonal muestreada.
+export function splineSamples(P, closed = false, per = 16) {
+  const n = P.length;
+  if (n < 2) return P.map((p) => ({ x: p.x, y: p.y }));
+  if (n === 2 && !closed) return [{ x: P[0].x, y: P[0].y }, { x: P[1].x, y: P[1].y }];
+  const refl = (a, b) => ({ x: 2 * a.x - b.x, y: 2 * a.y - b.y });
+  const at = (i) => {
+    if (closed) return P[((i % n) + n) % n];
+    if (i < 0) return refl(P[0], P[1]);
+    if (i >= n) return refl(P[n - 1], P[n - 2]);
+    return P[i];
+  };
+  const segs = closed ? n : n - 1;
+  const out = [{ x: P[0].x, y: P[0].y }];
+  const knot = (a, b) => Math.sqrt(Math.max(Math.hypot(b.x - a.x, b.y - a.y), 1e-9));
+  const lerp = (a, b, k) => ({ x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k });
+  for (let i = 0; i < segs; i++) {
+    const p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2);
+    const t0 = 0, t1 = t0 + knot(p0, p1), t2 = t1 + knot(p1, p2), t3 = t2 + knot(p2, p3);
+    for (let k = 1; k <= per; k++) {
+      if (k === per) { out.push({ x: p2.x, y: p2.y }); break; }
+      const t = t1 + ((t2 - t1) * k) / per;
+      const a1 = lerp(p0, p1, (t - t0) / (t1 - t0)), a2 = lerp(p1, p2, (t - t1) / (t2 - t1)), a3 = lerp(p2, p3, (t - t2) / (t3 - t2));
+      const b1 = lerp(a1, a2, (t - t0) / (t2 - t0)), b2 = lerp(a2, a3, (t - t1) / (t3 - t1));
+      out.push(lerp(b1, b2, (t - t1) / (t2 - t1)));
+    }
+  }
+  return out;
+}
+
+// Longitud acumulada de una poligonal.
+export function polylineLength(P) {
+  let L = 0;
+  for (let i = 1; i < P.length; i++) L += Math.hypot(P[i].x - P[i - 1].x, P[i].y - P[i - 1].y);
+  return L;
+}
+
+// n puntos repartidos a distancias iguales (por longitud de arco) sobre la poligonal P, con los extremos incluidos.
+export function resamplePolyline(P, n) {
+  const total = polylineLength(P);
+  if (P.length < 2 || n < 2 || !(total > 0)) return P.slice();
+  const out = [{ x: P[0].x, y: P[0].y }];
+  let acc = 0, k = 1;
+  for (let i = 1; i < P.length && k < n - 1; i++) {
+    const seg = Math.hypot(P[i].x - P[i - 1].x, P[i].y - P[i - 1].y);
+    while (k < n - 1 && acc + seg >= (total * k) / (n - 1) - 1e-12) {
+      const f = seg > 0 ? ((total * k) / (n - 1) - acc) / seg : 0;
+      out.push({ x: P[i - 1].x + (P[i].x - P[i - 1].x) * f, y: P[i - 1].y + (P[i].y - P[i - 1].y) * f });
+      k++;
+    }
+    acc += seg;
+  }
+  out.push({ x: P[P.length - 1].x, y: P[P.length - 1].y });
+  return out;
+}

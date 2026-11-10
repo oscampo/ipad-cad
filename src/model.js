@@ -1,5 +1,5 @@
 // Documento: puntos, lineas, arcos, circulos, restricciones, rellenos y tipos de linea.
-import { arcSweepOf, TAU } from './geom.js';
+import { arcSweepOf, TAU, splineSamples } from './geom.js';
 
 export const BUILTIN_LTYPES = {
   continua: { label: 'Continua', pattern: [] },
@@ -18,7 +18,7 @@ export const PALETTE = [
 ];
 
 export function newDoc() {
-  return { n: 0, pts: {}, lines: {}, circles: {}, arcs: {}, texts: {}, cons: {}, hatches: {}, ltypes: {} };
+  return { n: 0, pts: {}, lines: {}, circles: {}, arcs: {}, texts: {}, splines: {}, traces: {}, cons: {}, hatches: {}, ltypes: {} };
 }
 
 export function nextId(doc, prefix) {
@@ -59,6 +59,18 @@ export function arcOf(doc, arc) {
   return arcSweepOf(doc.pts[arc.c], doc.pts[arc.a], doc.pts[arc.b]);
 }
 
+// Spline que pasa por una lista de puntos reales del dibujo (se mueve con ellos).
+export function addSpline(doc, ptIds, style, closed = false) {
+  const id = nextId(doc, 's');
+  doc.splines[id] = { pts: [...ptIds], closed, ...style };
+  return id;
+}
+
+// Poligonal muestreada del spline (coordenadas del modelo).
+export function splinePolyline(doc, sp, per = 16) {
+  return splineSamples(sp.pts.map((p) => doc.pts[p]), sp.closed, per);
+}
+
 // Texto con punto de insercion (un punto real del documento, asi admite restricciones).
 // anchor: 'tl','tc','tr','ml','mc','mr','bl','bc','br' (vertical + horizontal); ang en grados.
 export function addText(doc, pt, text, opts = {}) {
@@ -84,6 +96,7 @@ function pointsUsed(doc) {
   for (const c of Object.values(doc.circles)) used.add(c.c);
   for (const a of Object.values(doc.arcs)) { used.add(a.c); used.add(a.a); used.add(a.b); }
   for (const t of Object.values(doc.texts || {})) used.add(t.pt);
+  for (const sp of Object.values(doc.splines || {})) for (const p of sp.pts) used.add(p);
   for (const k of Object.values(doc.cons)) for (const r of conRefs(k)) used.add(r);
   return used;
 }
@@ -98,12 +111,18 @@ export function cleanup(doc) {
     for (const [id, k] of Object.entries(doc.cons)) {
       if (!conRefs(k).every(exists)) { delete doc.cons[id]; changed = true; }
     }
+    for (const [id, sp] of Object.entries(doc.splines || {})) {
+      const keep = sp.pts.filter((p) => p in doc.pts);
+      if (keep.length !== sp.pts.length) { sp.pts = keep; changed = true; }
+      if (sp.pts.length < 2) { delete doc.splines[id]; changed = true; }
+    }
+    for (const id of Object.keys(doc.traces || {})) if (!(id in doc.pts)) { delete doc.traces[id]; changed = true; }
     for (const [id, t] of Object.entries(doc.texts || {})) {
       if (!(t.pt in doc.pts)) { delete doc.texts[id]; changed = true; }
       else if (t.ref && !(t.ref in doc.lines)) delete t.ref; // la linea de referencia ya no existe: queda con su desfase
     }
     for (const [id, h] of Object.entries(doc.hatches)) {
-      h.ids = h.ids.filter((e) => e in doc.lines || e in doc.circles || e in doc.arcs);
+      h.ids = h.ids.filter((e) => e in doc.lines || e in doc.circles || e in doc.arcs || e in (doc.splines || {}));
       if (!h.ids.length) { delete doc.hatches[id]; changed = true; }
     }
     const used = pointsUsed(doc);
@@ -124,6 +143,7 @@ export function deleteItems(doc, items) {
     else if (k === 'ci') delete doc.circles[id];
     else if (k === 'ar') delete doc.arcs[id];
     else if (k === 'tx') delete doc.texts[id];
+    else if (k === 'sp') delete doc.splines[id];
     else if (k === 'ha') delete doc.hatches[id];
     else if (k === 'co') delete doc.cons[id];
   }
@@ -149,8 +169,9 @@ export function arcSamples(doc, arc) {
 // por puntos compartidos; los arcos se muestrean) y circulos {c,r}.
 export function hatchLoops(doc, h) {
   const loops = [];
-  const edges = h.ids.filter((i) => i in doc.lines || i in doc.arcs);
-  const ends = (id) => (id in doc.lines ? [doc.lines[id].a, doc.lines[id].b] : [doc.arcs[id].a, doc.arcs[id].b]);
+  const spl = doc.splines || {};
+  const edges = h.ids.filter((i) => i in doc.lines || i in doc.arcs || (i in spl && !spl[i].closed));
+  const ends = (id) => (id in doc.lines ? [doc.lines[id].a, doc.lines[id].b] : id in spl ? [spl[id].pts[0], spl[id].pts[spl[id].pts.length - 1]] : [doc.arcs[id].a, doc.arcs[id].b]);
   const used = new Set();
   const byPoint = new Map();
   for (const id of edges) for (const p of ends(id)) {
@@ -161,7 +182,7 @@ export function hatchLoops(doc, h) {
   const walk = (id, from) => {
     const [ea, eb] = ends(id);
     if (id in doc.lines) return [from === ea ? eb : ea];
-    const smp = arcSamples(doc, doc.arcs[id]);
+    const smp = id in spl ? splinePolyline(doc, spl[id], 12) : arcSamples(doc, doc.arcs[id]);
     return from === ea ? smp.slice(1) : smp.slice(0, -1).reverse();
   };
   const pt = (x) => (typeof x === 'string' ? doc.pts[x] && { x: doc.pts[x].x, y: doc.pts[x].y } : x);
@@ -183,6 +204,7 @@ export function hatchLoops(doc, h) {
     const pts = seq.map(pt).filter(Boolean);
     if (pts.length >= 3) loops.push({ pts });
   }
+  for (const id of h.ids) if (id in spl && spl[id].closed) loops.push({ pts: splinePolyline(doc, spl[id], 12).slice(0, -1) });
   for (const id of h.ids) if (id in doc.circles) {
     const c = doc.circles[id];
     const p = doc.pts[c.c];

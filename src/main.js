@@ -1,13 +1,14 @@
 import wasmUrl from '@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url';
 import { initSolver, solve } from './solver.js';
 import {
-  newDoc, addPoint, addLine, addCircle, addArc, addText, addCon, cleanup, deleteItems, clone, hatchLoops,
+  newDoc, addPoint, addLine, addCircle, addArc, addText, addSpline, splinePolyline, addCon, cleanup, deleteItems, clone, hatchLoops,
   allLtypes, PALETTE, arcOf,
 } from './model.js';
 import {
   dist, closestOnSeg, lineLine, lineCircle, circleCircle, signedAngle, dashFromPattern, parsePattern,
-  arcThrough3, inSweep, TAU,
+  arcThrough3, inSweep, TAU, splineSamples,
 } from './geom.js';
+import { startTrace, recordTraces, traceToSpline } from './curves.js';
 import { splitElement } from './split.js';
 import { layoutDim, dragDim, dimValue } from './dims.js';
 import { textFrame, textHit, textPose, rawAngle, ANCHORS, ANCHOR_NAMES, LINE_SPACING } from './text.js';
@@ -72,7 +73,7 @@ function redo() {
   pending = null; sel = sel.filter(exists); afterChange();
 }
 function exists(s) {
-  return s.k === 'pt' ? s.id in doc.pts : s.k === 'ln' ? s.id in doc.lines : s.k === 'ci' ? s.id in doc.circles : s.k === 'ar' ? s.id in doc.arcs : s.k === 'tx' ? s.id in doc.texts : s.k === 'ha' ? s.id in doc.hatches : s.id in doc.cons;
+  return s.k === 'pt' ? s.id in doc.pts : s.k === 'ln' ? s.id in doc.lines : s.k === 'ci' ? s.id in doc.circles : s.k === 'ar' ? s.id in doc.arcs : s.k === 'tx' ? s.id in doc.texts : s.k === 'sp' ? s.id in doc.splines : s.k === 'ha' ? s.id in doc.hatches : s.id in doc.cons;
 }
 let saveTimer = 0;
 function persist() {
@@ -85,7 +86,7 @@ function afterChange() { updateButtons(); updateEnabled(); syncPanel(); persist(
 
 // Un boton de restriccion solo se activa si la seleccion actual le sirve (mismas reglas que applyCon).
 function updateEnabled() {
-  const n = { pt: 0, ln: 0, ci: 0, ar: 0 };
+  const n = { pt: 0, ln: 0, ci: 0, ar: 0, sp: 0 };
   for (const x of sel) if (x.k in n) n[x.k]++;
   n.pt += sel.filter((x) => x.k === 'tx').length;
   const { pt, ln } = n;
@@ -106,7 +107,12 @@ function updateEnabled() {
   document.querySelectorAll('[data-con]').forEach((b) => { b.disabled = !rules[b.dataset.con]; });
   $('mkint').disabled = ln + crv !== 2;
   $('mksplit').disabled = !(ln + crv === 1 && pt >= 1);
-  $('mkhatch').disabled = ln + crv < 1;
+  $('mkhatch').disabled = ln + crv + n.sp < 1;
+  const selPts = sel.filter((x) => x.k === 'pt').map((x) => x.id);
+  $('trTrace').disabled = !selPts.length;
+  $('trClear').disabled = !selPts.some((id) => doc.traces[id]?.pts.length > 1);
+  $('trSpline').disabled = !(selPts.length === 1 && doc.traces[selPts[0]]?.pts.length >= 3);
+  $('spClose').disabled = !n.sp;
   $('del').disabled = !sel.length;
   $('txAlign').disabled = !(sel.some((x) => x.k === 'tx') && ln === 1);
   $('txFree').disabled = !sel.some((x) => x.k === 'tx' && doc.texts[x.id]?.ref);
@@ -156,19 +162,24 @@ function geometryPoints() {
 const selectedTextPoints = () => new Set(sel.filter((x) => x.k === 'tx').map((x) => doc.texts[x.id]?.pt).filter(Boolean));
 
 // Puntos de insercion propios de un texto (txOnly) que ahora no se muestran: solo se ven con el texto seleccionado.
+const selectedSplinePoints = () => new Set(sel.filter((x) => x.k === 'sp').flatMap((x) => doc.splines[x.id]?.pts || []));
+
 function hiddenTextPoints() {
-  const geom = geometryPoints(), selTx = selectedTextPoints(), out = new Set();
-  for (const [id, p] of Object.entries(doc.pts)) if (p.txOnly && !geom.has(id) && !selTx.has(id)) out.add(id);
+  const geom = geometryPoints(), selTx = selectedTextPoints(), selSp = selectedSplinePoints(), out = new Set();
+  for (const [id, p] of Object.entries(doc.pts)) {
+    if (p.txOnly && !geom.has(id) && !selTx.has(id)) out.add(id);
+    else if (p.splOnly && !geom.has(id) && !selSp.has(id)) out.add(id); // control de un spline trazado: se ve al seleccionar la curva
+  }
   return out;
 }
 
 // Puntos que se dibujan y se pueden tocar: respeta el interruptor "Puntos" y la regla anterior.
 function shownPoints() {
-  const hidden = hiddenTextPoints(), selTx = selectedTextPoints();
+  const hidden = hiddenTextPoints(), selTx = selectedTextPoints(), selSp = selectedSplinePoints();
   const out = new Set();
   for (const id of Object.keys(doc.pts)) {
     if (hidden.has(id)) continue;
-    if (opts.pts || selTx.has(id) || isSel('pt', id)) out.add(id);
+    if (opts.pts || selTx.has(id) || selSp.has(id) || isSel('pt', id)) out.add(id);
   }
   return out;
 }
@@ -243,6 +254,10 @@ function hitTest(sx, sy) {
     const g = arcOf(doc, ar);
     if (d < bd && inSweep(cp, g.a0, g.sweep, m, 8 / Math.max(ar.r * view.s, 1))) { bd = d; best = { k: 'ar', id }; }
   }
+  for (const [id, sp] of Object.entries(doc.splines)) {
+    const d = distToPolyline(splinePolyline(doc, sp, 12).map(toScreen), sx, sy);
+    if (d < bd) { bd = d; best = { k: 'sp', id }; }
+  }
   if (best) return best;
   for (const [id, h] of Object.entries(doc.hatches)) {
     const path = hatchPath(h);
@@ -295,6 +310,41 @@ function applyStroke(c, color, w, ltype, o, ls = 1) {
   const d = dashFromPattern(lt.pattern, 0.6).map((x) => Math.max(x, 0.01) * 3 * k * dpr);
   c.setLineDash(d);
   return d;
+}
+
+// Poligonal con patron dibujado tramo a tramo (px de dispositivo); sirve para splines y trazados.
+function strokePolyline(c, P, dash) {
+  c.setLineDash([]);
+  c.beginPath();
+  let total = 0;
+  for (let i = 1; i < P.length; i++) total += Math.hypot(P[i].x - P[i - 1].x, P[i].y - P[i - 1].y);
+  const period = dash.reduce((t, v) => t + v, 0);
+  if (!dash.length || !(period > 0) || !(total > 0) || total / period > 20000) {
+    P.forEach((q, i) => (i ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y)));
+    c.stroke();
+    return;
+  }
+  let i = 0, on = true, rem = dash[0];
+  c.moveTo(P[0].x, P[0].y);
+  for (let k = 1; k < P.length; k++) {
+    let x = P[k - 1].x, y = P[k - 1].y, L = Math.hypot(P[k].x - x, P[k].y - y);
+    if (!(L > 0)) continue;
+    const ux = (P[k].x - x) / L, uy = (P[k].y - y) / L;
+    while (L > 1e-9) {
+      const take = Math.min(rem, L);
+      x += ux * take; y += uy * take; L -= take; rem -= take;
+      if (on) c.lineTo(x, y); else c.moveTo(x, y);
+      if (rem <= 1e-9) { i++; on = !on; rem = dash[i % dash.length]; if (!(rem > 0)) rem = 1e-3; }
+    }
+  }
+  c.stroke();
+}
+
+// Distancia (px) de (sx,sy) a una poligonal en pantalla.
+function distToPolyline(P, sx, sy) {
+  let best = Infinity;
+  for (let i = 1; i < P.length; i++) best = Math.min(best, dist(closestOnSeg({ x: sx, y: sy }, P[i - 1], P[i]), { x: sx, y: sy }));
+  return best;
 }
 
 // Segmento con patron dibujado tramo a tramo (px de dispositivo).
@@ -377,6 +427,23 @@ export function render(c, W, H, v, o) {
     if (o.ui && isSel('ln', id)) { c.setLineDash([]); c.strokeStyle = theme.sel + '88'; c.lineWidth = (l.w + 6) * dpr; c.beginPath(); c.moveTo(a.x * dpr, a.y * dpr); c.lineTo(b.x * dpr, b.y * dpr); c.stroke(); }
     const dsh = applyStroke(c, l.color, l.w, l.ltype, o, l.ls);
     strokeLine(c, a.x * dpr, a.y * dpr, b.x * dpr, b.y * dpr, dsh);
+  }
+  for (const [id, sp] of Object.entries(doc.splines)) {
+    const P = splinePolyline(doc, sp, 16).map((q) => { const s = toScreen(q); return { x: s.x * dpr, y: s.y * dpr }; });
+    if (o.ui && isSel('sp', id)) {
+      c.setLineDash([]); c.strokeStyle = theme.sel + '88'; c.lineWidth = (sp.w + 6) * dpr; c.lineJoin = 'round';
+      c.beginPath(); P.forEach((q, i) => (i ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y))); c.stroke();
+    }
+    const dsh = applyStroke(c, sp.color, sp.w, sp.ltype, o, sp.ls);
+    c.lineJoin = 'round';
+    strokePolyline(c, P, dsh);
+  }
+  for (const tr of Object.values(doc.traces)) {
+    if (tr.pts.length < 2) continue;
+    const P = tr.pts.map((q) => { const s = toScreen(q); return { x: s.x * dpr, y: s.y * dpr }; });
+    const dsh = applyStroke(c, tr.color, tr.w, tr.ltype, o, tr.ls);
+    c.lineJoin = 'round';
+    strokePolyline(c, P, dsh);
   }
   c.setLineDash([]);
   if (o.texts !== false) drawTexts(c, o);
@@ -597,6 +664,14 @@ function drawPreview(c) {
         c.setLineDash([]); c.beginPath(); c.arc(m.x * dpr, m.y * dpr, 4 * dpr, 0, 7); c.stroke();
       }
     }
+    if (tool === 'spline' && pending?.ids) {
+      const Pm = pending.ids.map((id) => doc.pts[id]);
+      if (!(s.type === 'pt' && s.id === pending.ids[pending.ids.length - 1])) Pm.push({ x: s.x, y: s.y });
+      const Sm = splineSamples(Pm, false, 12).map(toScreen);
+      c.setLineDash([6 * dpr, 4 * dpr]); c.beginPath();
+      Sm.forEach((q, i) => (i ? c.lineTo(q.x * dpr, q.y * dpr) : c.moveTo(q.x * dpr, q.y * dpr)));
+      c.stroke();
+    }
     if (tool === 'circle' && pending?.center) {
       const cc = toScreen(doc.pts[pending.center]);
       const r = dist(cc, sp);
@@ -754,9 +829,16 @@ function toolMove(p) {
     const res = solve(doc, []);
     if (!res.ok) ci.r = r0;
   } else {
-    const dx = m.x - drag.m0.x, dy = m.y - drag.m0.y;
-    const targets = Object.entries(drag.orig).map(([id, o]) => ({ id, x: o.x + dx, y: o.y + dy }));
-    solve(doc, targets);
+    // con trazados activos se interpola el movimiento en pasos cortos para que la trayectoria salga continua
+    const cur2 = { dx: m.x - drag.m0.x, dy: m.y - drag.m0.y }, prev = drag.lastD || { dx: 0, dy: 0 };
+    const tracing = Object.keys(doc.traces).length > 0;
+    const steps = tracing ? Math.min(40, Math.max(1, Math.ceil((Math.hypot(cur2.dx - prev.dx, cur2.dy - prev.dy) * view.s) / 8))) : 1;
+    for (let i = 1; i <= steps; i++) {
+      const f = i / steps, dx = prev.dx + (cur2.dx - prev.dx) * f, dy = prev.dy + (cur2.dy - prev.dy) * f;
+      const r = solve(doc, Object.entries(drag.orig).map(([id, o]) => ({ id, x: o.x + dx, y: o.y + dy })));
+      if (r.ok && tracing) recordTraces(doc, 1.5 / view.s);
+    }
+    drag.lastD = cur2;
   }
   draw();
 }
@@ -798,6 +880,14 @@ function toolUp(p, q) {
     const id = addCircle(doc, pending.center, r, style());
     if (sUp.type === 'pt') addCon(doc, { t: 'PONC', refs: [sUp.id, id] });
     pending = null; finishEdit();
+    return;
+  }
+  if (tool === 'spline') {
+    if (!pending) { pushUndo(); pending = { ids: [pointFrom(sUp)] }; draw(); return; }
+    const ids = pending.ids;
+    if (sUp.type === 'pt' && sUp.id === ids[ids.length - 1]) { finishSpline(false); return; } // tocar de nuevo el ultimo punto termina
+    if (sUp.type === 'pt' && sUp.id === ids[0] && ids.length >= 3) { finishSpline(true); return; } // tocar el primero cierra la curva
+    ids.push(pointFrom(sUp)); draw();
     return;
   }
   if (tool === 'text') { placeText(sUp); return; }
@@ -848,6 +938,15 @@ function toolUp(p, q) {
     if (pending.items.length === 2) { const it = pending.items; pending = null; sel = []; makeIntersections(it); }
     else { toast('Toca el segundo elemento'); afterChange(); }
   }
+}
+
+function finishSpline(closed) {
+  const ids = pending?.ids || [];
+  pending = null;
+  if (ids.length < 2) { cleanup(doc); afterChange(); return; }
+  const id = addSpline(doc, ids, style(), closed);
+  sel = [{ k: 'sp', id }];
+  afterChange();
 }
 
 function niceHeight() {
@@ -1092,8 +1191,9 @@ function applyStyle(prop, value) {
   let touched = false;
   if (sel.length) pushUndo();
   for (const s of sel) {
-    const o = s.k === 'ln' ? doc.lines[s.id] : s.k === 'ci' ? doc.circles[s.id] : s.k === 'ar' ? doc.arcs[s.id] : (s.k === 'ha' || s.k === 'tx') && prop === 'color' ? (s.k === 'ha' ? doc.hatches[s.id] : doc.texts[s.id]) : null;
+    const o = s.k === 'ln' ? doc.lines[s.id] : s.k === 'ci' ? doc.circles[s.id] : s.k === 'ar' ? doc.arcs[s.id] : s.k === 'sp' ? doc.splines[s.id] : (s.k === 'ha' || s.k === 'tx') && prop === 'color' ? (s.k === 'ha' ? doc.hatches[s.id] : doc.texts[s.id]) : null;
     if (o) { o[prop] = value; touched = true; }
+    else if (s.k === 'pt' && doc.traces[s.id]) { doc.traces[s.id][prop] = value; touched = true; } // el estilo de un punto con trazado es el de su trayectoria
   }
   if (sel.length && !touched) undoStack.pop();
   afterChange();
@@ -1161,12 +1261,13 @@ function buildAnchors() {
 }
 
 function syncPanel() {
-  const first = sel.map((s) => (s.k === 'ln' ? doc.lines[s.id] : s.k === 'ci' ? doc.circles[s.id] : s.k === 'ar' ? doc.arcs[s.id] : null)).find(Boolean);
+  const first = sel.map((s) => (s.k === 'ln' ? doc.lines[s.id] : s.k === 'ci' ? doc.circles[s.id] : s.k === 'ar' ? doc.arcs[s.id] : s.k === 'sp' ? doc.splines[s.id] : null)).find(Boolean);
   const hat = sel.map((s) => (s.k === 'ha' ? doc.hatches[s.id] : null)).find(Boolean);
   const txt = sel.map((s) => (s.k === 'tx' ? doc.texts[s.id] : null)).find(Boolean);
   if (first) { cur.color = first.color; cur.ltype = first.ltype; cur.w = first.w; cur.ls = first.ls ?? 1; }
   else if (hat) cur.color = hat.color;
   else if (txt) cur.color = txt.color;
+  else if (sel.some((s) => s.k === 'pt' && doc.traces[s.id])) { const tr = doc.traces[sel.find((s) => s.k === 'pt' && doc.traces[s.id]).id]; cur.color = tr.color; cur.ltype = tr.ltype; cur.w = tr.w; cur.ls = tr.ls ?? 1; }
   $('ltEl').value = String(cur.ls ?? 1);
   syncTextPanel(txt);
   fillLtypes();
@@ -1188,7 +1289,7 @@ function updateHatchFromPanel() {
 }
 
 function createHatch() {
-  const ids = sel.filter((s) => s.k === 'ln' || s.k === 'ci' || s.k === 'ar').map((s) => s.id);
+  const ids = sel.filter((s) => s.k === 'ln' || s.k === 'ci' || s.k === 'ar' || s.k === 'sp').map((s) => s.id);
   if (!ids.length) { toast('Selecciona las líneas, arcos o círculos que forman el contorno'); return; }
   const h = { ids, kind: $('hKind').value, angle: Number($('hAngle').value) || 0, spacing: Math.max(2, Number($('hSpace').value) || 8), alpha: Number($('hAlpha').value), color: cur.color };
   if (!hatchLoops(doc, h).length) { toast('El contorno debe ser cerrado (líneas y arcos encadenados) o un círculo'); return; }
@@ -1207,6 +1308,7 @@ const HINTS = {
   circle: 'Toca el centro y luego un punto del borde.',
   intersect: 'Toca dos elementos (línea, arco o círculo) para crear su punto de intersección.',
   text: 'Toca donde va el punto de insercion del texto (puede ser un punto existente).',
+  spline: 'Spline por puntos: toca los puntos por donde pasa la curva. Tocar de nuevo el último (o Esc) termina; tocar el primero la cierra.',
   arcc: 'Arco por centro y extremos: toca el centro, el inicio y el fin (sentido antihorario).',
   arc3: 'Arco por 3 puntos: toca el inicio, un punto intermedio y el fin.',
 };
@@ -1223,6 +1325,7 @@ function updateStatus(p) {
     else if (s.k === 'ln') { const [a, b] = lineEnds(s.id).map((i) => doc.pts[i]); txt = `Línea: longitud ${fmt(dist(a, b))}, ángulo ${fmt((Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI)}°, ${ltLabel(doc.lines[s.id])}`; }
     else if (s.k === 'ci') txt = `Círculo: radio ${fmt(doc.circles[s.id].r)}, ${ltLabel(doc.circles[s.id])}`;
     else if (s.k === 'tx') { const t = doc.texts[s.id]; txt = `Texto: “${t.text.split('\n')[0].slice(0, 24)}”, ${fmt(t.ang)}°, insercion ${t.anchor}${t.ref ? ', alineado con una línea' : ''}`; }
+    else if (s.k === 'sp') { const sp = doc.splines[s.id]; txt = `Spline: ${sp.pts.length} puntos, ${sp.closed ? 'cerrada' : 'abierta'}, ${ltLabel(sp)}`; }
     else if (s.k === 'ar') { const g = arcOf(doc, doc.arcs[s.id]); txt = `Arco: radio ${fmt(doc.arcs[s.id].r)}, ${fmt((g.sweep * 180) / Math.PI)}°, ${ltLabel(doc.arcs[s.id])}`; }
     else if (s.k === 'ha') txt = 'Relleno seleccionado';
     else if (s.k === 'co') txt = 'Restricción/cota seleccionada';
@@ -1243,6 +1346,8 @@ function contentBounds() {
   for (const p of Object.values(doc.pts)) { xs.push(p.x); ys.push(p.y); }
   for (const c of Object.values(doc.circles)) { const p = doc.pts[c.c]; xs.push(p.x - c.r, p.x + c.r); ys.push(p.y - c.r, p.y + c.r); }
   for (const a of Object.values(doc.arcs)) { const p = doc.pts[a.c]; xs.push(p.x - a.r, p.x + a.r); ys.push(p.y - a.r, p.y + a.r); }
+  for (const sp of Object.values(doc.splines)) for (const q of splinePolyline(doc, sp, 8)) { xs.push(q.x); ys.push(q.y); }
+  for (const tr of Object.values(doc.traces)) for (const q of tr.pts) { xs.push(q.x); ys.push(q.y); }
   if (!xs.length) return null;
   return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
 }
@@ -1257,7 +1362,7 @@ function fitView() {
 }
 function loadDoc(d) {
   if (!d || typeof d !== 'object' || !d.pts || !d.lines || !d.circles) throw new Error('Archivo no válido');
-  doc = { n: 0, cons: {}, hatches: {}, ltypes: {}, arcs: {}, texts: {}, ...d };
+  doc = { n: 0, cons: {}, hatches: {}, ltypes: {}, arcs: {}, texts: {}, splines: {}, traces: {}, ...d };
   undoStack = []; redoStack = []; sel = []; pending = null;
 }
 function exportPNG() {
@@ -1286,7 +1391,7 @@ function exportPNG() {
 
 // ---------------------------------------------------------------- cableado de la interfaz
 function setTool(t) {
-  if (pending) { pending = null; cleanup(doc); }
+  if (pending) { if (tool === 'spline' && pending.ids?.length >= 2) finishSpline(false); else { pending = null; cleanup(doc); } }
   tool = t;
   document.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === t));
   if (t !== 'intersect') pending = null;
@@ -1314,6 +1419,40 @@ $('colorPick').oninput = (e) => applyStyle('color', e.target.value);
 ['hKind', 'hAngle', 'hSpace', 'hAlpha'].forEach((id) => { $(id).onchange = updateHatchFromPanel; });
 $('hAlpha').oninput = updateHatchFromPanel;
 $('mkhatch').onclick = createHatch;
+$('trTrace').onclick = () => {
+  const pts = sel.filter((x) => x.k === 'pt').map((x) => x.id);
+  if (!pts.length) { toast('Selecciona uno o más puntos'); return; }
+  pushUndo();
+  if (pts.every((id) => doc.traces[id])) { pts.forEach((id) => delete doc.traces[id]); toast('Trazado desactivado'); }
+  else { pts.forEach((id) => startTrace(doc, id)); toast('Trazado activado: mueve el mecanismo para dibujar la trayectoria'); }
+  afterChange();
+};
+$('trClear').onclick = () => {
+  const pts = sel.filter((x) => x.k === 'pt' && doc.traces[x.id]).map((x) => x.id);
+  if (!pts.length) return;
+  pushUndo();
+  pts.forEach((id) => { doc.traces[id].pts = [{ x: doc.pts[id].x, y: doc.pts[id].y }]; });
+  afterChange();
+};
+$('trSpline').onclick = () => {
+  const pid = sel.find((x) => x.k === 'pt' && doc.traces[x.id])?.id;
+  if (!pid) { toast('Selecciona un punto con trazado'); return; }
+  pushUndo();
+  const id = traceToSpline(doc, pid, Math.max(3, Math.round(Number($('trN').value) || 16)));
+  if (!id) { rollback(); toast('Aún no hay trayectoria: mueve el mecanismo con el trazado activado'); afterChange(); return; }
+  sel = [{ k: 'sp', id }];
+  toast(doc.splines[id].closed ? 'Spline cerrado creado a partir del trazado' : 'Spline creado a partir del trazado');
+  afterChange();
+};
+$('spClose').onclick = () => {
+  const sps = sel.filter((x) => x.k === 'sp').map((x) => doc.splines[x.id]);
+  if (!sps.length) return;
+  if (sps.some((sp) => sp.pts.length < 3)) { toast('Una curva cerrada necesita al menos 3 puntos'); return; }
+  pushUndo();
+  const to = !sps.every((sp) => sp.closed);
+  sps.forEach((sp) => { sp.closed = to; });
+  afterChange();
+};
 $('ltEl').oninput = (e) => applyStyle('ls', Number(e.target.value));
 $('txContent').onchange = (e) => applyText('text', e.target.value);
 $('txAlign').onclick = () => {
@@ -1397,9 +1536,9 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') { spaceDown = true; e.preventDefault(); }
   if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
   else if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); }
-  else if (k === 'escape') { if (pending) cancelPending(); else { sel = []; afterChange(); } }
+  else if (k === 'escape') { if (pending) { if (tool === 'spline' && pending.ids?.length >= 2) finishSpline(false); else cancelPending(); } else { sel = []; afterChange(); } }
   else if (k === 'delete' || k === 'backspace') $('del').click();
-  else if (!e.ctrlKey && !e.metaKey) { const m = { v: 'select', p: 'point', l: 'line', c: 'circle', i: 'intersect', a: 'arc3', r: 'arcc', t: 'text' }[k]; if (m) setTool(m); }
+  else if (!e.ctrlKey && !e.metaKey) { const m = { v: 'select', p: 'point', l: 'line', c: 'circle', i: 'intersect', a: 'arc3', r: 'arcc', t: 'text', s: 'spline' }[k]; if (m) setTool(m); }
 });
 window.addEventListener('keyup', (e) => { if (e.code === 'Space') spaceDown = false; });
 window.addEventListener('resize', resize);

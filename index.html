@@ -85,6 +85,7 @@ small { color: var(--muted); }
   <button data-tool="circle" data-icon="circle" title="Círculo (C)" aria-label="Círculo"><i></i></button>
   <button data-tool="arcc" data-icon="arc-c" title="Arco por centro y extremos (R)" aria-label="Arco por centro y extremos"><i></i></button>
   <button data-tool="arc3" data-icon="arc-3" title="Arco por 3 puntos (A)" aria-label="Arco por 3 puntos"><i></i></button>
+  <button data-tool="spline" data-icon="spline" title="Spline por puntos (S)" aria-label="Spline por puntos"><i></i></button>
   <button data-tool="text" data-icon="text" title="Texto (T)" aria-label="Texto"><i></i></button>
   <button data-tool="intersect" data-icon="intersect" title="Intersección de 2 elementos (I)" aria-label="Intersección"><i></i></button>
   <span class="sep"></span>
@@ -138,6 +139,16 @@ small { color: var(--muted); }
     <div class="row"><label>Punto de inserción</label></div>
     <div class="txa" id="txAnchors"></div>
     <small>Elige en qué punto de la caja del texto está el punto de inserción. Ese punto es un punto real: se puede acotar, fijar o relacionar con otros elementos.</small>
+</details>
+<details class="sec" data-sec="curves"><summary data-icon="trace"><i></i>Spline y trazado</summary>
+    <div class="grid2">
+      <button id="trTrace" data-icon="trace" title="Activar o quitar el trazado de los puntos seleccionados: dibujan su trayectoria al mover el mecanismo"><i></i><span>Trazar punto</span></button>
+      <button id="trClear" data-icon="trash" title="Borrar la trayectoria dibujada (el trazado sigue activo)"><i></i><span>Borrar trayectoria</span></button>
+      <button id="trSpline" data-icon="spline" title="Convertir la trayectoria de un punto en un spline editable"><i></i><span>Trazado a spline</span></button>
+      <button id="spClose" data-icon="spline" title="Cerrar o abrir el spline seleccionado"><i></i><span>Cerrar / abrir</span></button>
+    </div>
+    <div class="row"><label for="trN">Puntos del spline</label><input type="number" id="trN" value="16" min="3" max="200" step="1"></div>
+    <small>Selecciona un punto, pulsa "Trazar punto" y arrastra el mecanismo: el punto deja su trayectoria. Luego puedes convertirla en un spline.</small>
 </details>
 <details class="sec" data-sec="lt"><summary data-icon="linetype"><i></i>Nuevo tipo de línea</summary>
     <div class="row"><label for="ltName">Nombre</label><input type="text" id="ltName" placeholder="mi tipo"></div>

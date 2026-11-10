@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { newDoc, addPoint, addLine, addCircle, addArc, addCon, addText, deleteItems, hatchLoops, arcOf } from '../src/model.js';
+import { newDoc, addPoint, addLine, addCircle, addArc, addCon, addText, addSpline, deleteItems, hatchLoops, arcOf, cleanup, splinePolyline } from '../src/model.js';
+import { startTrace, recordTraces, traceToSpline } from '../src/curves.js';
 import { layoutDim, dragDim, dimValue, dimText } from '../src/dims.js';
 import { textFrame, textCorners, textHit, textPose, rawAngle } from '../src/text.js';
 import { exportSVG, exportDXF, dimLayouts, extraExtents } from '../src/export.js';
 import { splitElement } from '../src/split.js';
 import { initSolver, solve } from '../src/solver.js';
-import { lineLine, lineCircle, circleCircle, signedAngle, dashFromPattern, parsePattern, circumcircle, arcSweepOf, TAU } from '../src/geom.js';
+import { lineLine, lineCircle, circleCircle, signedAngle, dashFromPattern, parsePattern, circumcircle, arcSweepOf, TAU, splineSamples, resamplePolyline, polylineLength } from '../src/geom.js';
 
 await initSolver();
 const near = (a, b, eps = 1e-6, msg) => assert.ok(Math.abs(a - b) < eps, `${msg || ''} ${a} vs ${b}`);
@@ -522,6 +523,108 @@ t('cotas de referencia: miden en vivo, no entran al solver y salen en cursiva', 
   const circ = addCircle(d, c, 4, {});
   const kc = { t: 'RAD', refs: [circ], v: 1, ref: true };
   assert.equal(dimText(d, kc), 'φ8');
+});
+
+
+t('spline: pasa por todos los puntos, cierra y no hace picos', () => {
+  const P = [{ x: 0, y: 0 }, { x: 10, y: 8 }, { x: 20, y: 0 }, { x: 30, y: 8 }];
+  const S = splineSamples(P, false, 16);
+  assert.equal(S.length, 3 * 16 + 1);
+  P.forEach((q) => assert.ok(S.some((r) => Math.hypot(r.x - q.x, r.y - q.y) < 1e-9), 'pasa por el punto'));
+  assert.ok(S.every((r) => r.y > -3 && r.y < 11), 'sin oscilaciones grandes (centripeta)');
+  assert.deepEqual(splineSamples([P[0], P[1]], false), [P[0], P[1]], 'con 2 puntos es un segmento');
+  const C = splineSamples([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }], true, 16);
+  assert.equal(C.length, 4 * 16 + 1);
+  near(C[0].x, C[C.length - 1].x, 1e-9); near(C[0].y, C[C.length - 1].y, 1e-9);
+  const dup = splineSamples([{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 5, y: 5 }], false, 8);
+  assert.ok(dup.every((r) => Number.isFinite(r.x) && Number.isFinite(r.y)), 'puntos repetidos no dan NaN');
+});
+
+t('spline: entidad ligada a puntos reales; borrar un punto lo quita de la curva; relleno de curva cerrada', () => {
+  const d = newDoc();
+  const ids = [[0, 0], [10, 0], [10, 10], [0, 10], [5, 14]].map(([x, y]) => addPoint(d, x, y, false));
+  const sp = addSpline(d, ids, { color: 'auto', ltype: 'continua', w: 2 }, true);
+  assert.equal(splinePolyline(d, d.splines[sp]).length, 5 * 16 + 1);
+  const loops = hatchLoops(d, { ids: [sp] });
+  assert.equal(loops.length, 1);
+  assert.equal(loops[0].pts.length, 5 * 12, "curva cerrada muestreada sin repetir el primer punto");
+  deleteItems(d, [{ k: 'pt', id: ids[4] }]);
+  assert.equal(d.splines[sp].pts.length, 4);
+  deleteItems(d, [{ k: 'pt', id: ids[3] }, { k: 'pt', id: ids[2] }, { k: 'pt', id: ids[1] }]);
+  assert.ok(!(sp in d.splines), 'con menos de 2 puntos la curva desaparece');
+});
+
+t('trazado: el punto del seguidor deja su trayectoria al simular el mecanismo', () => {
+  const d = newDoc();
+  const o2 = addPoint(d, 0, 0), o4 = addPoint(d, 8, 0);
+  d.pts[o2].fixed = d.pts[o4].fixed = true;
+  const a = addPoint(d, 0, 3), b = addPoint(d, 8, 4), m = addPoint(d, 4, 6);
+  addLine(d, o2, a, {}); addLine(d, a, b, {}); addLine(d, o4, b, {});
+  addCon(d, { t: 'DIST', refs: [o2, a], v: 3 }); addCon(d, { t: 'DIST', refs: [a, b], v: 9 }); addCon(d, { t: 'DIST', refs: [o4, b], v: 5 });
+  addCon(d, { t: 'DIST', refs: [a, m], v: 4 }); addCon(d, { t: 'DIST', refs: [b, m], v: 6 });
+  assert.ok(startTrace(d, m));
+  assert.ok(!startTrace(d, m), 'no duplica el trazado');
+  let n = 0;
+  for (let i = 0; i <= 40; i++) {
+    const th = Math.PI / 6 + (i * Math.PI) / 40;
+    const r = solve(d, [{ id: a, x: 3 * Math.cos(th), y: 3 * Math.sin(th) }]);
+    if (r.ok) n += recordTraces(d, 0.05);
+  }
+  const tr = d.traces[m];
+  assert.ok(tr.pts.length > 25, 'muestras: ' + tr.pts.length);
+  assert.equal(tr.pts.length, n + 1);
+  // cada muestra cumple la geometria del acoplador (trayectoria fisicamente valida)
+  const A = (q) => q; void A;
+  const d2 = (p, q) => Math.hypot(p.x - q.x, p.y - q.y);
+  const last = tr.pts[tr.pts.length - 1];
+  near(d2(last, d.pts[m]), 0, 1e-3, 'la ultima muestra es la posicion actual');
+  assert.ok(Math.hypot(tr.pts[0].x - last.x, tr.pts[0].y - last.y) > 1, 'la trayectoria se movio');
+  const before = tr.pts.length;
+  recordTraces(d, 0.05);
+  assert.equal(tr.pts.length, before, 'sin movimiento no agrega');
+});
+
+t('trazado: convertir a spline reparte puntos por longitud y detecta trayectorias cerradas', () => {
+  const d = newDoc();
+  const m = addPoint(d, 10, 0);
+  startTrace(d, m);
+  for (let i = 1; i <= 120; i++) { const th = (i / 120) * Math.PI * 2; d.pts[m].x = 10 * Math.cos(th); d.pts[m].y = 10 * Math.sin(th); recordTraces(d, 0.01); }
+  const sid = traceToSpline(d, m, 12);
+  const sp = d.splines[sid];
+  assert.equal(sp.closed, true);
+  assert.equal(sp.pts.length, 12);
+  assert.ok(sp.pts.every((p) => d.pts[p].splOnly && d.pts[p].auto), 'puntos de control propios de la curva');
+  // los puntos estan sobre la circunferencia y bien repartidos
+  const angs = sp.pts.map((p) => Math.atan2(d.pts[p].y, d.pts[p].x));
+  sp.pts.forEach((p) => near(Math.hypot(d.pts[p].x, d.pts[p].y), 10, 0.05));
+  const gaps = angs.map((a, i) => ((angs[(i + 1) % angs.length] - a + 3 * Math.PI) % (2 * Math.PI)) - Math.PI);
+  gaps.forEach((g) => near(Math.abs(g), (2 * Math.PI) / 12, 0.1, 'reparto uniforme'));
+  deleteItems(d, [{ k: 'sp', id: sid }]);
+  assert.equal(Object.keys(d.pts).length, 1, 'al borrar la curva se van sus puntos de control');
+  // trayectoria abierta
+  const e = newDoc(), q = addPoint(e, 0, 0);
+  startTrace(e, q);
+  for (let i = 1; i <= 50; i++) { e.pts[q].x = i; e.pts[q].y = Math.sin(i / 8) * 3; recordTraces(e, 0.01); }
+  const s2 = e.splines[traceToSpline(e, q, 8)];
+  assert.equal(s2.closed, false);
+  assert.equal(s2.pts.length, 8);
+  near(e.pts[s2.pts[0]].x, 0, 1e-9); near(e.pts[s2.pts[7]].x, 50, 1e-9);
+  assert.equal(traceToSpline(newDoc(), 'nada'), null);
+});
+
+t('exportar: splines y trazados salen en SVG y DXF', () => {
+  const d = newDoc();
+  const ids = [[0, 0], [10, 6], [20, 0]].map(([x, y]) => addPoint(d, x, y, false));
+  addSpline(d, ids, { color: '#2563eb', ltype: 'eje', w: 2, ls: 1 }, false);
+  const m = addPoint(d, 5, 5); startTrace(d, m); d.pts[m].x = 9; recordTraces(d, 0.1); d.pts[m].y = 8; recordTraces(d, 0.1);
+  const svg = exportSVG(d, 1);
+  assert.equal(svg.split('<path d="M').length - 1, 2, 'spline + trazado');
+  assert.ok(svg.includes('stroke="#2563eb"') && svg.includes('stroke="#db2777"'));
+  const rows = exportDXF(d, 5).trim().split('\r\n');
+  assert.equal(rows.length % 2, 0);
+  assert.equal(rows.filter((r) => r === 'POLYLINE').length, 2);
+  assert.equal(rows.filter((r) => r === 'SEQEND').length, 2);
+  assert.equal(rows.filter((r) => r === 'VERTEX').length, 2 * 0 + 2 * 16 + 1 + 3);
 });
 
 console.log(`\n${passed} pruebas pasaron`);

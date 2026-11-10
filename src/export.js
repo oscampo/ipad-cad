@@ -1,4 +1,4 @@
-import { hatchLoops, allLtypes, arcOf } from './model.js';
+import { hatchLoops, allLtypes, arcOf, splinePolyline } from './model.js';
 import { dashFromPattern, norm } from './geom.js';
 import { textFrame, textCorners, textPose, LINE_SPACING } from './text.js';
 import { layoutDim } from './dims.js';
@@ -11,6 +11,8 @@ function bounds(doc) {
   for (const p of Object.values(doc.pts)) { xs.push(p.x); ys.push(p.y); }
   for (const c of Object.values(doc.circles)) { const p = doc.pts[c.c]; xs.push(p.x - c.r, p.x + c.r); ys.push(p.y - c.r, p.y + c.r); }
   for (const a of Object.values(doc.arcs || {})) { const p = doc.pts[a.c]; xs.push(p.x - a.r, p.x + a.r); ys.push(p.y - a.r, p.y + a.r); }
+  for (const sp of Object.values(doc.splines || {})) for (const q of splinePolyline(doc, sp, 8)) { xs.push(q.x); ys.push(q.y); }
+  for (const tr of Object.values(doc.traces || {})) for (const q of tr.pts) { xs.push(q.x); ys.push(q.y); }
   if (!xs.length) return null;
   return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
 }
@@ -125,6 +127,15 @@ export function exportSVG(doc, ltScale = 1, vis = {}) {
     const a = doc.pts[l.a], q = doc.pts[l.b];
     out.push(`<line x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(q.x)}" y2="${Y(q.y)}" stroke="${col(l.color)}" stroke-width="${l.w}"${dash(l.ltype, l.ls)}/>`);
   }
+  // splines y trazados: poligonal muestreada
+  const polyPath = (pts, closed) => 'M' + pts.map((q) => `${X(q.x)} ${Y(q.y)}`).join(' L') + (closed ? ' Z' : '');
+  for (const sp of Object.values(doc.splines || {})) {
+    out.push(`<path d="${polyPath(splinePolyline(doc, sp, 16), sp.closed)}" fill="none" stroke="${col(sp.color)}" stroke-width="${sp.w}" stroke-linejoin="round"${dash(sp.ltype, sp.ls)}/>`);
+  }
+  for (const tr of Object.values(doc.traces || {})) {
+    if (tr.pts.length < 2) continue;
+    out.push(`<path d="${polyPath(tr.pts, false)}" fill="none" stroke="${col(tr.color)}" stroke-width="${tr.w}" stroke-linejoin="round"${dash(tr.ltype, tr.ls)}/>`);
+  }
   // textos: ancho aproximado (0.6 de la altura por caracter) solo para alinear
   for (const t of vis.texts === false ? [] : Object.values(doc.texts || {})) {
     const P = doc.pts[t.pt];
@@ -174,6 +185,14 @@ export function exportDXF(doc, viewScale = 5, vis = {}) {
     if (sweep > Math.PI * 2 - 1e-6) { g(0, 'CIRCLE'); g(8, '0'); g(10, p.x); g(20, p.y); g(30, 0); g(40, ar.r); continue; }
     g(0, 'ARC'); g(8, '0'); g(10, p.x); g(20, p.y); g(30, 0); g(40, ar.r); g(50, deg(a0)); g(51, deg(a0 + sweep));
   }
+  // splines y trazados como POLYLINE (R12) con los vertices muestreados
+  const poly = (pts, closed) => {
+    g(0, 'POLYLINE'); g(8, '0'); g(66, 1); g(70, closed ? 1 : 0);
+    for (const q of pts) { g(0, 'VERTEX'); g(8, '0'); g(10, q.x); g(20, q.y); g(30, 0); }
+    g(0, 'SEQEND'); g(8, '0');
+  };
+  for (const sp of Object.values(doc.splines || {})) poly(splinePolyline(doc, sp, 16), sp.closed);
+  for (const tr of Object.values(doc.traces || {})) if (tr.pts.length >= 2) poly(tr.pts, false);
   // textos: una entidad TEXT por linea, alineada segun el punto de insercion (ancho aproximado)
   for (const t of vis.texts === false ? [] : Object.values(doc.texts || {})) {
     const P = doc.pts[t.pt];

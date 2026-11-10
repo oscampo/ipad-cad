@@ -38,6 +38,8 @@ const custom = {
   'arc-3': S('<path d="M4 19Q12 1 20 19"/><circle cx="4" cy="19" r="1.8" fill="currentColor"/><circle cx="12" cy="10" r="1.8" fill="currentColor"/><circle cx="20" cy="19" r="1.8" fill="currentColor"/>'),
   // dividir: tramos separados por puntos (_._._)
   split: S('<path d="M1.5 14H6"/><circle cx="8" cy="14" r="1.7" fill="currentColor"/><path d="M10 14h4"/><circle cx="16" cy="14" r="1.7" fill="currentColor"/><path d="M18 14h4.5"/>'),
+  spline: S('<path d="M3 18C8 4 14 4 21 18"/><circle cx="3" cy="18" r="1.8" fill="currentColor"/><circle cx="12" cy="8" r="1.8" fill="currentColor"/><circle cx="21" cy="18" r="1.8" fill="currentColor"/>'),
+  trace: S('<path d="M3 19C6 19 8 12 12 11s5-4 6-5" stroke-dasharray="1.5 3"/><circle cx="19.5" cy="5" r="2.4" fill="currentColor"/>'),
   text: S('<path d="M5 7V5h14v2M12 5v14M9 19h6"/>'),
   'con-mid': S('<path d="M3 12h18"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/><path d="M3 8v8M21 8v8M8 9.5v5M16 9.5v5" opacity=".45"/>'),
   'con-tan': S('<circle cx="12" cy="14" r="6"/><path d="M3 8h18"/>'),

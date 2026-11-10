@@ -14,6 +14,8 @@ CAD 2D parametrico para iPad (uso personal), inspirado en Updraw. PWA: se instal
 - Texto con punto de insercion (esquinas, medios de lado o centro de la caja), angulo y altura; el punto es un punto real del dibujo.
 - Texto alineado con una linea (sigue su direccion, con desfase) y modo legible (se gira 180 grados si quedaria boca abajo, manteniendo su caja en el mismo sitio).
 - Cotas de referencia (solo lectura, en cursiva): miden en vivo y no entran al solver, para medir resultados sin generar conflictos.
+- Splines por puntos (Catmull-Rom centripeta, abiertos o cerrados): pasan por puntos reales del dibujo y se pueden rellenar y exportar.
+- Trazado de trayectorias: marca un punto con "Trazar punto" y al arrastrar el mecanismo deja su trayectoria; se puede convertir en un spline editable.
 - Interruptores de vista: restricciones, puntos, cotas y textos.
 - Escala del patron de linea por elemento.
 - Exportar .json, PNG, SVG, DXF (lineas, arcos, circulos, puntos, textos y cotas; en DXF las cotas salen como geometria: LINE, ARC, SOLID y TEXT, no como entidades DIMENSION).
