@@ -74,6 +74,26 @@ dialog .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top
 .txa button { padding: 4px; min-width: 44px; }
 canvas.preview { width: 100%; height: 24px; display: block; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
 small { color: var(--muted); }
+#tree { display: none; position: absolute; left: 0; top: 0; bottom: 0; width: min(320px, 88%); z-index: 6; flex-direction: column; background: var(--panel); border-right: 1px solid var(--line); box-shadow: 2px 0 12px rgba(0,0,0,.15); }
+body.treeopen #tree { display: flex; }
+#tree .thead { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px 4px 12px; border-bottom: 1px solid var(--line); }
+#tree .thead button { min-height: 36px; min-width: 36px; }
+#treeBody { overflow-y: auto; flex: 1; padding: 4px 0 24px; -webkit-overflow-scrolling: touch; }
+#treeBody details { margin: 0; }
+#treeBody summary, #treeBody .leaf { display: flex; align-items: center; gap: 4px; min-height: 40px; padding-right: 4px; cursor: pointer; list-style: none; }
+#treeBody summary::-webkit-details-marker { display: none; }
+#treeBody summary::before { content: ""; flex: none; width: 7px; height: 7px; margin: 0 8px 0 6px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform .12s; }
+#treeBody details[open] > summary::before { transform: rotate(45deg); }
+#treeBody .leaf::before { content: ""; flex: none; width: 21px; }
+#treeBody .nm { flex: 1; min-width: 0; padding: 8px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#treeBody .grp > summary { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+#treeBody .row2.on > .nm, #treeBody .row2.on { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+#treeBody .row2.on > .nm { font-weight: 600; }
+#treeBody .ab { min-height: 34px; min-width: 34px; padding: 0; border: 0; background: transparent; }
+#treeBody .ab svg { width: 18px; height: 18px; }
+#treeBody .kids { margin-left: 14px; border-left: 1px solid var(--line); }
+body.nopanel main { grid-template-columns: 1fr; }
+body.nopanel #panel { display: none; }
 @media (max-width: 760px) { main { grid-template-columns: 1fr; grid-template-rows: 1fr 40%; } #panel { border-left: 0; border-top: 1px solid var(--line); } }
 </style>
 </head>
@@ -93,9 +113,14 @@ small { color: var(--muted); }
   <button id="redo" data-icon="redo" title="Rehacer (Ctrl+Y)" aria-label="Rehacer"><i></i></button>
   <button id="del" data-icon="trash" title="Borrar selección (Supr)" aria-label="Borrar"><i></i></button>
   <button id="fit" data-icon="fit" title="Ajustar vista" aria-label="Ajustar vista"><i></i></button>
+  <span class="sep"></span>
+  <button id="tTree" data-icon="list-tree" title="Árbol de elementos" aria-label="Árbol de elementos" aria-pressed="false"><i></i></button>
+  <button id="tPanel" data-icon="menu" title="Mostrar u ocultar el menú de herramientas" aria-label="Menú" aria-pressed="true"><i></i></button>
 </header>
 <main>
-  <div id="stage"><canvas id="cv"></canvas><div id="toast"></div></div>
+  <div id="stage"><canvas id="cv"></canvas><div id="toast"></div>
+    <nav id="tree" aria-label="Árbol de elementos"><div class="thead"><b>Elementos</b><button id="treeClose" aria-label="Cerrar">✕</button></div><div id="treeBody"></div></nav>
+  </div>
   <aside id="panel">
 <details class="sec" data-sec="cons" open><summary data-icon="pencil-ruler"><i></i>Restricciones</summary>
 <div class="grid2">

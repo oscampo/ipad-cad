@@ -14,6 +14,7 @@ import { layoutDim, dragDim, dimValue } from './dims.js';
 import { textFrame, textHit, textPose, rawAngle, ANCHORS, ANCHOR_NAMES, LINE_SPACING } from './text.js';
 import { exportSVG, exportSVGLaser, exportDXF, extraExtents } from './export.js';
 import { iconSvg } from './icons.js';
+import { buildTree, kindOf } from './tree.js';
 
 const VERSION = '0.1.0';
 const STORE = 'ipad-cad-v1';
@@ -82,7 +83,7 @@ function persist() {
     try { localStorage.setItem(STORE, JSON.stringify({ doc, view, cur, opts })); } catch { /* sin almacenamiento */ }
   }, 300);
 }
-function afterChange() { updateButtons(); updateEnabled(); syncPanel(); persist(); draw(); }
+function afterChange() { updateButtons(); updateEnabled(); syncPanel(); persist(); draw(); renderTree(); }
 
 // Un boton de restriccion solo se activa si la seleccion actual le sirve (mismas reglas que applyCon).
 function updateEnabled() {
@@ -118,6 +119,126 @@ function updateEnabled() {
   $('txAlign').disabled = !(sel.some((x) => x.k === 'tx') && ln === 1);
   $('txFree').disabled = !sel.some((x) => x.k === 'tx' && doc.texts[x.id]?.ref);
 }
+
+// ---------------------------------------------------------------- arbol de elementos y menu
+const treeOpen = new Set();
+let treeSelKey = '';
+const selMatch = (n) => n.sel && sel.some((s) => s.k === n.sel.k && s.id === n.sel.id);
+function renderTree() {
+  if (!document.body.classList.contains('treeopen')) return;
+  const body = $('treeBody');
+  const tree = buildTree(doc);
+  // al cambiar la seleccion desde el lienzo, se abre la rama que lleva al elemento
+  const key = sel.map((s) => s.k + s.id).join(',');
+  const reveal = key !== treeSelKey && sel.length > 0;
+  treeSelKey = key;
+  let focusEl = null;
+  const lock = iconSvg('lock');
+  const mk = (n, path, depth) => {
+    const kids = n.children && n.children.length ? n.children : null;
+    const p = path + '/' + n.key;
+    const on = !n.group && selMatch(n);
+    const head = document.createElement(kids ? 'summary' : 'div');
+    head.className = 'row2' + (on ? ' on' : '') + (kids ? '' : ' leaf');
+    const nm = document.createElement('span');
+    nm.className = 'nm'; nm.textContent = n.label; nm.title = n.label;
+    head.appendChild(nm);
+    if (n.sel) {
+      nm.onclick = (e) => { e.preventDefault(); e.stopPropagation(); treeSelect(n); };
+    }
+    const act = (svg, title, fn) => {
+      const b = document.createElement('button'); b.className = 'ab'; b.title = title; b.setAttribute('aria-label', title); b.innerHTML = svg;
+      b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); fn(); };
+      head.appendChild(b);
+    };
+    if (n.lock !== undefined) act(iconSvg(n.lock ? 'lock' : 'unlock'), n.lock ? 'Soltar punto' : 'Fijar punto', () => treeToggleFix(n.sel.id));
+    if (n.con) {
+      const k = doc.cons[n.con];
+      if (k && ['DIST', 'DISTPL', 'ANG', 'RAD'].includes(k.t) && !k.ref) act(iconSvg('ruler'), 'Editar valor', () => editDimension(n.con));
+    }
+    if (n.sel && !String(n.key).startsWith('ref:') && !String(n.key).startsWith('tr:')) act(iconSvg('trash'), 'Borrar', () => treeDelete(n.sel));
+    if (!kids) return head;
+    const d = document.createElement('details');
+    d.className = n.group ? 'grp' : '';
+    if (reveal && sel.length === 1 && containsSel(n)) treeOpen.add(p);
+    d.open = treeOpen.has(p);
+    d.addEventListener('toggle', () => { if (d.open) treeOpen.add(p); else treeOpen.delete(p); });
+    d.appendChild(head);
+    const wrap = document.createElement('div'); wrap.className = 'kids';
+    if (d.open) {
+      const lim = n.children.slice(0, 300);
+      lim.forEach((c) => wrap.appendChild(mk(c, p, depth + 1)));
+      if (n.children.length > lim.length) { const m = document.createElement('div'); m.className = 'leaf'; m.textContent = `… ${n.children.length - lim.length} más`; wrap.appendChild(m); }
+    } else {
+      // se llena al abrir (el arbol puede tener cientos de nodos)
+      d.addEventListener('toggle', function fill() {
+        if (!d.open || wrap.childElementCount) return;
+        n.children.slice(0, 300).forEach((c) => wrap.appendChild(mk(c, p, depth + 1)));
+      });
+    }
+    d.appendChild(wrap);
+    if (on && !focusEl) focusEl = head;
+    return d;
+  };
+  const containsSel = (n) => (n.sel && selMatch(n) && !n.group) || (n.children || []).some(containsSel);
+  body.textContent = '';
+  if (!tree.length) { body.innerHTML = '<p style="padding:12px;color:var(--muted)">El dibujo está vacío.</p>'; return; }
+  tree.forEach((g) => body.appendChild(mk(g, '', 0)));
+  if (!focusEl) focusEl = body.querySelector('.row2.on');
+  if (reveal && focusEl) focusEl.scrollIntoView({ block: 'nearest' });
+}
+
+function elementBounds(items) {
+  const pts = [];
+  for (const { k, id } of items) {
+    if (k === 'pt' && doc.pts[id]) pts.push(doc.pts[id]);
+    else if (k === 'ln' && doc.lines[id]) pts.push(doc.pts[doc.lines[id].a], doc.pts[doc.lines[id].b]);
+    else if ((k === 'ci' && doc.circles[id]) || (k === 'ar' && doc.arcs[id])) { const o = doc.circles[id] || doc.arcs[id], c = doc.pts[o.c]; pts.push({ x: c.x - o.r, y: c.y - o.r }, { x: c.x + o.r, y: c.y + o.r }); }
+    else if (k === 'sp' && doc.splines[id]) pts.push(...doc.splines[id].pts.map((p) => doc.pts[p]));
+    else if (k === 'tx' && doc.texts[id]) pts.push(doc.pts[doc.texts[id].pt]);
+  }
+  return pts.filter(Boolean);
+}
+// Selecciona un nodo del arbol y, si queda fuera de la vista, centra el lienzo en el.
+function treeSelect(n) {
+  const s0 = n.sel;
+  let items = [s0];
+  if (s0.k === 'co') {
+    const refs = (doc.cons[s0.id]?.refs || []).map((r) => { const k = kindOf(doc, r); return k ? { k, id: r } : null; }).filter(Boolean);
+    items = [s0, ...refs];
+  }
+  sel = items;
+  const b = elementBounds(items);
+  if (b.length) {
+    const r = cv.getBoundingClientRect();
+    const out = b.some((p) => { const q = toScreen(p); return q.x < 8 || q.y < 8 || q.x > r.width - 8 || q.y > r.height - 8; });
+    if (out) {
+      const x0 = Math.min(...b.map((p) => p.x)), x1 = Math.max(...b.map((p) => p.x)), y0 = Math.min(...b.map((p) => p.y)), y1 = Math.max(...b.map((p) => p.y));
+      view = { s: view.s, ox: r.width / 2 - ((x0 + x1) / 2) * view.s, oy: r.height / 2 + ((y0 + y1) / 2) * view.s };
+    }
+  }
+  treeSelKey = sel.map((s) => s.k + s.id).join(','); // no reabrir ramas: ya estamos en el arbol
+  afterChange();
+}
+function treeToggleFix(id) {
+  const p = doc.pts[id]; if (!p) return;
+  pushUndo(); p.fixed = !p.fixed; afterChange();
+}
+function treeDelete(s0) {
+  pushUndo(); deleteItems(doc, [s0]); sel = sel.filter(exists);
+  solve(doc, []);
+  afterChange();
+}
+function applyChrome() {
+  document.body.classList.toggle('nopanel', opts.panel === false);
+  $('tPanel').setAttribute('aria-pressed', String(opts.panel !== false));
+  document.body.classList.toggle('treeopen', !!opts.tree);
+  $('tTree').setAttribute('aria-pressed', String(!!opts.tree));
+  renderTree();
+}
+$('tPanel').onclick = () => { opts.panel = opts.panel === false; applyChrome(); persist(); };
+$('tTree').onclick = () => { opts.tree = !opts.tree; applyChrome(); persist(); };
+$('treeClose').onclick = () => { opts.tree = false; applyChrome(); persist(); };
 
 function hydrateIcons() {
   document.querySelectorAll('[data-icon]').forEach((el) => {
@@ -1649,7 +1770,7 @@ async function boot() {
   } catch { /* sin estado previo */ }
   for (const [id, key] of [['tGrid', 'grid'], ['tSnap', 'snap'], ['tCons', 'cons'], ['tTouch', 'touch'], ['tPts', 'pts'], ['tDims', 'dims'], ['tTexts', 'texts']]) $(id).setAttribute('aria-pressed', String(opts[key]));
   $('ltScale').value = String(opts.ltScale);
-  hydrateIcons(); wireLongPressHints(); wireSections(); applyLabels(); updateEnabled();
+  hydrateIcons(); wireLongPressHints(); wireSections(); applyLabels(); applyChrome(); updateEnabled();
   setTool('select');
   try { await initSolver(wasmUrl); } catch (err) { toast('No cargó el solver: ' + err.message); }
   syncPanel(); updateButtons(); resize();

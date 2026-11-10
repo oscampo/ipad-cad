@@ -5,6 +5,7 @@ import { layoutDim, dragDim, dimValue, dimText } from '../src/dims.js';
 import { textFrame, textCorners, textHit, textPose, rawAngle } from '../src/text.js';
 import { exportSVG, exportSVGLaser, exportDXF, dimLayouts, extraExtents } from '../src/export.js';
 import { splitElement } from '../src/split.js';
+import { buildTree, conLabel } from '../src/tree.js';
 import { initSolver, solve } from '../src/solver.js';
 import { lineLine, lineCircle, circleCircle, signedAngle, dashFromPattern, parsePattern, circumcircle, arcSweepOf, TAU, splineSamples, resamplePolyline, polylineLength, splineBezier, closestOnPolyline, polylineLine, polylineCircle, polylinePolyline } from '../src/geom.js';
 
@@ -834,6 +835,30 @@ t('arrastrar un punto ligado a un spline deforma la curva y el punto llega al de
   near(d.pts[p].y, ty, 0.5, 'llega cerca del destino: ' + d.pts[p].y);
   assert.ok(ids.some((i, k) => Math.hypot(d.pts[i].x - before[k].x, d.pts[i].y - before[k].y) > 1), 'la curva se deformo');
   near(d.pts[ids[0]].x, 0, 1e-9); near(d.pts[ids[4]].y, 0, 1e-9);
+});
+
+
+t('arbol de elementos: grupos, puntos de cada elemento y relaciones', () => {
+  const { d, a, b, l1, l2 } = lineDoc();
+  addCon(d, { t: 'PAR', refs: [l1, l2] });
+  addCon(d, { t: 'DIST', refs: [a, b], v: 14.14 });
+  const ids = [[0, 0], [5, 3], [9, 0]].map(([x, y]) => addPoint(d, x, y, true));
+  ids.forEach((i) => { d.pts[i].splOnly = true; });
+  const sp = addSpline(d, ids, { color: 'auto', ltype: 'continua', w: 2, ls: 1 }, false);
+  const p = addPoint(d, 4, 3, false); addCon(d, { t: 'PONS', refs: [p, sp] });
+  const tree = buildTree(d);
+  const g = (k) => tree.find((x) => x.key === k);
+  assert.equal(g('g:ln').children.length, 2);
+  const ln1 = g('g:ln').children.find((n) => n.sel.id === l1);
+  assert.ok(ln1.children.some((c) => c.con && /Paralelas/.test(c.label)), 'la linea muestra sus relaciones');
+  assert.equal(ln1.children.filter((c) => c.sel.k === 'pt').length, 2, 'y sus dos puntos');
+  const spn = g('g:sp').children[0];
+  assert.equal(spn.children.find((c) => c.group).children.length, 3, 'puntos de control del spline');
+  assert.ok(spn.children.some((c) => /Punto sobre spline/.test(c.label)));
+  assert.ok(!g('g:pt').children.some((c) => ids.includes(c.sel.id)), 'los puntos de control no aparecen sueltos');
+  assert.equal(g('g:co').children.length, 3);
+  assert.equal(conLabel(d, { t: 'DIST', refs: [a, b], v: 14.14, ref: true }), 'Distancia = 14.14 (referencia)');
+  assert.deepEqual(buildTree(newDoc()), []);
 });
 
 console.log(`\n${passed} pruebas pasaron`);
