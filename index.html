@@ -33,16 +33,28 @@ body { display: grid; grid-template-rows: auto 1fr auto; height: 100dvh; padding
 #bar { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 8px; background: var(--panel); border-bottom: 1px solid var(--line); align-items: center; }
 #bar .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
 button, select, input { font: inherit; color: var(--fg); }
-button { min-height: 40px; min-width: 40px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--btn); cursor: pointer; touch-action: manipulation; }
+button { min-height: 44px; min-width: 44px; padding: 4px 10px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--btn); cursor: pointer; touch-action: manipulation; }
 button:hover { border-color: var(--muted); }
 button.on, button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
-button:disabled { opacity: .4; }
-main { display: grid; grid-template-columns: 1fr 280px; min-height: 0; }
+button:disabled { opacity: .35; cursor: default; }
+main { display: grid; grid-template-columns: 1fr 300px; min-height: 0; }
 #stage { position: relative; min-width: 0; min-height: 0; }
 #cv { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; display: block; }
 #panel { overflow-y: auto; background: var(--panel); border-left: 1px solid var(--line); padding: 8px; -webkit-overflow-scrolling: touch; }
-#panel h3 { margin: 12px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
-#panel h3:first-child { margin-top: 0; }
+#panel details { border-bottom: 1px solid var(--line); padding: 2px 0 8px; }
+#panel summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+#panel summary::-webkit-details-marker { display: none; }
+#panel summary::after { content: ""; margin-left: auto; width: 8px; height: 8px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); transition: transform .15s; }
+#panel details[open] > summary::after { transform: rotate(45deg); }
+#panel summary svg { width: 18px; height: 18px; flex: none; }
+button svg { width: 22px; height: 22px; flex: none; pointer-events: none; }
+button i, summary i { display: inline-flex; font-style: normal; }
+.grid2 button { justify-content: flex-start; text-align: left; font-size: 13px; line-height: 1.15; }
+.grid2 button span { overflow: hidden; text-overflow: ellipsis; }
+body.nolabels .grid2 { grid-template-columns: repeat(4, 1fr); }
+body.nolabels .grid2 button span { display: none; }
+body.nolabels .grid2 button { justify-content: center; padding: 4px; }
+#bar button { padding: 4px 8px; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .row { display: flex; gap: 6px; align-items: center; margin: 4px 0; flex-wrap: wrap; }
 .row label { flex: 1 1 90px; color: var(--muted); }
@@ -65,68 +77,83 @@ small { color: var(--muted); }
 </head>
 <body>
 <header id="bar">
-  <button data-tool="select" title="Seleccionar / arrastrar (V)">Seleccionar</button>
-  <button data-tool="point" title="Punto (P)">Punto</button>
-  <button data-tool="line" title="Línea (L)">Línea</button>
-  <button data-tool="circle" title="Círculo (C)">Círculo</button>
-  <button data-tool="intersect" title="Intersección de 2 elementos (I)">Intersección</button>
+  <button data-tool="select" data-icon="select" title="Seleccionar y arrastrar (V)" aria-label="Seleccionar"><i></i></button>
+  <button data-tool="point" data-icon="point" title="Punto (P)" aria-label="Punto"><i></i></button>
+  <button data-tool="line" data-icon="line" title="Línea (L)" aria-label="Línea"><i></i></button>
+  <button data-tool="circle" data-icon="circle" title="Círculo (C)" aria-label="Círculo"><i></i></button>
+  <button data-tool="intersect" data-icon="intersect" title="Intersección de 2 elementos (I)" aria-label="Intersección"><i></i></button>
   <span class="sep"></span>
-  <button id="undo" title="Deshacer (Ctrl+Z)">↶</button>
-  <button id="redo" title="Rehacer (Ctrl+Y)">↷</button>
-  <button id="del" title="Borrar selección (Supr)">Borrar</button>
-  <button id="fit" title="Ajustar vista">Ajustar</button>
+  <button id="undo" data-icon="undo" title="Deshacer (Ctrl+Z)" aria-label="Deshacer"><i></i></button>
+  <button id="redo" data-icon="redo" title="Rehacer (Ctrl+Y)" aria-label="Rehacer"><i></i></button>
+  <button id="del" data-icon="trash" title="Borrar selección (Supr)" aria-label="Borrar"><i></i></button>
+  <button id="fit" data-icon="fit" title="Ajustar vista" aria-label="Ajustar vista"><i></i></button>
 </header>
 <main>
   <div id="stage"><canvas id="cv"></canvas><div id="toast"></div></div>
   <aside id="panel">
-    <h3>Restricciones (sobre la selección)</h3>
-    <div class="grid2">
-      <button data-con="H">Horizontal</button><button data-con="V">Vertical</button>
-      <button data-con="PAR">Paralela ∥</button><button data-con="PERP">Perpendicular ⟂</button>
-      <button data-con="COI">Coincidente</button><button data-con="MID">Punto medio</button>
-      <button data-con="EQ">Igual =</button><button data-con="TAN">Tangente</button>
-      <button data-con="FIX">Fijar / soltar</button><button data-con="ONC">Punto sobre…</button>
-    </div>
-    <h3>Cotas</h3>
-    <div class="grid2">
-      <button data-con="DIM">Distancia</button><button data-con="ANG">Ángulo</button>
-      <button data-con="RAD">Radio</button><button id="mkint">Intersección</button>
-    </div>
-
-    <h3>Estilo (selección y nuevos)</h3>
+<details class="sec" data-sec="cons" open><summary data-icon="pencil-ruler"><i></i>Restricciones</summary>
+<div class="grid2">
+<button data-con="H" data-icon="con-h" data-hint="líneas, o 2 puntos" title="Horizontal: líneas, o 2 puntos"><i></i><span>Horizontal</span></button>
+<button data-con="V" data-icon="con-v" data-hint="líneas, o 2 puntos" title="Vertical: líneas, o 2 puntos"><i></i><span>Vertical</span></button>
+<button data-con="PAR" data-icon="con-par" data-hint="2 o más líneas" title="Paralela: 2 o más líneas"><i></i><span>Paralela</span></button>
+<button data-con="PERP" data-icon="con-perp" data-hint="2 o más líneas" title="Perpendic.: 2 o más líneas"><i></i><span>Perpendic.</span></button>
+<button data-con="COI" data-icon="con-coi" data-hint="2 o más puntos" title="Coincidente: 2 o más puntos"><i></i><span>Coincidente</span></button>
+<button data-con="MID" data-icon="con-mid" data-hint="1 punto + 1 línea" title="Punto medio: 1 punto + 1 línea"><i></i><span>Punto medio</span></button>
+<button data-con="EQ" data-icon="equal" data-hint="2 líneas o 2 círculos" title="Igual: 2 líneas o 2 círculos"><i></i><span>Igual</span></button>
+<button data-con="TAN" data-icon="con-tan" data-hint="línea + círculo, o 2 círculos" title="Tangente: línea + círculo, o 2 círculos"><i></i><span>Tangente</span></button>
+<button data-con="ONC" data-icon="con-onc" data-hint="punto(s) + 1 línea o círculo" title="Punto sobre: punto(s) + 1 línea o círculo"><i></i><span>Punto sobre</span></button>
+<button data-con="FIX" data-icon="lock" data-hint="puntos, líneas o círculos" title="Fijar / soltar: puntos, líneas o círculos"><i></i><span>Fijar / soltar</span></button>
+</div></details>
+<details class="sec" data-sec="dims" open><summary data-icon="ruler"><i></i>Cotas e intersección</summary>
+<div class="grid2">
+<button data-con="DIM" data-icon="dim-dist" data-hint="2 puntos, 1 línea, o punto + línea" title="Distancia: 2 puntos, 1 línea, o punto + línea"><i></i><span>Distancia</span></button>
+<button data-con="ANG" data-icon="dim-ang" data-hint="2 líneas" title="Ángulo: 2 líneas"><i></i><span>Ángulo</span></button>
+<button data-con="RAD" data-icon="dim-rad" data-hint="círculo(s)" title="Radio: círculo(s)"><i></i><span>Radio</span></button>
+<button id="mkint" data-icon="intersect" data-hint="2 elementos (líneas/círculos)" title="Intersección: 2 elementos (líneas/círculos)"><i></i><span>Intersección</span></button>
+</div></details>
+<details class="sec" data-sec="style" open><summary data-icon="palette"><i></i>Estilo (selección y nuevos)</summary>
     <div class="sw" id="swatches"></div>
     <div class="row"><label for="colorPick">Otro color</label><input type="color" id="colorPick" value="#2563eb"></div>
     <div class="row"><label for="ltype">Tipo de línea</label><select id="ltype"></select></div>
     <canvas class="preview" id="ltprev"></canvas>
     <div class="row"><label for="weight">Grosor</label><select id="weight"><option value="1">Fino</option><option value="2" selected>Normal</option><option value="3.5">Grueso</option></select></div>
-
-    <h3>Nuevo tipo de línea</h3>
+</details>
+<details class="sec" data-sec="lt"><summary data-icon="linetype"><i></i>Nuevo tipo de línea</summary>
     <div class="row"><label for="ltName">Nombre</label><input type="text" id="ltName" placeholder="mi tipo"></div>
     <div class="row"><label for="ltPat">Patrón</label><input type="text" id="ltPat" placeholder="12 -3 2 -3"></div>
     <small>+ trazo, − hueco, 0 punto. Ej.: <code>12 -3 2 -3</code> es eje.</small>
     <canvas class="preview" id="ltnewprev"></canvas>
     <div class="row"><button id="ltAdd">Crear tipo</button><button id="ltDel">Quitar tipo</button></div>
-
-    <h3>Relleno / achurado</h3>
+</details>
+<details class="sec" data-sec="hatch"><summary data-icon="hatch"><i></i>Relleno / achurado</summary>
     <div class="row"><label for="hKind">Tipo</label><select id="hKind"><option value="lines">Líneas</option><option value="cross">Cruzado</option><option value="solid">Sólido</option></select></div>
     <div class="row"><label for="hAngle">Ángulo °</label><input type="number" id="hAngle" value="45" step="5"></div>
     <div class="row"><label for="hSpace">Separación</label><input type="number" id="hSpace" value="8" min="2" step="1"></div>
     <div class="row"><label for="hAlpha">Opacidad</label><input type="range" id="hAlpha" min="0.1" max="1" step="0.05" value="0.45"></div>
-    <div class="row"><button id="mkhatch">Crear relleno (contornos seleccionados)</button></div>
-
-    <h3>Vista</h3>
-    <div class="row"><button id="tGrid" aria-pressed="true">Cuadrícula</button><button id="tSnap" aria-pressed="false">Imán cuadrícula</button></div>
-    <div class="row"><button id="tCons" aria-pressed="true">Ver restricciones</button><button id="tTouch" aria-pressed="false">Dibujar con dedo</button></div>
-    <div class="row"><label for="ltScale">Escala de trazos</label><input type="range" id="ltScale" min="0.5" max="3" step="0.1" value="1"></div>
-
-    <h3>Archivo</h3>
+    <div class="row"><button id="mkhatch" data-icon="hatch" data-hint="contorno cerrado (líneas o círculo)" title="Crear relleno: contorno cerrado"><i></i><span>Crear relleno</span></button></div>
+</details>
+<details class="sec" data-sec="view"><summary data-icon="eye"><i></i>Vista</summary>
     <div class="grid2">
-      <button id="fNew">Nuevo</button><button id="fSave">Guardar .json</button>
-      <button id="fLoad">Abrir…</button><button id="fPng">Exportar PNG</button>
-      <button id="fSvg">Exportar SVG</button><button id="fDxf">Exportar DXF</button>
+      <button id="tGrid" data-icon="grid" aria-pressed="true"><i></i><span>Cuadrícula</span></button>
+      <button id="tSnap" data-icon="magnet" aria-pressed="false"><i></i><span>Imán</span></button>
+      <button id="tCons" data-icon="eye" aria-pressed="true"><i></i><span>Ver restricciones</span></button>
+      <button id="tTouch" data-icon="hand" aria-pressed="false"><i></i><span>Dedo dibuja</span></button>
+      <button id="tLabels" data-icon="labels" aria-pressed="true"><i></i><span>Etiquetas del panel</span></button>
+    </div>
+    <div class="row"><label for="ltScale">Escala de trazos</label><input type="range" id="ltScale" min="0.5" max="3" step="0.1" value="1"></div>
+</details>
+<details class="sec" data-sec="file"><summary data-icon="save"><i></i>Archivo</summary>
+    <div class="grid2">
+      <button id="fNew" data-icon="file-plus"><i></i><span>Nuevo</span></button>
+      <button id="fSave" data-icon="save"><i></i><span>Guardar</span></button>
+      <button id="fLoad" data-icon="folder-open"><i></i><span>Abrir…</span></button>
+      <button id="fPng" data-icon="image"><i></i><span>PNG</span></button>
+      <button id="fSvg" data-icon="svg"><i></i><span>SVG</span></button>
+      <button id="fDxf" data-icon="dxf"><i></i><span>DXF</span></button>
     </div>
     <input type="file" id="fileIn" accept=".json,application/json" hidden>
-    <p><small>Se guarda solo en este navegador. Exporta .json para respaldar. v<span id="ver"></span></small></p>
+    <p><small>Se guarda solo en este navegador. Guarda un .json para respaldar. v<span id="ver"></span></small></p>
+</details>
   </aside>
 </main>
 <footer id="status">Listo</footer>

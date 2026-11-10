@@ -8,6 +8,7 @@ import {
   dist, closestOnSeg, lineLine, lineCircle, circleCircle, signedAngle, dashFromPattern, parsePattern,
 } from './geom.js';
 import { exportSVG, exportDXF } from './export.js';
+import { iconSvg } from './icons.js';
 
 const VERSION = '0.1.0';
 const STORE = 'ipad-cad-v1';
@@ -21,7 +22,7 @@ let view = { ox: 200, oy: 300, s: 3 }; // px por unidad; y del modelo hacia arri
 let tool = 'select';
 let sel = []; // [{k:'pt'|'ln'|'ci'|'ha', id}]
 let cur = { color: 'auto', ltype: 'continua', w: 2 };
-const opts = { grid: true, snap: false, cons: true, touch: false, ltScale: 1 };
+const opts = { grid: true, snap: false, cons: true, touch: false, ltScale: 1, labels: true, sections: {} };
 let undoStack = [], redoStack = [];
 let pending = null; // estado de la herramienta en curso
 let hover = null; // posicion del puntero en pantalla
@@ -76,7 +77,61 @@ function persist() {
     try { localStorage.setItem(STORE, JSON.stringify({ doc, view, cur, opts })); } catch { /* sin almacenamiento */ }
   }, 300);
 }
-function afterChange() { updateButtons(); syncPanel(); persist(); draw(); }
+function afterChange() { updateButtons(); updateEnabled(); syncPanel(); persist(); draw(); }
+
+// Un boton de restriccion solo se activa si la seleccion actual le sirve (mismas reglas que applyCon).
+function updateEnabled() {
+  const n = { pt: 0, ln: 0, ci: 0 };
+  for (const s of sel) if (s.k in n) n[s.k]++;
+  const { pt, ln, ci } = n;
+  const rules = {
+    H: ln >= 1 || pt >= 2, V: ln >= 1 || pt >= 2,
+    PAR: ln >= 2, PERP: ln >= 2,
+    COI: pt >= 2,
+    MID: pt === 1 && ln === 1,
+    EQ: ln >= 2 || ci >= 2,
+    TAN: (ln === 1 && ci === 1) || (ci === 2 && !ln),
+    ONC: pt >= 1 && (ln === 1 || ci === 1) && !(ln && ci),
+    FIX: pt + ln + ci > 0,
+    DIM: (pt === 2 && !ln) || (ln === 1 && !pt) || (pt === 1 && ln === 1),
+    ANG: ln === 2,
+    RAD: ci >= 1,
+  };
+  document.querySelectorAll('[data-con]').forEach((b) => { b.disabled = !rules[b.dataset.con]; });
+  $('mkint').disabled = ln + ci !== 2;
+  $('mkhatch').disabled = ln + ci < 1;
+  $('del').disabled = !sel.length;
+}
+
+function hydrateIcons() {
+  document.querySelectorAll('[data-icon]').forEach((el) => {
+    const slot = el.querySelector(':scope > i');
+    if (slot) slot.innerHTML = iconSvg(el.dataset.icon);
+  });
+}
+
+// En pantallas tactiles no hay hover: mantener presionado un boton de la barra muestra su nombre.
+function wireLongPressHints() {
+  let timer = 0, shown = false;
+  const bar = $('bar');
+  bar.addEventListener('pointerdown', (e) => {
+    const b = e.target.closest('button');
+    if (!b || e.pointerType === 'mouse') return;
+    shown = false;
+    timer = setTimeout(() => { shown = true; toast(b.title || b.getAttribute('aria-label')); }, 450);
+  });
+  const stop = () => clearTimeout(timer);
+  bar.addEventListener('pointerup', stop); bar.addEventListener('pointercancel', stop); bar.addEventListener('pointerleave', stop);
+  bar.addEventListener('click', (e) => { if (shown) { e.stopImmediatePropagation(); e.preventDefault(); shown = false; } }, true);
+}
+
+function wireSections() {
+  document.querySelectorAll('details.sec').forEach((d) => {
+    const saved = opts.sections?.[d.dataset.sec];
+    if (typeof saved === 'boolean') d.open = saved;
+    d.addEventListener('toggle', () => { opts.sections[d.dataset.sec] = d.open; persist(); });
+  });
+}
 function updateButtons() { $('undo').disabled = !undoStack.length; $('redo').disabled = !redoStack.length; }
 
 // ---------------------------------------------------------------- snap y hit-test
@@ -763,7 +818,7 @@ function syncPanel() {
   if (hat) { $('hKind').value = hat.kind; $('hAngle').value = hat.angle; $('hSpace').value = hat.spacing; $('hAlpha').value = hat.alpha; }
   drawSample($('ltprev'), (allLtypes(doc)[cur.ltype] || allLtypes(doc).continua).pattern, theme.fg);
   const hasDimOrCon = sel.some((s) => s.k === 'co');
-  $('del').textContent = hasDimOrCon ? 'Borrar cota' : 'Borrar';
+  $('del').title = hasDimOrCon ? 'Borrar cota o restricción (Supr)' : 'Borrar selección (Supr)';
 }
 
 function updateHatchFromPanel() {
@@ -888,6 +943,11 @@ function toggle(id, key) {
   b.setAttribute('aria-pressed', String(opts[key]));
 }
 toggle('tGrid', 'grid'); toggle('tSnap', 'snap'); toggle('tCons', 'cons'); toggle('tTouch', 'touch');
+$('tLabels').onclick = () => { opts.labels = !opts.labels; applyLabels(); persist(); };
+function applyLabels() {
+  document.body.classList.toggle('nolabels', !opts.labels);
+  $('tLabels').setAttribute('aria-pressed', String(opts.labels));
+}
 $('ltScale').oninput = (e) => { opts.ltScale = Number(e.target.value); draw(); syncPanel(); persist(); };
 
 function previewNew() {
@@ -958,6 +1018,7 @@ async function boot() {
   } catch { /* sin estado previo */ }
   for (const [id, key] of [['tGrid', 'grid'], ['tSnap', 'snap'], ['tCons', 'cons'], ['tTouch', 'touch']]) $(id).setAttribute('aria-pressed', String(opts[key]));
   $('ltScale').value = String(opts.ltScale);
+  hydrateIcons(); wireLongPressHints(); wireSections(); applyLabels(); updateEnabled();
   setTool('select');
   try { await initSolver(wasmUrl); } catch (err) { toast('No cargó el solver: ' + err.message); }
   syncPanel(); updateButtons(); resize();
