@@ -15,6 +15,7 @@ const kindOf = (doc, id) => (id in doc.lines ? 'l' : id in doc.circles ? 'c' : i
 
 // Traduce una restriccion del documento a primitivas del solver.
 function conPrims(doc, id, k) {
+  if (k.ref) return []; // cota de referencia: solo mide, no restringe
   const r = k.refs;
   const base = { id };
   const kd = r.map((x) => kindOf(doc, x));

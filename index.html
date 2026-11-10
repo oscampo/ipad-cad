@@ -128,7 +128,12 @@ small { color: var(--muted); }
 </details>
 <details class="sec" data-sec="text"><summary data-icon="text"><i></i>Texto</summary>
     <div class="row"><textarea id="txContent" rows="2" placeholder="Selecciona un texto para editarlo" style="flex:1 1 100%;min-height:56px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--btn);color:var(--fg);font:inherit"></textarea></div>
-    <div class="row"><label for="txAngle">Ángulo °</label><input type="number" id="txAngle" value="0" step="5"></div>
+    <div class="row"><label for="txAngle" id="txAngleLabel">Ángulo °</label><input type="number" id="txAngle" value="0" step="5"></div>
+    <div class="grid2">
+      <button id="txAlign" data-icon="con-par" title="Alinear con una línea: selecciona el texto y una línea"><i></i><span>Alinear con línea</span></button>
+      <button id="txFree" data-icon="text" title="Soltar la alineación (conserva la orientación actual)"><i></i><span>Soltar</span></button>
+      <button id="txRead" data-icon="eye" aria-pressed="true" title="Si el texto quedaría boca abajo, se gira 180° para que se lea"><i></i><span>Legible</span></button>
+    </div>
     <div class="row"><label for="txSize">Altura</label><input type="number" id="txSize" min="0.01" step="any" placeholder="auto"></div>
     <div class="row"><label>Punto de inserción</label></div>
     <div class="txa" id="txAnchors"></div>
@@ -177,7 +182,7 @@ small { color: var(--muted); }
 </main>
 <footer id="status">Listo</footer>
 <dialog id="dlgT"><form method="dialog"><label id="dlgTLabel" for="dlgTInput"></label><textarea id="dlgTInput" rows="3" style="width:100%;font-size:18px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--btn);color:var(--fg);font-family:inherit"></textarea><div class="actions"><button value="cancel" type="button" id="dlgTCancel">Cancelar</button><button value="ok" id="dlgTOk" class="on">Aceptar</button></div></form></dialog>
-<dialog id="dlg"><form method="dialog"><label id="dlgLabel" for="dlgInput"></label><input id="dlgInput" type="text" inputmode="decimal" autocomplete="off"><div class="actions"><button value="cancel" type="button" id="dlgCancel">Cancelar</button><button value="ok" id="dlgOk" class="on">Aceptar</button></div></form></dialog>
+<dialog id="dlg"><form method="dialog"><label id="dlgLabel" for="dlgInput"></label><input id="dlgInput" type="text" inputmode="decimal" autocomplete="off"><label id="dlgRefRow" style="display:flex;gap:8px;align-items:flex-start;margin-top:10px;font-size:13px"><input type="checkbox" id="dlgRef" style="width:22px;height:22px;min-height:22px;flex:none;margin:0"><span>Solo lectura (referencia): mide y muestra el valor en cursiva, sin restringir la geometría</span></label><div class="actions"><button value="cancel" type="button" id="dlgCancel">Cancelar</button><button value="ok" id="dlgOk" class="on">Aceptar</button></div></form></dialog>
 <script type="module" src="/src/main.js"></script>
 </body>
 </html>

@@ -9,8 +9,8 @@ import {
   arcThrough3, inSweep, TAU,
 } from './geom.js';
 import { splitElement } from './split.js';
-import { layoutDim, dragDim } from './dims.js';
-import { textFrame, textHit, ANCHORS, ANCHOR_NAMES, LINE_SPACING } from './text.js';
+import { layoutDim, dragDim, dimValue } from './dims.js';
+import { textFrame, textHit, textPose, rawAngle, ANCHORS, ANCHOR_NAMES, LINE_SPACING } from './text.js';
 import { exportSVG, exportDXF, extraExtents } from './export.js';
 import { iconSvg } from './icons.js';
 
@@ -25,7 +25,7 @@ let doc = newDoc();
 let view = { ox: 200, oy: 300, s: 3 }; // px por unidad; y del modelo hacia arriba
 let tool = 'select';
 let sel = []; // [{k:'pt'|'ln'|'ci'|'ha', id}]
-let cur = { color: 'auto', ltype: 'continua', w: 2, ls: 1, tx: { h: null, ang: 0, anchor: 'bl' } };
+let cur = { color: 'auto', ltype: 'continua', w: 2, ls: 1, tx: { h: null, ang: 0, anchor: 'bl', readable: true } };
 const opts = { grid: true, snap: false, cons: true, pts: true, dims: true, texts: true, touch: false, ltScale: 1, labels: true, sections: {} };
 let undoStack = [], redoStack = [];
 let pending = null; // estado de la herramienta en curso
@@ -108,6 +108,8 @@ function updateEnabled() {
   $('mksplit').disabled = !(ln + crv === 1 && pt >= 1);
   $('mkhatch').disabled = ln + crv < 1;
   $('del').disabled = !sel.length;
+  $('txAlign').disabled = !(sel.some((x) => x.k === 'tx') && ln === 1);
+  $('txFree').disabled = !sel.some((x) => x.k === 'tx' && doc.texts[x.id]?.ref);
 }
 
 function hydrateIcons() {
@@ -447,9 +449,9 @@ function drawHatch(c, id, h, o) {
 }
 
 let labelBg = '#fff';
-function label(c, text, x, y, id, color) {
+function label(c, text, x, y, id, color, italic = false) {
   c.save();
-  c.font = `${12 * dpr}px -apple-system, system-ui, sans-serif`;
+  c.font = `${italic ? 'italic ' : ''}${12 * dpr}px -apple-system, system-ui, sans-serif`;
   const w = c.measureText(text).width / dpr + 8, h = 18;
   const bx = x - w / 2, by = y - h / 2;
   c.fillStyle = labelBg; c.globalAlpha = 0.85;
@@ -486,10 +488,11 @@ function drawTexts(c, o) {
   for (const [id, t] of Object.entries(doc.texts)) {
     const P = doc.pts[t.pt];
     if (!P) continue;
-    const S = toScreen(P), f = textFrame(t, measureRel), sc = view.s;
+    const pose = textPose(doc, t);
+    const S = toScreen(P), f = textFrame(t, measureRel, pose.anchor), sc = view.s;
     c.save();
     c.translate(S.x * dpr, S.y * dpr);
-    c.rotate(-((t.ang || 0) * Math.PI) / 180);
+    c.rotate(-(pose.ang * Math.PI) / 180);
     c.font = `${t.h * sc * dpr}px ${FONT}`;
     c.fillStyle = colorOf(t.color, o); c.textBaseline = 'top'; c.textAlign = 'left';
     f.lines.forEach((ln, i) => c.fillText(ln, f.xmin * sc * dpr, (-f.ymax * sc + (i * LINE_SPACING + 0.1) * t.h * sc) * dpr));
@@ -521,7 +524,7 @@ function drawDim(c, id, k, col) {
   c.setLineDash([]);
   for (const ar of L.arrows) arrowHead(c, ar);
   c.restore();
-  if (L.label) label(c, L.label.text, L.label.x, L.label.y, id, col);
+  if (L.label) label(c, L.label.text, L.label.x, L.label.y, id, col, L.label.italic);
 }
 
 function drawConstraints(c, o) {
@@ -875,7 +878,7 @@ async function placeText(sUp) {
   if (!reuse) doc.pts[pid].txOnly = true; // punto propio del texto: solo se ve al seleccionarlo
   const val = await askText('Texto (Enter = nueva línea)', '');
   if (val === null || !val.trim()) { rollback(); afterChange(); return; }
-  const id = addText(doc, pid, val, { h: cur.tx.h ?? niceHeight(), ang: cur.tx.ang, anchor: cur.tx.anchor, color: cur.color });
+  const id = addText(doc, pid, val, { h: cur.tx.h ?? niceHeight(), ang: cur.tx.ang, anchor: cur.tx.anchor, color: cur.color, readable: cur.tx.readable });
   sel = [{ k: 'tx', id }];
   finishEdit();
 }
@@ -921,14 +924,22 @@ function makeIntersections(items) {
 }
 
 // ---------------------------------------------------------------- restricciones
-function askNumber(labelText, initial) {
+// Ultimo estado del interruptor "Solo lectura" del dialogo de cotas.
+let dlgRef = false;
+function askNumber(labelText, initial, refState = false) {
   return new Promise((resolve) => {
-    const dlg = $('dlg'), inp = $('dlgInput');
+    const dlg = $('dlg'), inp = $('dlgInput'), chk = $('dlgRef');
     $('dlgLabel').textContent = labelText;
     inp.value = String(initial);
+    chk.checked = refState; inp.disabled = refState;
+    chk.onchange = () => { inp.disabled = chk.checked; };
     let done = false;
-    const finish = (v) => { if (done) return; done = true; dlg.close(); resolve(v); };
-    $('dlgOk').onclick = (ev) => { ev.preventDefault(); const v = Number(inp.value.replace(',', '.')); finish(Number.isFinite(v) ? v : null); };
+    const finish = (v) => { if (done) return; done = true; dlgRef = chk.checked; dlg.close(); resolve(v); };
+    $('dlgOk').onclick = (ev) => {
+      ev.preventDefault();
+      if (chk.checked) { finish(Number(initial)); return; } // cota de referencia: no se teclea valor
+      const v = Number(inp.value.replace(',', '.')); finish(Number.isFinite(v) ? v : null);
+    };
     $('dlgCancel').onclick = () => finish(null);
     dlg.oncancel = () => finish(null);
     dlg.showModal(); inp.focus(); inp.select();
@@ -1008,7 +1019,7 @@ async function applyCon(kind) {
       } else return bad('Selecciona 2 puntos, 1 línea, o 1 punto + 1 línea');
       const val = await askNumber('Distancia', Math.round(v * 1000) / 1000);
       if (val === null || val <= 0) return;
-      list.push({ t, refs, v: val });
+      list.push({ t, refs, v: val, ...(dlgRef ? { ref: true } : {}) });
       break;
     }
     case 'ANG': {
@@ -1017,7 +1028,7 @@ async function applyCon(kind) {
       const v = (signedAngle(dir(lns[0]), dir(lns[1])) * 180) / Math.PI;
       const val = await askNumber('Ángulo (°) de la 1.ª a la 2.ª línea seleccionada', Math.round(v * 100) / 100);
       if (val === null) return;
-      list.push({ t: 'ANG', refs: [lns[0], lns[1]], v: val });
+      list.push({ t: 'ANG', refs: [lns[0], lns[1]], v: val, ...(dlgRef ? { ref: true } : {}) });
       break;
     }
     case 'RAD': {
@@ -1027,7 +1038,7 @@ async function applyCon(kind) {
       const r0 = curveOf(crv[0]).r;
       const val0 = await askNumber(allC ? 'Diámetro (φ)' : 'Radio (R)', Math.round((allC ? 2 * r0 : r0) * 1000) / 1000);
       if (val0 === null || val0 <= 0) return;
-      crv.forEach((c) => list.push({ t: 'RAD', refs: [c], v: allC ? val0 / 2 : val0 }));
+      crv.forEach((c) => list.push({ t: 'RAD', refs: [c], v: allC ? val0 / 2 : val0, ...(dlgRef ? { ref: true } : {}) }));
       break;
     }
     default: return;
@@ -1055,7 +1066,7 @@ function commitCons(list) {
   pushUndo();
   list.forEach((k) => addCon(doc, k));
   const r = solve(doc, []);
-  if (!r.ok) { rollback(); toast('No se pudo: entra en conflicto con otras restricciones'); afterChange(); return; }
+  if (!r.ok) { rollback(); toast('No se pudo: entra en conflicto con otras restricciones. Si solo quieres medir, usa «Solo lectura»'); afterChange(); return; }
   afterChange();
 }
 
@@ -1063,13 +1074,15 @@ async function editDimension(id) {
   const k = doc.cons[id];
   if (!k || k.v === undefined) return;
   const isC = k.t === 'RAD' && k.refs[0] in doc.circles;
-  const val0 = await askNumber(k.t === 'ANG' ? 'Ángulo (°)' : k.t === 'RAD' ? (isC ? 'Diámetro (φ)' : 'Radio (R)') : 'Distancia', isC ? 2 * k.v : k.v);
-  if (val0 === null || (k.t !== 'ANG' && val0 <= 0)) return;
-  const val = isC ? val0 / 2 : val0;
+  const now = dimValue(doc, k); // las de referencia muestran el valor medido en este momento
+  const val0 = await askNumber(k.t === 'ANG' ? 'Ángulo (°)' : k.t === 'RAD' ? (isC ? 'Diámetro (φ)' : 'Radio (R)') : 'Distancia', Math.round((isC ? 2 * now : now) * 1000) / 1000, !!k.ref);
+  if (val0 === null || (!dlgRef && k.t !== 'ANG' && val0 <= 0)) return;
   pushUndo();
-  const old = k.v; k.v = val;
+  if (dlgRef) { k.ref = true; afterChange(); return; } // es (o pasa a ser) cota de referencia: no toca el solver
+  const val = isC ? val0 / 2 : val0;
+  k.v = val; delete k.ref;
   const r = solve(doc, []);
-  if (!r.ok) { k.v = old; rollback(); toast('Valor imposible con las restricciones actuales'); }
+  if (!r.ok) { rollback(); toast('Valor imposible con las restricciones actuales. Usa «Solo lectura» para solo medirla'); }
   afterChange();
 }
 
@@ -1117,7 +1130,9 @@ function drawSample(canvas, pattern, color) {
 }
 
 function syncTextPanel(txt) {
-  const src = txt || { text: '', h: cur.tx.h ?? '', ang: cur.tx.ang, anchor: cur.tx.anchor };
+  const src = txt || { text: '', h: cur.tx.h ?? '', ang: cur.tx.ang, anchor: cur.tx.anchor, readable: cur.tx.readable };
+  $('txAngleLabel').textContent = txt?.ref ? 'Desfase °' : 'Ángulo °';
+  $('txRead').setAttribute('aria-pressed', String(src.readable !== false));
   if (document.activeElement !== $('txContent')) $('txContent').value = src.text;
   if (document.activeElement !== $('txAngle')) $('txAngle').value = String(src.ang ?? 0);
   if (document.activeElement !== $('txSize')) $('txSize').value = src.h === '' ? '' : String(Math.round(src.h * 1000) / 1000);
@@ -1126,8 +1141,8 @@ function syncTextPanel(txt) {
 }
 
 function applyText(prop, value) {
-  if (prop === 'h' || prop === 'ang' || prop === 'anchor') cur.tx[prop] = value;
   const ts = sel.filter((x) => x.k === 'tx').map((x) => doc.texts[x.id]);
+  if (['h', 'ang', 'anchor', 'readable'].includes(prop) && !(prop === 'ang' && ts.some((t) => t.ref))) cur.tx[prop] = value;
   if (ts.length) { pushUndo(); ts.forEach((t) => { t[prop] = value; }); }
   afterChange();
 }
@@ -1207,7 +1222,7 @@ function updateStatus(p) {
     if (s.k === 'pt') { const q = doc.pts[s.id]; txt = `Punto (${fmt(q.x)}, ${fmt(q.y)})${q.fixed ? ' fijo' : ''}`; }
     else if (s.k === 'ln') { const [a, b] = lineEnds(s.id).map((i) => doc.pts[i]); txt = `Línea: longitud ${fmt(dist(a, b))}, ángulo ${fmt((Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI)}°, ${ltLabel(doc.lines[s.id])}`; }
     else if (s.k === 'ci') txt = `Círculo: radio ${fmt(doc.circles[s.id].r)}, ${ltLabel(doc.circles[s.id])}`;
-    else if (s.k === 'tx') { const t = doc.texts[s.id]; txt = `Texto: “${t.text.split('\n')[0].slice(0, 24)}”, ${fmt(t.ang)}°, insercion ${t.anchor}`; }
+    else if (s.k === 'tx') { const t = doc.texts[s.id]; txt = `Texto: “${t.text.split('\n')[0].slice(0, 24)}”, ${fmt(t.ang)}°, insercion ${t.anchor}${t.ref ? ', alineado con una línea' : ''}`; }
     else if (s.k === 'ar') { const g = arcOf(doc, doc.arcs[s.id]); txt = `Arco: radio ${fmt(doc.arcs[s.id].r)}, ${fmt((g.sweep * 180) / Math.PI)}°, ${ltLabel(doc.arcs[s.id])}`; }
     else if (s.k === 'ha') txt = 'Relleno seleccionado';
     else if (s.k === 'co') txt = 'Restricción/cota seleccionada';
@@ -1301,6 +1316,22 @@ $('hAlpha').oninput = updateHatchFromPanel;
 $('mkhatch').onclick = createHatch;
 $('ltEl').oninput = (e) => applyStyle('ls', Number(e.target.value));
 $('txContent').onchange = (e) => applyText('text', e.target.value);
+$('txAlign').onclick = () => {
+  const ts = sel.filter((x) => x.k === 'tx').map((x) => doc.texts[x.id]), lns = sel.filter((x) => x.k === 'ln').map((x) => x.id);
+  if (!ts.length || lns.length !== 1) { toast('Selecciona un texto y una línea'); return; }
+  pushUndo(); ts.forEach((t) => { t.ref = lns[0]; t.ang = 0; });
+  toast('Texto alineado con la línea'); afterChange();
+};
+$('txFree').onclick = () => {
+  const ts = sel.filter((x) => x.k === 'tx').map((x) => doc.texts[x.id]).filter((t) => t.ref);
+  if (!ts.length) return;
+  pushUndo(); ts.forEach((t) => { t.ang = rawAngle(doc, t); delete t.ref; }); // conserva la orientacion actual
+  afterChange();
+};
+$('txRead').onclick = () => {
+  const ts = sel.filter((x) => x.k === 'tx').map((x) => doc.texts[x.id]);
+  applyText('readable', !(ts.length ? ts[0].readable !== false : cur.tx.readable !== false));
+};
 $('txAngle').onchange = (e) => applyText('ang', Number(e.target.value) || 0);
 $('txSize').onchange = (e) => { const v = Number(e.target.value); if (v > 0) applyText('h', v); };
 

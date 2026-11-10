@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { newDoc, addPoint, addLine, addCircle, addArc, addCon, addText, deleteItems, hatchLoops, arcOf } from '../src/model.js';
-import { layoutDim, dragDim } from '../src/dims.js';
-import { textFrame, textCorners, textHit } from '../src/text.js';
+import { layoutDim, dragDim, dimValue, dimText } from '../src/dims.js';
+import { textFrame, textCorners, textHit, textPose, rawAngle } from '../src/text.js';
 import { exportSVG, exportDXF, dimLayouts, extraExtents } from '../src/export.js';
 import { splitElement } from '../src/split.js';
 import { initSolver, solve } from '../src/solver.js';
@@ -463,6 +463,65 @@ t('exportar: respeta los interruptores de cotas y textos', () => {
   const rows = (v) => exportDXF(d, 5, v).trim().split('\r\n');
   assert.equal(rows({ dims: false }).filter((r) => r === 'SOLID').length, 0);
   assert.ok(rows({ texts: false }).filter((r) => r === 'TEXT').length === 1, 'solo la etiqueta de la cota');
+});
+
+
+t('texto: alineado con una linea sigue su direccion y se gira si cambia', () => {
+  const d = newDoc();
+  const a = addPoint(d, 0, 0), b = addPoint(d, 10, 10), p = addPoint(d, 5, 5);
+  const L = addLine(d, a, b, {});
+  const T = { pt: p, text: 'AB', h: 2, ang: 0, anchor: 'bl', ref: L, readable: true };
+  near(rawAngle(d, T), 45, 1e-9);
+  assert.equal(textPose(d, T).ang, 45);
+  d.pts[b].x = 0; d.pts[b].y = 10; // la linea pasa a vertical (90 grados)
+  near(rawAngle(d, T), 90, 1e-9);
+  const pz = textPose(d, { ...T, ang: 30 }); // 90 + 30 = 120: boca abajo, se gira 180
+  near(pz.ang, 300, 1e-9);
+  assert.equal(pz.anchor, 'tr');
+  near(rawAngle(d, { ...T, ang: 90 }), 180, 1e-9, 'el desfase se suma al de la linea');
+  assert.equal(textPose(d, { ...T, ref: 'no-existe', ang: 20 }).ang, 20, 'referencia perdida: usa su angulo');
+});
+
+t('texto: legible gira 180 y cambia el punto de insercion, la caja queda en el mismo sitio', () => {
+  const d = newDoc();
+  const p = addPoint(d, 3, 4);
+  const T = { pt: p, text: 'ABCDE', h: 2, ang: 200, anchor: 'bl', readable: true };
+  const pose = textPose(d, T);
+  near(pose.ang, 20, 1e-9);
+  assert.equal(pose.anchor, 'tr');
+  const box = (cs) => [Math.min(...cs.map((c) => c.x)), Math.max(...cs.map((c) => c.x)), Math.min(...cs.map((c) => c.y)), Math.max(...cs.map((c) => c.y))];
+  const flipped = box(textCorners(d, T, measure));
+  const raw = box(textCorners(d, { ...T, readable: false }, measure));
+  flipped.forEach((v, i) => near(v, raw[i], 1e-9, 'misma region de la hoja'));
+  assert.equal(textPose(d, { ...T, readable: false }).ang, 200, 'sin legibilidad no se toca');
+  assert.equal(textPose(d, { ...T, ang: 90 }).ang, 90, 'vertical hacia arriba se queda');
+  assert.equal(textPose(d, { ...T, ang: 270 }).ang, 90, 'vertical hacia abajo se gira');
+  assert.equal(textPose(d, { ...T, ang: 359, anchor: 'mc' }).anchor, 'mc', 'sin giro no cambia el ancla');
+  assert.ok(textHit(d, T, { x: 3 - 1, y: 4 - 1 }, measure), 'el golpe usa la pose legible');
+});
+
+t('cotas de referencia: miden en vivo, no entran al solver y salen en cursiva', () => {
+  const d = newDoc();
+  const a = addPoint(d, 0, 0), b = addPoint(d, 3, 4), c = addPoint(d, 10, 0);
+  d.pts[a].fixed = d.pts[c].fixed = true;
+  const l1 = addLine(d, a, b, {}), l2 = addLine(d, a, c, {});
+  const ref = addCon(d, { t: 'DIST', refs: [a, b], v: 99, ref: true });
+  const ang = addCon(d, { t: 'ANG', refs: [l2, l1], v: 1, ref: true });
+  assert.ok(solve(d).ok, 'una cota que no cumple la geometria no es conflicto si es de referencia');
+  near(dimValue(d, d.cons[ref]), 5, 1e-9);
+  assert.equal(dimText(d, d.cons[ref]), '5');
+  near(dimValue(d, d.cons[ang]), (Math.atan2(4, 3) * 180) / Math.PI, 1e-9);
+  assert.equal(layoutDim(d, d.cons[ref], { s: 10, ox: 0, oy: 0 }).label.italic, true);
+  d.pts[b].x = 6; d.pts[b].y = 8;
+  assert.equal(dimText(d, d.cons[ref]), '10', 'sigue a la geometria');
+  addCon(d, { t: 'DIST', refs: [a, b], v: 10 });
+  assert.ok(solve(d).ok);
+  const drive = addCon(d, { t: 'DIST', refs: [a, b], v: 7 });
+  assert.equal(solve(d).ok, false, 'la misma cota como restriccion si entra en conflicto');
+  assert.equal(layoutDim(d, d.cons[drive], { s: 10, ox: 0, oy: 0 }).label.italic, false);
+  const circ = addCircle(d, c, 4, {});
+  const kc = { t: 'RAD', refs: [circ], v: 1, ref: true };
+  assert.equal(dimText(d, kc), 'φ8');
 });
 
 console.log(`\n${passed} pruebas pasaron`);

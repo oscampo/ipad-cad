@@ -76,6 +76,7 @@ function splitLine(doc, id, ptIds) {
   });
   for (let i = 0; i < pieces.length - 1; i++) addCon(doc, { t: 'COL', refs: [pieces[i], pieces[i + 1]], hidden: true });
   retargetHatches(doc, id, pieces);
+  for (const t of Object.values(doc.texts || {})) if (t.ref === id) t.ref = pieces[0];
   delete doc.lines[id];
   cleanup(doc);
   return { ok: true, pieces, dropped };

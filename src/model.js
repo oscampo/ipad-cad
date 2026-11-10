@@ -63,7 +63,7 @@ export function arcOf(doc, arc) {
 // anchor: 'tl','tc','tr','ml','mc','mr','bl','bc','br' (vertical + horizontal); ang en grados.
 export function addText(doc, pt, text, opts = {}) {
   const id = nextId(doc, 't');
-  doc.texts[id] = { pt, text, h: opts.h ?? 4, ang: opts.ang ?? 0, anchor: opts.anchor ?? 'bl', color: opts.color ?? 'auto' };
+  doc.texts[id] = { pt, text, h: opts.h ?? 4, ang: opts.ang ?? 0, anchor: opts.anchor ?? 'bl', color: opts.color ?? 'auto', readable: opts.readable ?? true };
   return id;
 }
 
@@ -100,6 +100,7 @@ export function cleanup(doc) {
     }
     for (const [id, t] of Object.entries(doc.texts || {})) {
       if (!(t.pt in doc.pts)) { delete doc.texts[id]; changed = true; }
+      else if (t.ref && !(t.ref in doc.lines)) delete t.ref; // la linea de referencia ya no existe: queda con su desfase
     }
     for (const [id, h] of Object.entries(doc.hatches)) {
       h.ids = h.ids.filter((e) => e in doc.lines || e in doc.circles || e in doc.arcs);

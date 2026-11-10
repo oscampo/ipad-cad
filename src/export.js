@@ -1,6 +1,6 @@
 import { hatchLoops, allLtypes, arcOf } from './model.js';
 import { dashFromPattern, norm } from './geom.js';
-import { textFrame, textCorners, LINE_SPACING } from './text.js';
+import { textFrame, textCorners, textPose, LINE_SPACING } from './text.js';
 import { layoutDim } from './dims.js';
 
 const DIM_KINDS = new Set(['DIST', 'DISTPL', 'ANG', 'RAD']);
@@ -66,7 +66,7 @@ function dimSvg(L, color) {
   if (L.label) {
     const b = labelBox(L.label);
     out.push(`<rect x="${n(b.x)}" y="${n(b.y)}" width="${n(b.w)}" height="${n(b.h)}" rx="3" fill="#fff" fill-opacity="0.85"/>`);
-    out.push(`<text x="${n(L.label.x)}" y="${n(L.label.y)}" font-family="sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="${color}">${esc(L.label.text)}</text>`);
+    out.push(`<text x="${n(L.label.x)}" y="${n(L.label.y)}" font-family="sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central"${L.label.italic ? ' font-style="italic"' : ''} fill="${color}">${esc(L.label.text)}</text>`);
   }
   return out;
 }
@@ -129,10 +129,11 @@ export function exportSVG(doc, ltScale = 1, vis = {}) {
   for (const t of vis.texts === false ? [] : Object.values(doc.texts || {})) {
     const P = doc.pts[t.pt];
     if (!P) continue;
-    const f = textFrame(t, approx);
-    const anchor = { l: 'start', c: 'middle', r: 'end' }[t.anchor?.[1] ?? 'l'];
+    const pose = textPose(doc, t);
+    const f = textFrame(t, approx, pose.anchor);
+    const anchor = { l: 'start', c: 'middle', r: 'end' }[pose.anchor[1]];
     const lines = f.lines.map((ln, i) => `<tspan x="${n((anchor === 'start' ? f.xmin : anchor === 'middle' ? f.xmin + f.w / 2 : f.xmin + f.w) * K)}" y="${n((-f.ymax + (i * LINE_SPACING + 0.95) * t.h) * K)}">${esc(ln)}</tspan>`).join('');
-    out.push(`<text transform="translate(${X(P.x)} ${Y(P.y)}) rotate(${n(-(t.ang || 0))})" font-family="sans-serif" font-size="${n(t.h * K)}" text-anchor="${anchor}" fill="${col(t.color)}">${lines}</text>`);
+    out.push(`<text transform="translate(${X(P.x)} ${Y(P.y)}) rotate(${n(-pose.ang)})" font-family="sans-serif" font-size="${n(t.h * K)}" text-anchor="${anchor}" fill="${col(t.color)}">${lines}</text>`);
   }
   // cotas
   if (vis.dims !== false) for (const L of dimLayouts(doc, view)) out.push(...dimSvg(L, '#000000'));
@@ -177,15 +178,16 @@ export function exportDXF(doc, viewScale = 5, vis = {}) {
   for (const t of vis.texts === false ? [] : Object.values(doc.texts || {})) {
     const P = doc.pts[t.pt];
     if (!P) continue;
-    const f = textFrame(t, approx);
-    const a = ((t.ang || 0) * Math.PI) / 180, c0 = Math.cos(a), s0 = Math.sin(a);
-    const h72 = { l: 0, c: 1, r: 2 }[t.anchor?.[1] ?? 'l'];
+    const pose = textPose(doc, t);
+    const f = textFrame(t, approx, pose.anchor);
+    const a = (pose.ang * Math.PI) / 180, c0 = Math.cos(a), s0 = Math.sin(a);
+    const h72 = { l: 0, c: 1, r: 2 }[pose.anchor[1]];
     f.lines.forEach((ln, i) => {
       const x = h72 === 0 ? f.xmin : h72 === 1 ? f.xmin + f.w / 2 : f.xmin + f.w;
       const y = f.ymax - (i + 1) * 1.2 * t.h + 0.2 * t.h; // linea base
       const wx = P.x + x * c0 - y * s0, wy = P.y + x * s0 + y * c0;
       g(0, 'TEXT'); g(8, '0'); g(10, wx); g(20, wy); g(30, 0); g(40, t.h); g(1, ln.replace(/\s+/g, ' '));
-      g(50, (((t.ang || 0) % 360) + 360) % 360); g(72, h72); g(11, wx); g(21, wy); g(31, 0); g(73, 0);
+      g(50, pose.ang); g(72, h72); g(11, wx); g(21, wy); g(31, 0); g(73, 0);
     });
   }
   // cotas como geometria: el layout esta en px de pantalla (y hacia abajo); se pasa a unidades del dibujo
@@ -207,6 +209,7 @@ export function exportDXF(doc, viewScale = 5, vis = {}) {
     }
     if (L.label) {
       g(0, 'TEXT'); g(8, '0'); g(10, mx(L.label.x)); g(20, my(L.label.y)); g(30, 0); g(40, 11 / S); g(1, L.label.text);
+      if (L.label.italic) g(51, 15); // cota de referencia: oblicuo
       g(72, 1); g(11, mx(L.label.x)); g(21, my(L.label.y)); g(31, 0); g(73, 2);
     }
   }

@@ -22,13 +22,27 @@ function distEnds(doc, k) {
   return [p, footOnLine(p, doc.pts[l.a], doc.pts[l.b])];
 }
 
-export function dimText(doc, k) {
-  if (k.t === 'ANG') return fmtNum(k.v) + '°';
-  if (k.t === 'RAD') return (k.refs[0] in doc.circles ? 'φ' + fmtNum(2 * k.v) : 'R' + fmtNum(k.v));
-  return fmtNum(k.v);
+// Valor que muestra una cota. Las de referencia (k.ref) no restringen nada: miden en vivo.
+export function dimValue(doc, k) {
+  if (!k.ref) return k.v;
+  if (k.t === 'DIST' || k.t === 'DISTPL') { const [p1, p2] = distEnds(doc, k); return Math.hypot(p2.x - p1.x, p2.y - p1.y); }
+  if (k.t === 'ANG') {
+    const l1 = doc.lines[k.refs[0]], l2 = doc.lines[k.refs[1]];
+    const d = (l) => ({ x: doc.pts[l.b].x - doc.pts[l.a].x, y: doc.pts[l.b].y - doc.pts[l.a].y });
+    return (signedAngle(d(l1), d(l2)) * 180) / Math.PI;
+  }
+  if (k.t === 'RAD') { const o = doc.circles[k.refs[0]] || doc.arcs[k.refs[0]]; return o ? o.r : k.v; }
+  return k.v;
 }
 
-export function layoutDim(doc, k, view) {
+export function dimText(doc, k) {
+  const v = dimValue(doc, k);
+  if (k.t === 'ANG') return fmtNum(v) + '°';
+  if (k.t === 'RAD') return (k.refs[0] in doc.circles ? 'φ' + fmtNum(2 * v) : 'R' + fmtNum(v));
+  return fmtNum(v);
+}
+
+function layoutDimBase(doc, k, view) {
   const s = view.s, v = V(view);
   const out = { lines: [], arcs: [], arrows: [], label: null };
   const text = dimText(doc, k);
@@ -122,6 +136,13 @@ export function layoutDim(doc, k, view) {
     return out;
   }
   return out;
+}
+
+// Las cotas de referencia llevan la etiqueta en cursiva (label.italic).
+export function layoutDim(doc, k, view) {
+  const L = layoutDimBase(doc, k, view);
+  if (L.label) L.label.italic = !!k.ref;
+  return L;
 }
 
 // El usuario arrastra la etiqueta: reposiciona la cota. Devuelve true si cambio algo.

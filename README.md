@@ -12,6 +12,9 @@ CAD 2D parametrico para iPad (uso personal), inspirado en Updraw. PWA: se instal
 - Arcos (centro y extremos, 3 puntos), colineal y dividir (segmentos, arcos y circulos heredan estilo y relaciones).
 - Cotas con flechas y lineas de extension reposicionables (arrastra la etiqueta): distancia, angulo, R de arco, phi de circulo.
 - Texto con punto de insercion (esquinas, medios de lado o centro de la caja), angulo y altura; el punto es un punto real del dibujo.
+- Texto alineado con una linea (sigue su direccion, con desfase) y modo legible (se gira 180 grados si quedaria boca abajo, manteniendo su caja en el mismo sitio).
+- Cotas de referencia (solo lectura, en cursiva): miden en vivo y no entran al solver, para medir resultados sin generar conflictos.
+- Interruptores de vista: restricciones, puntos, cotas y textos.
 - Escala del patron de linea por elemento.
 - Exportar .json, PNG, SVG, DXF (lineas, arcos, circulos, puntos, textos y cotas; en DXF las cotas salen como geometria: LINE, ARC, SOLID y TEXT, no como entidades DIMENSION).
 
