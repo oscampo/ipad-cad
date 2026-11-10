@@ -227,7 +227,7 @@ export function exportDXF(doc, viewScale = 5, vis = {}) {
       P.forEach(([px, py], i) => { g(10 + i, mx(px)); g(20 + i, my(py)); g(30 + i, 0); });
     }
     if (L.label) {
-      g(0, 'TEXT'); g(8, '0'); g(10, mx(L.label.x)); g(20, my(L.label.y)); g(30, 0); g(40, 11 / S); g(1, L.label.text);
+      g(0, 'TEXT'); g(8, '0'); g(10, mx(L.label.x)); g(20, my(L.label.y)); g(30, 0); g(40, 11 / S); g(1, L.label.text.replace(/\u2300/g, '%%c'));
       if (L.label.italic) g(51, 15); // cota de referencia: oblicuo
       g(72, 1); g(11, mx(L.label.x)); g(21, my(L.label.y)); g(31, 0); g(73, 2);
     }

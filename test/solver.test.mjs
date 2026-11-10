@@ -333,7 +333,7 @@ t('cotas: circulo muestra phi con el diametro y arco muestra R', () => {
   const A = addArc(d, o, p, q, 5, {});
   const kc = { t: 'RAD', refs: [c], v: 5 };
   const Lc = layoutDim(d, kc, VIEW);
-  assert.equal(Lc.label.text, 'φ10');
+  assert.equal(Lc.label.text, '⌀10');
   assert.equal(Lc.arrows.length, 2);
   const ka = { t: 'RAD', refs: [A], v: 5 };
   const La = layoutDim(d, ka, VIEW);
@@ -431,7 +431,7 @@ t('exportar cotas: SVG y DXF llevan flechas, extension, arcos de angulo y etique
   const nArrows = L.reduce((s, x) => s + x.arrows.length, 0);
   const svg = exportSVG(d, 1);
   assert.equal(svg.split('<polygon').length - 1, nArrows, 'una flecha por cabeza');
-  assert.ok(svg.includes('>40</text>') && svg.includes('>90°</text>') && svg.includes('>φ20</text>'), 'etiquetas');
+  assert.ok(svg.includes('>40</text>') && svg.includes('>90°</text>') && svg.includes('>⌀20</text>'), 'etiquetas');
   assert.ok(/<path d="M[^"]+ A[^"]+" fill="none" stroke="#000000" stroke-width="1"\/>/.test(svg), 'arco de la cota angular');
   const W = Number(svg.match(/width="([\d.]+)"/)[1]), H = Number(svg.match(/height="([\d.]+)"/)[1]);
   const tr = svg.match(/<g transform="translate\(([\d.-]+) ([\d.-]+)\)">/);
@@ -444,7 +444,7 @@ t('exportar cotas: SVG y DXF llevan flechas, extension, arcos de angulo y etique
   assert.equal(rows.length % 2, 0);
   assert.equal(rows.filter((r) => r === 'SOLID').length, nArrows, 'flechas SOLID');
   const labels = rows.filter((r, i) => rows[i - 1] === '1');
-  assert.ok(['40', '90°', 'φ20'].every((t) => labels.includes(t)), 'etiquetas en DXF');
+  assert.ok(['40', '90°', '%%c20'].every((t) => labels.includes(t)), 'etiquetas en DXF');
   assert.ok(rows.filter((r) => r === 'ARC').length >= 1, 'arco de la cota angular');
   // coordenadas del DXF en unidades del dibujo: la cota de 40 queda cerca de y=-8/6.. (sobre el eje, desplazada)
   const idx = rows.findIndex((r, i) => r === 'LINE' && rows[i + 5] === '20');
@@ -525,7 +525,7 @@ t('cotas de referencia: miden en vivo, no entran al solver y salen en cursiva', 
   assert.equal(layoutDim(d, d.cons[drive], { s: 10, ox: 0, oy: 0 }).label.italic, false);
   const circ = addCircle(d, c, 4, {});
   const kc = { t: 'RAD', refs: [circ], v: 1, ref: true };
-  assert.equal(dimText(d, kc), 'φ8');
+  assert.equal(dimText(d, kc), '⌀8');
 });
 
 
@@ -948,6 +948,49 @@ t('expresiones en cotas: formulas, constantes, funciones y errores', () => {
   near(v('sqrt(16)+abs(-4)'), 8);
   for (const bad of ['', '1/0', '(1+2', '3+', 'foo(2)', 'sin 30', '2 $ 3', 'sqrt(-4)', '1)']) assert.throws(() => evalExpr(bad), undefined, 'debe fallar: ' + bad);
   assert.ok(isPlainNumber('12.5') && isPlainNumber(' -3,2 ') && !isPlainNumber('3π') && !isPlainNumber('1+2'));
+});
+
+
+t('angulos en radianes: selector de unidad en expresiones y etiqueta', () => {
+  near(parseValue('2.35619449', { angle: true, radians: true }), 135, 1e-6, 'numero simple en radianes');
+  near(parseValue('3π/4', { angle: true, radians: true }), 135, 1e-9);
+  near(parseValue('sin(π/6)*2', { radians: false }), 1, 1e-9);
+  near(parseValue('asin(0.5)', { angle: true, radians: true }), 30, 1e-9, 'asin en radianes -> 30 grados');
+  near(parseValue('asin(0.5)', { angle: true }), 30, 1e-9, 'asin en grados');
+  near(parseValue('1', { angle: true, radians: true }), 57.2957795131, 1e-6);
+  near(parseValue('10*sin(30)', { radians: false }), 5, 1e-9);
+  const { d, l1, l2 } = (() => { const d = newDoc(); const o = addPoint(d, 0, 0), a = addPoint(d, 4, 0), b = addPoint(d, 0, 4); return { d, l1: addLine(d, o, a, {}), l2: addLine(d, o, b, {}) }; })();
+  assert.equal(dimText(d, { t: 'ANG', refs: [l1, l2], v: 90 }), '90°');
+  assert.equal(dimText(d, { t: 'ANG', refs: [l1, l2], v: 90, unit: 'rad' }), '1.571 rad');
+});
+
+t('cotas de radio y diametro (ANSI): dentro = linea por el interior; fuera = llamada radial con flecha desde afuera', () => {
+  const d = newDoc();
+  const c = addPoint(d, 0, 0), e = addPoint(d, 10, 0);
+  const ci = addCircle(d, c, 10, {});
+  const VIEW = { s: 10, ox: 0, oy: 0 }; // radio en pantalla: 100 px
+  const kin = { t: 'RAD', refs: [ci], v: 10, lp: 0, ang: 0 };
+  const Lin = layoutDim(d, kin, VIEW);
+  assert.equal(Lin.arrows.length, 2, 'diametro dentro: dos flechas');
+  assert.equal(Lin.lines.length, 1, 'una sola linea de lado a lado');
+  near(Math.abs(Lin.lines[0][2] - Lin.lines[0][0]), 200, 1e-6, 'abarca el diametro');
+  assert.ok(Lin.arrows.every((a) => Math.abs(Math.hypot(a.x, a.y) - 100) < 1e-6), 'flechas sobre la circunferencia');
+  const kout = { t: 'RAD', refs: [ci], v: 10, lp: 15, ang: 0 }; // texto fuera (150 px > 100 px)
+  const Lout = layoutDim(d, kout, VIEW);
+  assert.equal(Lout.arrows.length, 1, 'fuera: una flecha');
+  near(Lout.arrows[0].x, 100, 1e-6); near(Lout.arrows[0].dx, -1, 1e-9, 'apunta hacia el centro');
+  assert.equal(Lout.lines.length, 2, 'llamada + tramo horizontal');
+  assert.ok(Lout.lines[0][0] >= 100 - 1e-6 && Lout.lines[0][2] >= 150 - 1e-6, 'la llamada no cruza el circulo');
+  assert.ok(Lout.label.x > Lout.lines[1][2], 'texto junto al tramo horizontal');
+  // por defecto, un circulo diminuto en pantalla pone el texto fuera
+  const small = layoutDim(d, { t: 'RAD', refs: [ci], v: 10 }, { s: 1, ox: 0, oy: 0 });
+  assert.equal(small.arrows.length, 1, 'no cabe: fuera');
+  // radio de arco: dentro, una flecha desde el centro; fuera, llamada
+  const arc = addArc(d, c, e, addPoint(d, 0, 10), 10, {});
+  const ra = layoutDim(d, { t: 'RAD', refs: [arc], v: 10, lp: 5, ang: Math.PI / 4 }, VIEW);
+  assert.equal(ra.arrows.length, 1); assert.equal(ra.lines.length, 1);
+  const rb = layoutDim(d, { t: 'RAD', refs: [arc], v: 10, lp: 14, ang: Math.PI / 4 }, VIEW);
+  assert.equal(rb.lines.length, 2); assert.ok(rb.arrows[0].dx * Math.cos(Math.PI / 4) < 0 || rb.arrows[0].dx < 0);
 });
 
 console.log(`\n${passed} pruebas pasaron`);

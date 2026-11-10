@@ -6,7 +6,7 @@ const TAU_DEG = 180 / Math.PI;
 const FUNCS = {
   sin: (x, r) => Math.sin(r ? x : x / TAU_DEG), sen: (x, r) => Math.sin(r ? x : x / TAU_DEG),
   cos: (x, r) => Math.cos(r ? x : x / TAU_DEG), tan: (x, r) => Math.tan(r ? x : x / TAU_DEG),
-  asin: (x) => Math.asin(x) * TAU_DEG, acos: (x) => Math.acos(x) * TAU_DEG, atan: (x) => Math.atan(x) * TAU_DEG,
+  asin: (x, r, rm) => (rm ? Math.asin(x) : Math.asin(x) * TAU_DEG), acos: (x, r, rm) => (rm ? Math.acos(x) : Math.acos(x) * TAU_DEG), atan: (x, r, rm) => (rm ? Math.atan(x) : Math.atan(x) * TAU_DEG),
   sqrt: Math.sqrt, raiz: Math.sqrt, abs: Math.abs, exp: Math.exp, ln: Math.log, log: Math.log10, log10: Math.log10,
 };
 const KEEP_RAD = new Set(['sqrt', 'raiz', 'abs']); // conservan la marca de radianes del argumento
@@ -35,7 +35,7 @@ function tokenize(src) {
   return toks;
 }
 
-export function evalExpr(src) {
+export function evalExpr(src, { radians = false } = {}) {
   const toks = tokenize(String(src ?? ''));
   if (!toks.length) throw new Error('Escribe un valor');
   let p = 0;
@@ -85,7 +85,7 @@ export function evalExpr(src) {
       const a = expr();
       if (!isOp(')')) throw new Error('Falta cerrar un paréntesis');
       p++;
-      const v = FUNCS[k.v](a.v, a.r);
+      const v = FUNCS[k.v](a.v, a.r || radians, radians);
       return { v, r: KEEP_RAD.has(k.v) ? a.r : false };
     }
     throw new Error('Expresión no válida');
@@ -100,7 +100,8 @@ export function evalExpr(src) {
 export const isPlainNumber = (s) => /^\s*[-+]?(\d+([.,]\d+)?|[.,]\d+)\s*$/.test(String(s));
 
 // Valor numerico de lo que escribio el usuario; angle: lo que viene de π se pasa de radianes a grados.
-export function parseValue(src, { angle = false } = {}) {
-  const { value, rad } = evalExpr(src);
-  return Number((angle && rad ? value * TAU_DEG : value).toPrecision(12));
+// radians: la cota angular se escribe en radianes (los numeros y sin/cos/tan van en radianes); si no, en grados.
+export function parseValue(src, { angle = false, radians = false } = {}) {
+  const { value, rad } = evalExpr(src, { radians: angle && radians });
+  return Number((angle && (rad || radians) ? value * TAU_DEG : value).toPrecision(12));
 }

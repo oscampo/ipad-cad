@@ -5,6 +5,7 @@ import { lineLine, signedAngle, norm, TAU, inSweep } from './geom.js';
 import { arcOf } from './model.js';
 
 export const ARROW = 9;
+export const DIAM = '\u2300'; // simbolo de diametro (U+2300)
 export const fmtNum = (v) => (Math.abs(v) >= 1000 ? v.toFixed(1) : String(Math.round(v * 1000) / 1000));
 
 const V = (view) => (p) => ({ x: p.x * view.s + view.ox, y: view.oy - p.y * view.s });
@@ -64,8 +65,8 @@ export function dimValue(doc, k) {
 
 export function dimText(doc, k) {
   const v = dimValue(doc, k);
-  if (k.t === 'ANG') return fmtNum(v) + '°';
-  if (k.t === 'RAD') return (k.refs[0] in doc.circles ? 'φ' + fmtNum(2 * v) : 'R' + fmtNum(v));
+  if (k.t === 'ANG') return k.unit === 'rad' ? fmtNum((v * Math.PI) / 180) + ' rad' : fmtNum(v) + '°';
+  if (k.t === 'RAD') return (k.refs[0] in doc.circles ? DIAM + fmtNum(2 * v) : 'R' + fmtNum(v));
   return fmtNum(v);
 }
 
@@ -133,26 +134,47 @@ function layoutDimBase(doc, k, view) {
   }
 
   if (k.t === 'RAD') {
+    // Cotas de radio y diametro segun ANSI/ASME Y14.5: con el texto DENTRO, la linea de cota va por el
+    // interior (diametro: de lado a lado con flecha en ambos extremos; radio: del centro al arco con una
+    // flecha en el arco). Con el texto FUERA, una linea de llamada radial parte del arco con la flecha
+    // tocandolo desde afuera y apuntando al centro, y termina en un tramo horizontal junto al texto.
     const circ = doc.circles[k.refs[0]], arc = circ ? null : doc.arcs[k.refs[0]];
     const o = circ || arc;
     if (!o) return out;
     const Cm = doc.pts[o.c], C = v(Cm), rs = o.r * s;
     let defAng = Math.PI / 4;
     if (arc) { const g = arcOf(doc, arc); defAng = g.a0 + g.sweep / 2; }
-    const ang = k.ang ?? defAng;
+    let ang = k.ang ?? defAng;
+    const tw = 0.6 * 12 * text.length + 8; // ancho aproximado del texto (px)
+    let lp;
+    if (k.lp !== undefined) lp = k.lp * s;
+    else {
+      const fits = circ ? 2 * rs >= tw + 2 * ARROW + 6 : rs >= tw + ARROW + 8;
+      lp = fits ? (circ ? 0 : o.r * 0.5 * s) : rs + 26; // por defecto dentro si cabe, fuera si no
+    }
+    if (lp < 0) { ang += Math.PI; lp = -lp; }
     const d = { x: Math.cos(ang), y: -Math.sin(ang) }, nrm = { x: -d.y, y: d.x };
-    const lp = (k.lp ?? (circ ? 0 : o.r * 0.5)) * s;
-    const L = { x: C.x + d.x * lp, y: C.y + d.y * lp };
-    if (circ) {
-      const P1 = { x: C.x - d.x * rs, y: C.y - d.y * rs }, P2 = { x: C.x + d.x * rs, y: C.y + d.y * rs };
-      const ext1 = lp < -rs ? L : P1, ext2 = lp > rs ? L : P2;
-      out.lines.push([ext1.x, ext1.y, ext2.x, ext2.y]);
-      out.arrows.push({ x: P2.x, y: P2.y, dx: d.x, dy: d.y }, { x: P1.x, y: P1.y, dx: -d.x, dy: -d.y });
+    const P = { x: C.x + d.x * rs, y: C.y + d.y * rs };
+    if (lp > rs + 2) {
+      // texto fuera: llamada radial + tramo horizontal + texto
+      const E = { x: C.x + d.x * lp, y: C.y + d.y * lp };
+      const side = d.x >= 0 ? 1 : -1, E2 = { x: E.x + side * 10, y: E.y };
+      out.lines.push([P.x, P.y, E.x, E.y], [E.x, E.y, E2.x, E2.y]);
+      out.arrows.push({ x: P.x, y: P.y, dx: -d.x, dy: -d.y });
+      out.label = { x: E2.x + side * (tw / 2 + 1), y: E2.y, text };
     } else {
-      const P = { x: C.x + d.x * rs, y: C.y + d.y * rs };
-      const end = lp > rs ? L : P;
-      out.lines.push([C.x, C.y, end.x, end.y]);
-      out.arrows.push({ x: P.x, y: P.y, dx: d.x, dy: d.y });
+      const L = { x: C.x + d.x * lp, y: C.y + d.y * lp };
+      if (circ) {
+        const P1 = { x: C.x - d.x * rs, y: C.y - d.y * rs };
+        out.lines.push([P1.x, P1.y, P.x, P.y]);
+        out.arrows.push({ x: P.x, y: P.y, dx: d.x, dy: d.y }, { x: P1.x, y: P1.y, dx: -d.x, dy: -d.y });
+      } else {
+        out.lines.push([C.x, C.y, P.x, P.y]);
+        out.arrows.push({ x: P.x, y: P.y, dx: d.x, dy: d.y });
+      }
+      out.label = { x: L.x + nrm.x * 11, y: L.y + nrm.y * 11, text };
+    }
+    if (arc) {
       // si la cota cae fuera del tramo, prolonga el arco con una linea de extension
       const g = arcOf(doc, arc);
       if (!inSweep(Cm, g.a0, g.sweep, { x: Cm.x + Math.cos(ang), y: Cm.y + Math.sin(ang) }, 1e-6)) {
@@ -161,7 +183,6 @@ function layoutDimBase(doc, k, view) {
         else out.arcs.push({ cx: C.x, cy: C.y, r: rs, a0: -ang, a1: -(g.a0 + TAU), ccw: true, dashed: true });
       }
     }
-    out.label = { x: L.x + nrm.x * 11, y: L.y + nrm.y * 11, text };
     return out;
   }
   return out;

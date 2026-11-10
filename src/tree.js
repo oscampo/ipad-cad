@@ -1,7 +1,7 @@
 // Arbol de elementos del documento (sin DOM): cada elemento con sus puntos y sus relaciones.
 import { dist } from './geom.js';
 import { conRefs } from './model.js';
-import { dimValue } from './dims.js';
+import { dimValue, dimText, DIAM } from './dims.js';
 
 const f = (v, d = 2) => String(Math.round(v * 10 ** d) / 10 ** d);
 
@@ -15,8 +15,8 @@ const CON_NAMES = {
 export function conLabel(doc, k) {
   let s = CON_NAMES[k.t] || k.t;
   if (k.t === 'DIST' || k.t === 'DISTPL') s += ` = ${f(k.v)}`;
-  else if (k.t === 'ANG') s += ` = ${f(dimValue(doc, k))}°`;
-  else if (k.t === 'RAD') s += (k.refs[0] in doc.circles ? ` φ = ${f(k.v * 2)}` : ` R = ${f(k.v)}`);
+  else if (k.t === 'ANG') s += ` = ${dimText(doc, k)}`;
+  else if (k.t === 'RAD') s += (k.refs[0] in doc.circles ? ` ${DIAM} = ${f(k.v * 2)}` : ` R = ${f(k.v)}`);
   if (k.ref) s += ' (referencia)';
   if (k.hidden) s += ' (auto)';
   return s;
@@ -42,7 +42,7 @@ export function buildTree(doc) {
     children: [...conNodes(id), ...compact([ptNode(l.a, 'A:'), ptNode(l.b, 'B:')])],
   }));
   const circles = Object.entries(doc.circles).map(([id, c]) => ({
-    key: `ci:${id}`, label: `Círculo ${id} · φ = ${f(2 * c.r)}`, sel: { k: 'ci', id },
+    key: `ci:${id}`, label: `Círculo ${id} · ${DIAM} = ${f(2 * c.r)}`, sel: { k: 'ci', id },
     children: [...conNodes(id), ...compact([ptNode(c.c, 'Centro:')])],
   }));
   const arcs = Object.entries(doc.arcs).map(([id, a]) => ({
