@@ -3,7 +3,7 @@ import { newDoc, addPoint, addLine, addCircle, addArc, addCon, addText, addSplin
 import { startTrace, recordTraces, traceToSpline, offsetPolyline, firstLap } from '../src/curves.js';
 import { layoutDim, dragDim, dimValue, dimText, angSector, angTrue } from '../src/dims.js';
 import { textFrame, textCorners, textHit, textPose, rawAngle } from '../src/text.js';
-import { exportSVG, exportSVGLaser, exportDXF, dimLayouts, extraExtents } from '../src/export.js';
+import { exportSVG, exportSVGLaser, exportDXF, dimLayouts, extraExtents, laserClasses, styleKey } from '../src/export.js';
 import { splitElement } from '../src/split.js';
 import { buildTree, conLabel } from '../src/tree.js';
 import { cleanFileBase } from '../src/files.js';
@@ -1198,6 +1198,22 @@ t('copia espejo: puntos, arco (sigue antihorario), cota angular y puntos sobre e
   const angs = Object.values(d.cons).filter((k) => k.t === 'ANG');
   assert.equal(angs.length, 2); near(angs[0].v, -angs[1].v, 1e-6);
   void axis;
+});
+
+
+t('SVG corte laser: clases de linea a corte, marcado u omitir', () => {
+  const d = newDoc();
+  const cut = addLine(d, addPoint(d, 0, 0), addPoint(d, 10, 0), { ltype: 'continua', w: 2 });
+  const fold = addLine(d, addPoint(d, 0, 5), addPoint(d, 10, 5), { ltype: 'continua', w: 1 }); // mismo tipo, otro grosor
+  const dashed = addLine(d, addPoint(d, 0, 8), addPoint(d, 10, 8), { ltype: 'discontinua', w: 2 });
+  const cls = laserClasses(d);
+  assert.equal(cls.length, 3);
+  const k = (id) => styleKey(d.lines[id]);
+  const r = exportSVGLaser(d, { unit: 1, stroke: 0.1, cutColor: '#ff0000', markColor: '#0000ff', modes: { [k(cut)]: 'cut', [k(fold)]: 'mark', [k(dashed)]: 'skip' } });
+  assert.equal(r.cut, 1); assert.equal(r.mark, 1); assert.equal(r.count, 2);
+  assert.match(r.svg, /<g id="corte" fill="none" stroke="#ff0000"/);
+  assert.match(r.svg, /<g id="marcado" fill="none" stroke="#0000ff"/);
+  assert.equal(exportSVGLaser(d, { modes: { [k(cut)]: 'skip' } }), null);
 });
 
 console.log(`\n${passed} pruebas pasaron`);

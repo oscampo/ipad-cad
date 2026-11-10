@@ -13,7 +13,7 @@ import { splitElement } from './split.js';
 import { trimAt, extendEnd, linearArray, mirrorCopy } from './edit.js';
 import { layoutDim, dragDim, dimValue, angSector, angTrue, DIAM } from './dims.js';
 import { textFrame, textHit, textPose, rawAngle, ANCHORS, ANCHOR_NAMES, LINE_SPACING } from './text.js';
-import { exportSVG, exportSVGLaser, exportDXF, extraExtents } from './export.js';
+import { exportSVG, exportSVGLaser, exportDXF, extraExtents, laserClasses } from './export.js';
 import { iconSvg } from './icons.js';
 import { buildTree, kindOf } from './tree.js';
 import { cleanFileBase } from './files.js';
@@ -1958,21 +1958,47 @@ $('spOffset').onclick = () => {
 };
 
 // ---- SVG para corte laser ----
+const WLAB = { 1: 'Fino', 2: 'Normal', 3.5: 'Grueso' };
 $('fLaser').onclick = () => {
-  const v = { unit: 1, stroke: 0.1, color: '#ff0000', onlyContinuous: true, ...(opts.laser || {}) };
-  $('lsUnit').value = String(v.unit); $('lsStroke').value = String(v.stroke); $('lsColor').value = v.color; $('lsCont').checked = !!v.onlyContinuous;
+  const v = { unit: 1, stroke: 0.1, cutColor: '#ff0000', markColor: '#0000ff', modes: {}, ...(opts.laser || {}) };
+  $('lsUnit').value = String(v.unit); $('lsStroke').value = String(v.stroke); $('lsColor').value = v.cutColor; $('lsMarkColor').value = v.markColor;
+  const box = $('lsClasses'), lts = allLtypes(doc);
+  box.textContent = '';
+  const cls = laserClasses(doc);
+  if (!cls.length) { toast('No hay geometría para exportar'); return; }
+  for (const c of cls) {
+    const row = document.createElement('div');
+    row.className = 'row'; row.style.cssText = 'gap:8px;align-items:center;margin:4px 0';
+    const lt = lts[c.ltype] || lts.continua;
+    const dash = dashFromPattern(lt.pattern).map((n) => Math.max(0.5, n * 2.2)).join(' ');
+    const col = c.color === 'auto' ? 'currentColor' : c.color;
+    const sw = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    sw.setAttribute('width', '44'); sw.setAttribute('height', '16'); sw.style.flex = 'none';
+    sw.innerHTML = `<path d="M2 8H42" stroke="${col}" stroke-width="${Math.max(1, c.w * 1.2)}" ${dash ? `stroke-dasharray="${dash}"` : ''} fill="none"/>`;
+    const lab = document.createElement('span');
+    lab.style.cssText = 'flex:1;font-size:13px;line-height:1.2';
+    lab.textContent = `${lt.label} · ${WLAB[c.w] || c.w}${c.color === 'auto' ? '' : ' · ' + c.color} (${c.count})`;
+    const sel2 = document.createElement('select');
+    sel2.dataset.key = c.key; sel2.style.cssText = 'min-height:36px;padding:2px 6px;border:1px solid var(--line);border-radius:8px;background:var(--btn)';
+    sel2.innerHTML = '<option value="cut">Corte</option><option value="mark">Marcado</option><option value="skip">Omitir</option>';
+    sel2.value = v.modes[c.key] || (c.ltype === 'continua' ? 'cut' : 'skip');
+    row.append(sw, lab, sel2);
+    box.appendChild(row);
+  }
   $('dlgL').showModal();
 };
 $('lsCancel').onclick = () => $('dlgL').close();
 $('lsOk').onclick = (ev) => {
   ev.preventDefault();
-  const o = { unit: Number(String($('lsUnit').value).replace(',', '.')), stroke: Number(String($('lsStroke').value).replace(',', '.')), color: $('lsColor').value, onlyContinuous: $('lsCont').checked };
+  const modes = {};
+  document.querySelectorAll('#lsClasses select').forEach((s) => { modes[s.dataset.key] = s.value; });
+  const o = { unit: Number(String($('lsUnit').value).replace(',', '.')), stroke: Number(String($('lsStroke').value).replace(',', '.')), cutColor: $('lsColor').value, markColor: $('lsMarkColor').value, modes };
   if (!(o.unit > 0) || !(o.stroke > 0)) { toast('La escala y el grosor deben ser positivos'); return; }
   const r = exportSVGLaser(doc, o);
-  if (!r) { toast('No hay geometría para cortar' + (o.onlyContinuous ? ' (solo se exporta trazo continuo)' : '')); return; }
-  opts.laser = o; persist();
+  if (!r) { toast('No hay nada marcado como Corte o Marcado'); return; }
+  opts.laser = { ...(opts.laser || {}), ...o, modes: { ...(opts.laser?.modes || {}), ...modes } }; persist();
   $('dlgL').close();
-  saveFile('svg', '-laser', () => new Blob([r.svg], { type: 'image/svg+xml' })).then(() => toast(`SVG de ${r.width.toFixed(1)} × ${r.height.toFixed(1)} mm con ${r.count} elementos`));
+  saveFile('svg', '-laser', () => new Blob([r.svg], { type: 'image/svg+xml' })).then(() => toast(`SVG de ${r.width.toFixed(1)} × ${r.height.toFixed(1)} mm: ${r.cut} de corte y ${r.mark} de marcado`));
 };
 $('trTrace').onclick = () => {
   const pts = sel.filter((x) => x.k === 'pt').map((x) => x.id);

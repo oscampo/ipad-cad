@@ -55,6 +55,8 @@ body.nolabels .grid2 { grid-template-columns: repeat(4, 1fr); }
 body.nolabels .grid2 button span { display: none; }
 body.nolabels .grid2 button { justify-content: center; padding: 4px; }
 #bar button { padding: 4px 8px; }
+.exp3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 6px; }
+.exp3 button { font-size: 13px; font-weight: 600; line-height: 1.1; justify-content: center; text-align: center; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .row { display: flex; gap: 6px; align-items: center; margin: 4px 0; flex-wrap: wrap; }
 .row label { flex: 1 1 90px; color: var(--muted); }
@@ -220,9 +222,11 @@ body.nopanel #panel { display: none; }
       <button id="fSave" data-icon="save"><i></i><span>Guardar</span></button>
       <button id="fLoad" data-icon="folder-open"><i></i><span>Abrir…</span></button>
       <button id="fPng" data-icon="image"><i></i><span>PNG</span></button>
-      <button id="fSvg" data-icon="svg"><i></i><span>SVG</span></button>
-      <button id="fDxf" data-icon="dxf"><i></i><span>DXF</span></button>
-      <button id="fLaser" data-icon="svg" title="SVG a escala real en mm, solo la geometría que se corta"><i></i><span>SVG corte láser</span></button>
+    </div>
+    <div class="exp3">
+      <button id="fSvg" title="Exportar SVG del dibujo">SVG</button>
+      <button id="fLaser" title="SVG a escala real en mm para corte láser: eliges qué líneas se cortan y cuáles se marcan">SVG<br>CUT</button>
+      <button id="fDxf" title="Exportar DXF">DXF</button>
     </div>
     <input type="file" id="fileIn" accept=".json,application/json" hidden>
     <p><small>Se guarda solo en este navegador. Guarda un .json para respaldar. v<span id="ver"></span></small></p>
@@ -234,9 +238,11 @@ body.nopanel #panel { display: none; }
   <p style="margin:0 0 8px"><b>SVG para corte láser</b></p>
   <div class="row"><label for="lsUnit">1 unidad del dibujo =</label><input type="number" id="lsUnit" step="any" min="0"><span>mm</span></div>
   <div class="row"><label for="lsStroke">Grosor de línea (mm)</label><input type="number" id="lsStroke" step="any" min="0"></div>
-  <div class="row"><label for="lsColor">Color de corte</label><input type="color" id="lsColor"></div>
-  <label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;font-size:13px"><input type="checkbox" id="lsCont" style="width:22px;height:22px;min-height:22px;flex:none;margin:0"><span>Solo trazo continuo (omite ejes, ocultas y otras líneas de construcción)</span></label>
-  <small>Se exportan líneas, círculos, arcos y splines (como curvas Bézier). No salen cotas, textos, puntos ni rellenos.</small>
+  <div class="row"><label for="lsColor">Color de corte</label><input type="color" id="lsColor" style="width:64px;flex:none"></div>
+  <div class="row"><label for="lsMarkColor">Color de marcado</label><input type="color" id="lsMarkColor" style="width:64px;flex:none"></div>
+  <p style="margin:8px 0 4px;font-size:13px"><b>Qué se hace con cada clase de línea</b> <span style="color:var(--muted)">(tipo, color y grosor)</span></p>
+  <div id="lsClasses"></div>
+  <small>Corte = color de corte; Marcado = color de marcado (p. ej. pliegues); Omitir = no sale. Se exportan líneas, círculos, arcos y splines (como curvas Bézier) en dos grupos, "corte" y "marcado". No salen cotas, textos, puntos ni rellenos.</small>
   <div class="actions"><button type="button" id="lsCancel">Cancelar</button><button id="lsOk" class="on">Descargar</button></div>
 </form></dialog>
 <dialog id="dlgA"><form method="dialog">

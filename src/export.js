@@ -237,50 +237,69 @@ export function exportDXF(doc, viewScale = 5, vis = {}) {
   return rows.join('\r\n') + '\r\n';
 }
 
-// SVG para corte laser: a escala real (1 unidad del dibujo = unit mm), solo la geometria que se
-// corta (lineas, circulos, arcos y splines como curvas Bezier exactas), un solo color y grosor
-// de trazo fino, sin cotas, textos, puntos ni rellenos. El origen queda en la esquina superior
-// izquierda del contenido.
-// o: { unit (mm por unidad), stroke (mm), color, onlyContinuous (omite ejes, ocultas, etc.) }
+// Clase de linea de un elemento: tipo de linea + color + grosor. El corte laser se filtra por clase.
+export const styleKey = (e) => `${e.ltype ?? 'continua'}|${e.color ?? 'auto'}|${e.w ?? 2}`;
+// Clases presentes en el dibujo, con cuantos elementos tiene cada una (lineas, circulos, arcos y splines).
+export function laserClasses(doc) {
+  const m = new Map();
+  for (const set of [doc.lines, doc.circles, doc.arcs || {}, doc.splines || {}]) {
+    for (const e of Object.values(set)) {
+      const key = styleKey(e);
+      if (!m.has(key)) { const [ltype, color, w] = key.split('|'); m.set(key, { key, ltype, color, w: Number(w), count: 0 }); }
+      m.get(key).count++;
+    }
+  }
+  return [...m.values()].sort((a, b) => (a.ltype === 'continua' ? 0 : 1) - (b.ltype === 'continua' ? 0 : 1) || b.w - a.w || b.count - a.count);
+}
+
+// SVG para corte laser: a escala real (1 unidad del dibujo = unit mm), solo lineas, circulos, arcos y
+// splines (curvas Bezier exactas), sin cotas, textos, puntos ni rellenos. El origen queda en la esquina
+// superior izquierda del contenido. Cada clase de linea (tipo + color + grosor) se manda a "corte",
+// "marcado" (otro color, p. ej. pliegues) o se omite.
+// o: { unit (mm por unidad), stroke (mm), cutColor, markColor, modes: { claseKey: 'cut'|'mark'|'skip' },
+//      onlyContinuous (compatibilidad: sin modes, corta solo el trazo continuo) }
 export function exportSVGLaser(doc, o = {}) {
   const unit = Number(o.unit) > 0 ? Number(o.unit) : 1;
   const stroke = Number(o.stroke) > 0 ? Number(o.stroke) : 0.1;
-  const color = o.color || '#ff0000';
-  const keep = (e) => o.onlyContinuous === false || (e.ltype ?? 'continua') === 'continua';
-  const lines = Object.values(doc.lines).filter(keep), circles = Object.values(doc.circles).filter(keep);
-  const arcs = Object.values(doc.arcs || {}).filter(keep), splines = Object.values(doc.splines || {}).filter(keep);
+  const cutColor = o.cutColor || o.color || '#ff0000', markColor = o.markColor || '#0000ff';
+  const modeOf = (e) => {
+    if (o.modes) return o.modes[styleKey(e)] || 'skip';
+    return o.onlyContinuous === false || (e.ltype ?? 'continua') === 'continua' ? 'cut' : 'skip';
+  };
+  const pick = (set) => Object.values(set || {}).map((e) => ({ e, mode: modeOf(e) })).filter((x) => x.mode !== 'skip');
+  const lines = pick(doc.lines), circles = pick(doc.circles), arcs = pick(doc.arcs), splines = pick(doc.splines);
   const xs = [], ys = [];
   const add = (x, y) => { xs.push(x); ys.push(y); };
-  for (const l of lines) { add(doc.pts[l.a].x, doc.pts[l.a].y); add(doc.pts[l.b].x, doc.pts[l.b].y); }
-  for (const c of circles) { const p = doc.pts[c.c]; add(p.x - c.r, p.y - c.r); add(p.x + c.r, p.y + c.r); }
-  for (const a of arcs) for (const q of arcSamples(doc, a)) add(q.x, q.y);
-  for (const sp of splines) for (const q of splinePolyline(doc, sp, 24)) add(q.x, q.y);
+  for (const { e: l } of lines) { add(doc.pts[l.a].x, doc.pts[l.a].y); add(doc.pts[l.b].x, doc.pts[l.b].y); }
+  for (const { e: c } of circles) { const p = doc.pts[c.c]; add(p.x - c.r, p.y - c.r); add(p.x + c.r, p.y + c.r); }
+  for (const { e: a } of arcs) for (const q of arcSamples(doc, a)) add(q.x, q.y);
+  for (const { e: sp } of splines) for (const q of splinePolyline(doc, sp, 24)) add(q.x, q.y);
   if (!xs.length) return null;
   const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
   const f = (v) => Math.round(v * 1e4) / 1e4;
   const X = (x) => f((x - x0) * unit), Y = (y) => f((y1 - y) * unit);
   const W = f((x1 - x0) * unit), H = f((y1 - y0) * unit);
-  const out = [];
-  for (const l of lines) out.push(`<path d="M${X(doc.pts[l.a].x)} ${Y(doc.pts[l.a].y)} L${X(doc.pts[l.b].x)} ${Y(doc.pts[l.b].y)}"/>`);
-  for (const c of circles) { const p = doc.pts[c.c]; out.push(`<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="${f(c.r * unit)}"/>`); }
-  for (const a of arcs) {
+  const out = { cut: [], mark: [] };
+  for (const { e: l, mode } of lines) out[mode].push(`<path d="M${X(doc.pts[l.a].x)} ${Y(doc.pts[l.a].y)} L${X(doc.pts[l.b].x)} ${Y(doc.pts[l.b].y)}"/>`);
+  for (const { e: c, mode } of circles) { const p = doc.pts[c.c]; out[mode].push(`<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="${f(c.r * unit)}"/>`); }
+  for (const { e: a, mode } of arcs) {
     const p = doc.pts[a.c], { a0, sweep } = arcOf(doc, a), r = f(a.r * unit);
     const pt = (t) => `${X(p.x + a.r * Math.cos(t))} ${Y(p.y + a.r * Math.sin(t))}`;
-    if (sweep > Math.PI * 2 - 1e-6) out.push(`<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="${r}"/>`);
-    else out.push(`<path d="M${pt(a0)} A${r} ${r} 0 ${sweep > Math.PI ? 1 : 0} 0 ${pt(a0 + sweep)}"/>`);
+    if (sweep > Math.PI * 2 - 1e-6) out[mode].push(`<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="${r}"/>`);
+    else out[mode].push(`<path d="M${pt(a0)} A${r} ${r} 0 ${sweep > Math.PI ? 1 : 0} 0 ${pt(a0 + sweep)}"/>`);
   }
-  for (const sp of splines) {
+  for (const { e: sp, mode } of splines) {
     const segs = splineBezier(sp.pts.map((id) => doc.pts[id]), sp.closed);
     if (!segs.length) continue;
     const q = (pt) => `${X(pt.x)} ${Y(pt.y)}`;
-    out.push(`<path d="M${q(segs[0].p0)} ${segs.map((b) => `C${q(b.c1)} ${q(b.c2)} ${q(b.p1)}`).join(' ')}${sp.closed ? ' Z' : ''}"/>`);
+    out[mode].push(`<path d="M${q(segs[0].p0)} ${segs.map((b) => `C${q(b.c1)} ${q(b.c2)} ${q(b.p1)}`).join(' ')}${sp.closed ? ' Z' : ''}"/>`);
   }
+  const grp = (id, color, items) => (items.length ? [`<g id="${id}" fill="none" stroke="${color}" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round">`, ...items, '</g>'] : []);
   const svg = [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}mm" height="${H}mm" viewBox="0 0 ${W} ${H}">`,
-    `<g fill="none" stroke="${color}" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round">`,
-    ...out,
-    '</g>',
+    ...grp('corte', cutColor, out.cut),
+    ...grp('marcado', markColor, out.mark),
     '</svg>',
   ].join('\n');
-  return { svg, width: W, height: H, count: out.length };
+  return { svg, width: W, height: H, count: out.cut.length + out.mark.length, cut: out.cut.length, mark: out.mark.length };
 }
