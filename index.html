@@ -233,6 +233,11 @@ body.nopanel #panel { display: none; }
   <div class="actions"><button type="button" id="lsCancel">Cancelar</button><button id="lsOk" class="on">Descargar</button></div>
 </form></dialog>
 <dialog id="dlgT"><form method="dialog"><label id="dlgTLabel" for="dlgTInput"></label><textarea id="dlgTInput" rows="3" style="width:100%;font-size:18px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--btn);color:var(--fg);font-family:inherit"></textarea><div class="actions"><button value="cancel" type="button" id="dlgTCancel">Cancelar</button><button value="ok" id="dlgTOk" class="on">Aceptar</button></div></form></dialog>
+<dialog id="dlgN"><form method="dialog">
+  <label id="nameLabel" for="nameInput">Nombre del archivo</label>
+  <div style="display:flex;gap:6px;align-items:center"><input id="nameInput" type="text" autocomplete="off" autocapitalize="off" spellcheck="false"><b id="nameExt" style="color:var(--muted)"></b></div>
+  <div class="actions"><button type="button" id="nameCancel">Cancelar</button><button id="nameOk" class="on">Guardar</button></div>
+</form></dialog>
 <dialog id="dlg"><form method="dialog"><label id="dlgLabel" for="dlgInput"></label><input id="dlgInput" type="text" inputmode="decimal" autocomplete="off"><label id="dlgRefRow" style="display:flex;gap:8px;align-items:flex-start;margin-top:10px;font-size:13px"><input type="checkbox" id="dlgRef" style="width:22px;height:22px;min-height:22px;flex:none;margin:0"><span>Solo lectura (referencia): mide y muestra el valor en cursiva, sin restringir la geometría</span></label><div class="actions"><button value="cancel" type="button" id="dlgCancel">Cancelar</button><button value="ok" id="dlgOk" class="on">Aceptar</button></div></form></dialog>
 <script type="module" src="/src/main.js"></script>
 </body>

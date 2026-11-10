@@ -15,6 +15,7 @@ import { textFrame, textHit, textPose, rawAngle, ANCHORS, ANCHOR_NAMES, LINE_SPA
 import { exportSVG, exportSVGLaser, exportDXF, extraExtents } from './export.js';
 import { iconSvg } from './icons.js';
 import { buildTree, kindOf } from './tree.js';
+import { cleanFileBase } from './files.js';
 
 const VERSION = '0.1.0';
 const STORE = 'ipad-cad-v1';
@@ -1506,6 +1507,33 @@ function updateStatus(p) {
 }
 
 // ---------------------------------------------------------------- archivo
+// Pide el nombre del archivo (Safari guarda sin preguntar). Devuelve el nombre completo o null si se cancela.
+// El nombre base se recuerda para la siguiente exportacion; suffix distingue variantes (p. ej. "-laser").
+function askFileName(ext, suffix = '') {
+  return new Promise((resolve) => {
+    const dlg = $('dlgN'), inp = $('nameInput');
+    $('nameExt').textContent = '.' + ext;
+    inp.value = (opts.fileBase || 'dibujo') + suffix;
+    let done = false;
+    const finish = (full, base) => { if (done) return; done = true; dlg.close(); if (base) { opts.fileBase = suffix && base.endsWith(suffix) ? base.slice(0, -suffix.length) || base : base; persist(); } resolve(full); };
+    $('nameOk').onclick = (ev) => {
+      ev.preventDefault();
+      const base = cleanFileBase(inp.value, ext);
+      if (!base) { toast('Escribe un nombre'); return; }
+      finish(base + '.' + ext, base);
+    };
+    $('nameCancel').onclick = () => finish(null);
+    dlg.oncancel = () => finish(null);
+    dlg.showModal(); inp.focus(); inp.select();
+  });
+}
+async function saveFile(ext, suffix, makeBlob) {
+  const name = await askFileName(ext, suffix);
+  if (!name) return;
+  const bl = makeBlob();
+  if (bl) download(name, bl);
+}
+
 function download(name, blob) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = name;
@@ -1536,7 +1564,7 @@ function loadDoc(d) {
   doc = { n: 0, cons: {}, hatches: {}, ltypes: {}, arcs: {}, texts: {}, splines: {}, traces: {}, ...d };
   undoStack = []; redoStack = []; sel = []; pending = null;
 }
-function exportPNG() {
+async function exportPNG() {
   const b = contentBounds();
   if (!b) { toast('No hay nada que exportar'); return; }
   const pad = 20, k = 6;
@@ -1549,6 +1577,8 @@ function exportPNG() {
     W = Math.ceil(Math.max(W, ex.maxX + m) + sx); H = Math.ceil(Math.max(H, ex.maxY + m) + sy);
     v = { s: k, ox: v.ox + sx, oy: v.oy + sy };
   }
+  const fname = await askFileName('png');
+  if (!fname) return;
   const off = document.createElement('canvas');
   off.width = Math.min(W * 2, 8000); off.height = Math.min(H * 2, 8000);
   const sc = off.width / W;
@@ -1557,7 +1587,7 @@ function exportPNG() {
   dpr = sc; sel = [];
   render(oc, off.width, off.height, v, { fg: '#000', bg: '#fff', grid: false, cons: false, dims: opts.dims, texts: opts.texts, ui: false });
   dpr = saveDpr; labelHits = saveHits; sel = saveSel;
-  off.toBlob((bl) => download('dibujo.png', bl), 'image/png');
+  off.toBlob((bl) => download(fname, bl), 'image/png');
 }
 
 // ---------------------------------------------------------------- cableado de la interfaz
@@ -1628,9 +1658,8 @@ $('lsOk').onclick = (ev) => {
   const r = exportSVGLaser(doc, o);
   if (!r) { toast('No hay geometría para cortar' + (o.onlyContinuous ? ' (solo se exporta trazo continuo)' : '')); return; }
   opts.laser = o; persist();
-  download('corte-laser.svg', new Blob([r.svg], { type: 'image/svg+xml' }));
   $('dlgL').close();
-  toast(`SVG de ${r.width.toFixed(1)} × ${r.height.toFixed(1)} mm con ${r.count} elementos`);
+  saveFile('svg', '-laser', () => new Blob([r.svg], { type: 'image/svg+xml' })).then(() => toast(`SVG de ${r.width.toFixed(1)} × ${r.height.toFixed(1)} mm con ${r.count} elementos`));
 };
 $('trTrace').onclick = () => {
   const pts = sel.filter((x) => x.k === 'pt').map((x) => x.id);
@@ -1731,17 +1760,17 @@ $('ltDel').onclick = () => {
 };
 
 $('fNew').onclick = () => { if (confirm('¿Empezar un dibujo nuevo? Se pierde lo no guardado.')) { loadDoc(newDoc()); fitView(); afterChange(); } };
-$('fSave').onclick = () => download('dibujo.json', new Blob([JSON.stringify({ app: 'ipad-cad', version: VERSION, doc }, null, 1)], { type: 'application/json' }));
+$('fSave').onclick = () => saveFile('json', '', () => new Blob([JSON.stringify({ app: 'ipad-cad', version: VERSION, doc }, null, 1)], { type: 'application/json' }));
 $('fLoad').onclick = () => $('fileIn').click();
 $('fileIn').onchange = async (e) => {
   const f = e.target.files[0]; e.target.value = '';
   if (!f) return;
-  try { const j = JSON.parse(await f.text()); loadDoc(j.doc || j); fitView(); afterChange(); toast('Abierto: ' + f.name); }
+  try { const j = JSON.parse(await f.text()); loadDoc(j.doc || j); const b = cleanFileBase(f.name, 'json'); if (b) opts.fileBase = b; fitView(); afterChange(); toast('Abierto: ' + f.name); }
   catch (err) { toast('No se pudo abrir: ' + err.message); }
 };
 $('fPng').onclick = exportPNG;
-$('fSvg').onclick = () => { const s = exportSVG(doc, opts.ltScale, { dims: opts.dims, texts: opts.texts }); if (s) download('dibujo.svg', new Blob([s], { type: 'image/svg+xml' })); else toast('No hay nada que exportar'); };
-$('fDxf').onclick = () => { const s = exportDXF(doc, view.s, { dims: opts.dims, texts: opts.texts }); if (s) download('dibujo.dxf', new Blob([s], { type: 'application/dxf' })); else toast('No hay nada que exportar'); };
+$('fSvg').onclick = () => { const s = exportSVG(doc, opts.ltScale, { dims: opts.dims, texts: opts.texts }); if (s) saveFile('svg', '', () => new Blob([s], { type: 'image/svg+xml' })); else toast('No hay nada que exportar'); };
+$('fDxf').onclick = () => { const s = exportDXF(doc, view.s, { dims: opts.dims, texts: opts.texts }); if (s) saveFile('dxf', '', () => new Blob([s], { type: 'application/dxf' })); else toast('No hay nada que exportar'); };
 
 window.addEventListener('keydown', (e) => {
   if (e.target.closest?.('input,select,textarea,dialog')) return;

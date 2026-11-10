@@ -6,6 +6,7 @@ import { textFrame, textCorners, textHit, textPose, rawAngle } from '../src/text
 import { exportSVG, exportSVGLaser, exportDXF, dimLayouts, extraExtents } from '../src/export.js';
 import { splitElement } from '../src/split.js';
 import { buildTree, conLabel } from '../src/tree.js';
+import { cleanFileBase } from '../src/files.js';
 import { initSolver, solve } from '../src/solver.js';
 import { lineLine, lineCircle, circleCircle, signedAngle, dashFromPattern, parsePattern, circumcircle, arcSweepOf, TAU, splineSamples, resamplePolyline, polylineLength, splineBezier, closestOnPolyline, polylineLine, polylineCircle, polylinePolyline } from '../src/geom.js';
 
@@ -859,6 +860,16 @@ t('arbol de elementos: grupos, puntos de cada elemento y relaciones', () => {
   assert.equal(g('g:co').children.length, 3);
   assert.equal(conLabel(d, { t: 'DIST', refs: [a, b], v: 14.14, ref: true }), 'Distancia = 14.14 (referencia)');
   assert.deepEqual(buildTree(newDoc()), []);
+});
+
+
+t('nombres de archivo: limpia caracteres invalidos y la extension tecleada', () => {
+  assert.equal(cleanFileBase('mecanismo 4 barras', 'json'), 'mecanismo 4 barras');
+  assert.equal(cleanFileBase('leva.JSON', 'json'), 'leva');
+  assert.equal(cleanFileBase('a/b|c:d*e?', 'svg'), 'a b c d e');
+  assert.equal(cleanFileBase('  ..oculto.. ', 'png'), 'oculto');
+  assert.equal(cleanFileBase('   ', 'dxf'), '');
+  assert.equal(cleanFileBase('dibujo.svg.svg', 'svg'), 'dibujo.svg');
 });
 
 console.log(`\n${passed} pruebas pasaron`);
