@@ -447,4 +447,22 @@ t('exportar cotas: SVG y DXF llevan flechas, extension, arcos de angulo y etique
   assert.ok(idx >= 0);
 });
 
+
+t('exportar: respeta los interruptores de cotas y textos', () => {
+  const d = newDoc();
+  const a = addPoint(d, 0, 0), b = addPoint(d, 30, 0), e = addPoint(d, 10, 10);
+  addLine(d, a, b, {});
+  addCon(d, { t: 'DIST', refs: [a, b], v: 30 });
+  addText(d, e, 'Hola', { h: 2 });
+  const full = exportSVG(d, 1);
+  assert.ok(full.includes('<polygon') && full.includes('<text transform'));
+  const noDims = exportSVG(d, 1, { dims: false });
+  assert.ok(!noDims.includes('<polygon') && noDims.includes('<text transform'));
+  const noTexts = exportSVG(d, 1, { texts: false });
+  assert.ok(noTexts.includes('<polygon') && !noTexts.includes('<text transform'));
+  const rows = (v) => exportDXF(d, 5, v).trim().split('\r\n');
+  assert.equal(rows({ dims: false }).filter((r) => r === 'SOLID').length, 0);
+  assert.ok(rows({ texts: false }).filter((r) => r === 'TEXT').length === 1, 'solo la etiqueta de la cota');
+});
+
 console.log(`\n${passed} pruebas pasaron`);

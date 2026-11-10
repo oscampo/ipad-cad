@@ -26,7 +26,7 @@ let view = { ox: 200, oy: 300, s: 3 }; // px por unidad; y del modelo hacia arri
 let tool = 'select';
 let sel = []; // [{k:'pt'|'ln'|'ci'|'ha', id}]
 let cur = { color: 'auto', ltype: 'continua', w: 2, ls: 1, tx: { h: null, ang: 0, anchor: 'bl' } };
-const opts = { grid: true, snap: false, cons: true, touch: false, ltScale: 1, labels: true, sections: {} };
+const opts = { grid: true, snap: false, cons: true, pts: true, dims: true, texts: true, touch: false, ltScale: 1, labels: true, sections: {} };
 let undoStack = [], redoStack = [];
 let pending = null; // estado de la herramienta en curso
 let hover = null; // posicion del puntero en pantalla
@@ -142,11 +142,41 @@ function wireSections() {
 function updateButtons() { $('undo').disabled = !undoStack.length; $('redo').disabled = !redoStack.length; }
 
 // ---------------------------------------------------------------- snap y hit-test
+// Puntos que son vertices/centros de lineas, arcos o circulos.
+function geometryPoints() {
+  const s = new Set();
+  for (const l of Object.values(doc.lines)) { s.add(l.a); s.add(l.b); }
+  for (const a of Object.values(doc.arcs)) { s.add(a.c); s.add(a.a); s.add(a.b); }
+  for (const c of Object.values(doc.circles)) s.add(c.c);
+  return s;
+}
+
+const selectedTextPoints = () => new Set(sel.filter((x) => x.k === 'tx').map((x) => doc.texts[x.id]?.pt).filter(Boolean));
+
+// Puntos de insercion propios de un texto (txOnly) que ahora no se muestran: solo se ven con el texto seleccionado.
+function hiddenTextPoints() {
+  const geom = geometryPoints(), selTx = selectedTextPoints(), out = new Set();
+  for (const [id, p] of Object.entries(doc.pts)) if (p.txOnly && !geom.has(id) && !selTx.has(id)) out.add(id);
+  return out;
+}
+
+// Puntos que se dibujan y se pueden tocar: respeta el interruptor "Puntos" y la regla anterior.
+function shownPoints() {
+  const hidden = hiddenTextPoints(), selTx = selectedTextPoints();
+  const out = new Set();
+  for (const id of Object.keys(doc.pts)) {
+    if (hidden.has(id)) continue;
+    if (opts.pts || selTx.has(id) || isSel('pt', id)) out.add(id);
+  }
+  return out;
+}
+
 function snapAt(sx, sy, o = {}) {
   const m = toModel(sx, sy);
+  const textOnlyHidden = hiddenTextPoints();
   let best = null, bd = 14;
   for (const [id, p] of Object.entries(doc.pts)) {
-    if (o.skip === id) continue;
+    if (o.skip === id || textOnlyHidden.has(id)) continue;
     const d = dist(toScreen(p), { x: sx, y: sy });
     if (d < bd) { bd = d; best = { type: 'pt', id, x: p.x, y: p.y }; }
   }
@@ -184,14 +214,16 @@ function hitTest(sx, sy) {
   for (const h of labelHits) if (sx >= h.x && sx <= h.x + h.w && sy >= h.y && sy <= h.y + h.h) return { k: 'co', id: h.id };
   const m = toModel(sx, sy);
   let best = null, bd = 14;
+  const shown = shownPoints();
   for (const [id, p] of Object.entries(doc.pts)) {
+    if (!shown.has(id)) continue;
     const d = dist(toScreen(p), { x: sx, y: sy });
     if (d < bd) { bd = d; best = { k: 'pt', id }; }
   }
   if (best) return best;
   // un texto se toma por su caja (antes que las lineas que pasen por debajo)
   for (const [id, t] of Object.entries(doc.texts)) {
-    if (doc.pts[t.pt] && textHit(doc, t, m, measureRel, 2 / view.s)) return { k: 'tx', id };
+    if (opts.texts && doc.pts[t.pt] && textHit(doc, t, m, measureRel, 2 / view.s)) return { k: 'tx', id };
   }
   bd = 11;
   for (const [id, l] of Object.entries(doc.lines)) {
@@ -309,7 +341,7 @@ function strokeArc(c, cx, cy, r, a0, sweep, dash) {
   c.stroke();
 }
 
-function draw() { render(ctx, cv.width, cv.height, view, { fg: theme.fg, bg: theme.bg, grid: opts.grid, cons: opts.cons, ui: true }); }
+function draw() { render(ctx, cv.width, cv.height, view, { fg: theme.fg, bg: theme.bg, grid: opts.grid, cons: opts.cons, dims: opts.dims, texts: opts.texts, ui: true }); }
 
 // ctx en pixeles de dispositivo. o: {fg,bg,grid,cons,ui}
 export function render(c, W, H, v, o) {
@@ -345,10 +377,12 @@ export function render(c, W, H, v, o) {
     strokeLine(c, a.x * dpr, a.y * dpr, b.x * dpr, b.y * dpr, dsh);
   }
   c.setLineDash([]);
-  drawTexts(c, o);
+  if (o.texts !== false) drawTexts(c, o);
   if (o.cons || o.dims) drawConstraints(c, o);
   if (o.ui) {
+    const shown = shownPoints();
     for (const [id, p] of Object.entries(doc.pts)) {
+      if (!shown.has(id)) continue;
       const s = toScreen(p);
       const selp = isSel('pt', id) || sel.some((x) => x.k === 'tx' && doc.texts[x.id]?.pt === id);
       c.fillStyle = selp ? theme.sel : o.fg;
@@ -496,7 +530,7 @@ function drawConstraints(c, o) {
     if (k.hidden) continue;
     // al exportar (sin interfaz) las cotas van en el color del dibujo y no se pintan los simbolos de relaciones
     const col = !o.ui ? o.fg : isSel('co', id) ? theme.sel : theme.accent;
-    if (k.t === 'DIST' || k.t === 'DISTPL' || k.t === 'ANG' || k.t === 'RAD') { drawDim(c, id, k, col); continue; }
+    if (k.t === 'DIST' || k.t === 'DISTPL' || k.t === 'ANG' || k.t === 'RAD') { if (o.dims) drawDim(c, id, k, col); continue; }
     if (!o.cons) continue;
     const m = GLYPH[k.t] && midOf(k.refs);
     if (!m) continue;
@@ -836,7 +870,9 @@ function askText(labelText, initial) {
 
 async function placeText(sUp) {
   pushUndo();
+  const reuse = sUp.type === 'pt';
   const pid = pointFrom(sUp); // el punto de insercion es un punto real: admite restricciones
+  if (!reuse) doc.pts[pid].txOnly = true; // punto propio del texto: solo se ve al seleccionarlo
   const val = await askText('Texto (Enter = nueva línea)', '');
   if (val === null || !val.trim()) { rollback(); afterChange(); return; }
   const id = addText(doc, pid, val, { h: cur.tx.h ?? niceHeight(), ang: cur.tx.ang, anchor: cur.tx.anchor, color: cur.color });
@@ -1216,7 +1252,7 @@ function exportPNG() {
   let W = Math.ceil((b.x1 - b.x0) * k + pad * 2), H = Math.ceil((b.y1 - b.y0) * k + pad * 2);
   let v = { s: k, ox: pad - b.x0 * k, oy: H - pad + b.y0 * k };
   // el lienzo crece para que quepan cotas y textos
-  const ex = extraExtents(doc, v), m = 8;
+  const ex = extraExtents(doc, v, { dims: opts.dims, texts: opts.texts }), m = 8;
   if (ex) {
     const sx = Math.max(0, m - ex.minX), sy = Math.max(0, m - ex.minY);
     W = Math.ceil(Math.max(W, ex.maxX + m) + sx); H = Math.ceil(Math.max(H, ex.maxY + m) + sy);
@@ -1228,7 +1264,7 @@ function exportPNG() {
   const oc = off.getContext('2d');
   const saveDpr = dpr, saveHits = labelHits, saveSel = sel;
   dpr = sc; sel = [];
-  render(oc, off.width, off.height, v, { fg: '#000', bg: '#fff', grid: false, cons: false, dims: true, ui: false });
+  render(oc, off.width, off.height, v, { fg: '#000', bg: '#fff', grid: false, cons: false, dims: opts.dims, texts: opts.texts, ui: false });
   dpr = saveDpr; labelHits = saveHits; sel = saveSel;
   off.toBlob((bl) => download('dibujo.png', bl), 'image/png');
 }
@@ -1274,6 +1310,7 @@ function toggle(id, key) {
   b.setAttribute('aria-pressed', String(opts[key]));
 }
 toggle('tGrid', 'grid'); toggle('tSnap', 'snap'); toggle('tCons', 'cons'); toggle('tTouch', 'touch');
+toggle('tPts', 'pts'); toggle('tDims', 'dims'); toggle('tTexts', 'texts');
 $('tLabels').onclick = () => { opts.labels = !opts.labels; applyLabels(); persist(); };
 function applyLabels() {
   document.body.classList.toggle('nolabels', !opts.labels);
@@ -1320,8 +1357,8 @@ $('fileIn').onchange = async (e) => {
   catch (err) { toast('No se pudo abrir: ' + err.message); }
 };
 $('fPng').onclick = exportPNG;
-$('fSvg').onclick = () => { const s = exportSVG(doc, opts.ltScale); if (s) download('dibujo.svg', new Blob([s], { type: 'image/svg+xml' })); else toast('No hay nada que exportar'); };
-$('fDxf').onclick = () => { const s = exportDXF(doc, view.s); if (s) download('dibujo.dxf', new Blob([s], { type: 'application/dxf' })); else toast('No hay nada que exportar'); };
+$('fSvg').onclick = () => { const s = exportSVG(doc, opts.ltScale, { dims: opts.dims, texts: opts.texts }); if (s) download('dibujo.svg', new Blob([s], { type: 'image/svg+xml' })); else toast('No hay nada que exportar'); };
+$('fDxf').onclick = () => { const s = exportDXF(doc, view.s, { dims: opts.dims, texts: opts.texts }); if (s) download('dibujo.dxf', new Blob([s], { type: 'application/dxf' })); else toast('No hay nada que exportar'); };
 
 window.addEventListener('keydown', (e) => {
   if (e.target.closest?.('input,select,textarea,dialog')) return;
@@ -1348,7 +1385,7 @@ async function boot() {
     const s = JSON.parse(localStorage.getItem(STORE) || 'null');
     if (s?.doc) { loadDoc(s.doc); if (s.view) view = s.view; if (s.cur) cur = { ...cur, ...s.cur }; if (s.opts) Object.assign(opts, s.opts); }
   } catch { /* sin estado previo */ }
-  for (const [id, key] of [['tGrid', 'grid'], ['tSnap', 'snap'], ['tCons', 'cons'], ['tTouch', 'touch']]) $(id).setAttribute('aria-pressed', String(opts[key]));
+  for (const [id, key] of [['tGrid', 'grid'], ['tSnap', 'snap'], ['tCons', 'cons'], ['tTouch', 'touch'], ['tPts', 'pts'], ['tDims', 'dims'], ['tTexts', 'texts']]) $(id).setAttribute('aria-pressed', String(opts[key]));
   $('ltScale').value = String(opts.ltScale);
   hydrateIcons(); wireLongPressHints(); wireSections(); applyLabels(); updateEnabled();
   setTool('select');

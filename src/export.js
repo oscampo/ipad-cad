@@ -34,16 +34,16 @@ const labelBox = (l) => {
 };
 
 // Extension (px segun view) que ocupan las cotas y los textos, para no recortarlos al exportar.
-export function extraExtents(doc, view) {
+export function extraExtents(doc, view, vis = {}) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   const add = (x, y) => { minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); };
-  for (const L of dimLayouts(doc, view)) {
+  for (const L of vis.dims === false ? [] : dimLayouts(doc, view)) {
     for (const l of L.lines) { add(l[0], l[1]); add(l[2], l[3]); }
     for (const a of L.arcs) { add(a.cx - a.r, a.cy - a.r); add(a.cx + a.r, a.cy + a.r); }
     for (const ar of L.arrows) { add(ar.x - ar.dx * 9 - 4, ar.y - ar.dy * 9 - 4); add(ar.x - ar.dx * 9 + 4, ar.y - ar.dy * 9 + 4); }
     if (L.label) { const b = labelBox(L.label); add(b.x, b.y); add(b.x + b.w, b.y + b.h); }
   }
-  for (const t of Object.values(doc.texts || {})) {
+  for (const t of vis.texts === false ? [] : Object.values(doc.texts || {})) {
     if (!doc.pts[t.pt]) continue;
     for (const p of textCorners(doc, t, approx)) add(p.x * view.s + view.ox, view.oy - p.y * view.s);
   }
@@ -74,7 +74,7 @@ function dimSvg(L, color) {
 // SVG con 1 unidad de modelo = K unidades de dibujo. Trazos de tipos de linea en
 // unidades de papel (3 por unidad de patron), como en pantalla. Las cotas se dibujan con el
 // mismo layout que en pantalla (flechas y etiquetas de 12 px).
-export function exportSVG(doc, ltScale = 1) {
+export function exportSVG(doc, ltScale = 1, vis = {}) {
   const b = bounds(doc);
   if (!b) return null;
   const K = 6, pad = 20;
@@ -126,7 +126,7 @@ export function exportSVG(doc, ltScale = 1) {
     out.push(`<line x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(q.x)}" y2="${Y(q.y)}" stroke="${col(l.color)}" stroke-width="${l.w}"${dash(l.ltype, l.ls)}/>`);
   }
   // textos: ancho aproximado (0.6 de la altura por caracter) solo para alinear
-  for (const t of Object.values(doc.texts || {})) {
+  for (const t of vis.texts === false ? [] : Object.values(doc.texts || {})) {
     const P = doc.pts[t.pt];
     if (!P) continue;
     const f = textFrame(t, approx);
@@ -135,9 +135,9 @@ export function exportSVG(doc, ltScale = 1) {
     out.push(`<text transform="translate(${X(P.x)} ${Y(P.y)}) rotate(${n(-(t.ang || 0))})" font-family="sans-serif" font-size="${n(t.h * K)}" text-anchor="${anchor}" fill="${col(t.color)}">${lines}</text>`);
   }
   // cotas
-  for (const L of dimLayouts(doc, view)) out.push(...dimSvg(L, '#000000'));
+  if (vis.dims !== false) for (const L of dimLayouts(doc, view)) out.push(...dimSvg(L, '#000000'));
   // el lienzo crece para que quepan cotas y textos
-  const ex = extraExtents(doc, view);
+  const ex = extraExtents(doc, view, vis);
   const m = 8;
   const sx = ex ? Math.max(0, m - ex.minX) : 0, sy = ex ? Math.max(0, m - ex.minY) : 0;
   const W2 = n(Math.max(W, ex ? ex.maxX + m : 0) + sx), H2 = n(Math.max(H, ex ? ex.maxY + m : 0) + sy);
@@ -154,7 +154,7 @@ export function exportSVG(doc, ltScale = 1) {
 // DXF minimo (R12): LINE, CIRCLE, ARC, TEXT, POINT y, para las cotas, LINE/ARC/SOLID/TEXT.
 // viewScale: px por unidad del dibujo con que se ven las cotas (tamano de flechas y texto).
 // Los tipos de linea y colores se pierden.
-export function exportDXF(doc, viewScale = 5) {
+export function exportDXF(doc, viewScale = 5, vis = {}) {
   if (!bounds(doc)) return null;
   const rows = [];
   const g = (code, v) => rows.push(String(code), String(v));
@@ -174,7 +174,7 @@ export function exportDXF(doc, viewScale = 5) {
     g(0, 'ARC'); g(8, '0'); g(10, p.x); g(20, p.y); g(30, 0); g(40, ar.r); g(50, deg(a0)); g(51, deg(a0 + sweep));
   }
   // textos: una entidad TEXT por linea, alineada segun el punto de insercion (ancho aproximado)
-  for (const t of Object.values(doc.texts || {})) {
+  for (const t of vis.texts === false ? [] : Object.values(doc.texts || {})) {
     const P = doc.pts[t.pt];
     if (!P) continue;
     const f = textFrame(t, approx);
@@ -191,7 +191,7 @@ export function exportDXF(doc, viewScale = 5) {
   // cotas como geometria: el layout esta en px de pantalla (y hacia abajo); se pasa a unidades del dibujo
   const S = viewScale > 0 ? viewScale : 5;
   const mx = (x) => x / S, my = (y) => -y / S;
-  for (const L of dimLayouts(doc, { s: S, ox: 0, oy: 0 })) {
+  for (const L of vis.dims === false ? [] : dimLayouts(doc, { s: S, ox: 0, oy: 0 })) {
     for (const l of L.lines) { g(0, 'LINE'); g(8, '0'); g(10, mx(l[0])); g(20, my(l[1])); g(30, 0); g(11, mx(l[2])); g(21, my(l[3])); g(31, 0); }
     for (const a of L.arcs) {
       // angulos del lienzo (y hacia abajo): el del dibujo es su opuesto; ccw en pantalla = creciente en el dibujo
