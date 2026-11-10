@@ -7,6 +7,7 @@ import { exportSVG, exportSVGLaser, exportDXF, dimLayouts, extraExtents } from '
 import { splitElement } from '../src/split.js';
 import { buildTree, conLabel } from '../src/tree.js';
 import { cleanFileBase } from '../src/files.js';
+import { parseValue, evalExpr, isPlainNumber } from '../src/expr.js';
 import { initSolver, solve } from '../src/solver.js';
 import { lineLine, lineCircle, circleCircle, signedAngle, dashFromPattern, parsePattern, circumcircle, arcSweepOf, TAU, splineSamples, resamplePolyline, polylineLength, splineBezier, closestOnPolyline, polylineLine, polylineCircle, polylinePolyline } from '../src/geom.js';
 
@@ -929,6 +930,24 @@ t('cota angular: editar el valor del sector elegido y resolver', () => {
   const ang = Math.abs((Math.atan2(d.pts[b].y, d.pts[b].x) * 180) / Math.PI);
   near(ang, 30, 1e-3, 'rectas a 30 grados');
   near(dimValue(d, k), 150, 1e-3, 'se sigue mostrando el sector suplementario');
+});
+
+
+t('expresiones en cotas: formulas, constantes, funciones y errores', () => {
+  const v = (s, o) => parseValue(s, o);
+  near(v('10+1/3'), 10 + 1 / 3, 1e-9);
+  near(v('10*sin(30)'), 5, 1e-9, 'sin en grados');
+  near(v('10sin(30)'), 5, 1e-9, 'producto implicito');
+  near(v('sin(π/6)'), 0.5, 1e-9, 'con π, radianes');
+  near(v('3π/4'), (3 * Math.PI) / 4, 1e-9, 'en longitud es un numero');
+  near(v('3π/4', { angle: true }), 135, 1e-9, 'en angulo pasa a grados');
+  near(v('2π*5', { angle: true }), 1800, 1e-6);
+  near(v('45', { angle: true }), 45, 1e-12, 'un numero simple no se convierte');
+  near(v('2(3+1)'), 8); near(v('√2'), Math.SQRT2, 1e-9); near(v('2^-1'), 0.5); near(v('2**3'), 8); near(v('1,5*2'), 3);
+  near(v('-3+10'), 7); near(v('atan(1)'), 45, 1e-9); near(v('log(1000)'), 3); near(v('ln(e)'), 1);
+  near(v('sqrt(16)+abs(-4)'), 8);
+  for (const bad of ['', '1/0', '(1+2', '3+', 'foo(2)', 'sin 30', '2 $ 3', 'sqrt(-4)', '1)']) assert.throws(() => evalExpr(bad), undefined, 'debe fallar: ' + bad);
+  assert.ok(isPlainNumber('12.5') && isPlainNumber(' -3,2 ') && !isPlainNumber('3π') && !isPlainNumber('1+2'));
 });
 
 console.log(`\n${passed} pruebas pasaron`);

@@ -16,6 +16,7 @@ import { exportSVG, exportSVGLaser, exportDXF, extraExtents } from './export.js'
 import { iconSvg } from './icons.js';
 import { buildTree, kindOf } from './tree.js';
 import { cleanFileBase } from './files.js';
+import { parseValue, isPlainNumber } from './expr.js';
 
 const VERSION = '0.1.0';
 const STORE = 'ipad-cad-v1';
@@ -1161,19 +1162,46 @@ function makeIntersections(items) {
 // ---------------------------------------------------------------- restricciones
 // Ultimo estado del interruptor "Solo lectura" del dialogo de cotas.
 let dlgRef = false;
-function askNumber(labelText, initial, refState = false) {
+let dlgExpr = null; // formula tecleada en la ultima cota (null si fue un numero simple)
+const KEYS = [['π', 'π'], ['√', '√('], ['sin', 'sin('], ['cos', 'cos('], ['tan', 'tan('], ['^', '^'], ['(', '('], [')', ')'], ['×', '*'], ['÷', '/']];
+// kind: 'len' (distancias, radios) o 'angle' (grados; lo que lleve π se pasa de radianes a grados)
+function askNumber(labelText, initial, refState = false, kind = 'len') {
   return new Promise((resolve) => {
-    const dlg = $('dlg'), inp = $('dlgInput'), chk = $('dlgRef');
+    const dlg = $('dlg'), inp = $('dlgInput'), chk = $('dlgRef'), prev = $('dlgPrev');
     $('dlgLabel').textContent = labelText;
     inp.value = String(initial);
     chk.checked = refState; inp.disabled = refState;
-    chk.onchange = () => { inp.disabled = chk.checked; };
+    const keys = $('dlgKeys');
+    keys.textContent = '';
+    for (const [lab, ins] of KEYS) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.textContent = lab; b.style.cssText = 'min-height:36px;min-width:40px;padding:2px 8px';
+      b.onpointerdown = (e) => e.preventDefault(); // no quita el foco del campo (ni cierra el teclado)
+      b.onclick = () => {
+        const s0 = inp.selectionStart ?? inp.value.length, s1 = inp.selectionEnd ?? s0;
+        inp.value = inp.value.slice(0, s0) + ins + inp.value.slice(s1);
+        inp.setSelectionRange(s0 + ins.length, s0 + ins.length); inp.focus(); showPrev();
+      };
+      keys.appendChild(b);
+    }
+    const evalNow = () => { try { return { v: parseValue(inp.value, { angle: kind === 'angle' }) }; } catch (e) { return { err: e.message }; } };
+    const showPrev = () => {
+      if (chk.checked || isPlainNumber(inp.value)) { prev.textContent = ''; return; }
+      const r = evalNow();
+      prev.style.color = r.err ? 'var(--warn)' : 'var(--muted)';
+      prev.textContent = r.err ? r.err : '= ' + (Math.round(r.v * 1e6) / 1e6) + (kind === 'angle' ? '°' : '');
+    };
+    const sync = () => { inp.disabled = chk.checked; keys.style.display = chk.checked ? 'none' : 'flex'; showPrev(); };
+    chk.onchange = sync; inp.oninput = showPrev; sync();
     let done = false;
     const finish = (v) => { if (done) return; done = true; dlgRef = chk.checked; dlg.close(); resolve(v); };
     $('dlgOk').onclick = (ev) => {
       ev.preventDefault();
-      if (chk.checked) { finish(Number(initial)); return; } // cota de referencia: no se teclea valor
-      const v = Number(inp.value.replace(',', '.')); finish(Number.isFinite(v) ? v : null);
+      if (chk.checked) { dlgExpr = null; finish(Number(initial)); return; } // cota de referencia: no se teclea valor
+      const r = evalNow();
+      if (r.err) { prev.style.color = 'var(--warn)'; prev.textContent = r.err; return; } // se queda abierto para corregir
+      dlgExpr = isPlainNumber(inp.value) ? null : inp.value.trim();
+      finish(r.v);
     };
     $('dlgCancel').onclick = () => finish(null);
     dlg.oncancel = () => finish(null);
@@ -1266,7 +1294,7 @@ async function applyCon(kind) {
       } else return bad('Selecciona 2 puntos, 1 línea, o 1 punto + 1 línea');
       const val = await askNumber('Distancia', Math.round(v * 1000) / 1000);
       if (val === null || val <= 0) return;
-      list.push({ t, refs, v: val, ...(dlgRef ? { ref: true } : {}) });
+      list.push({ t, refs, v: val, ...(dlgExpr ? { expr: dlgExpr } : {}), ...(dlgRef ? { ref: true } : {}) });
       break;
     }
     case 'ANG': {
@@ -1277,10 +1305,10 @@ async function applyCon(kind) {
       const tmp = { t: 'ANG', refs: [lns[0], lns[1]], v };
       const S = angSector(doc, tmp);
       tmp.s1 = S.V0 ? S.s1 : 1; tmp.s2 = S.V0 ? S.s2 : 1;
-      const val = await askNumber('Ángulo (°) entre las dos líneas, de 0 a 180', Math.round(angSector(doc, tmp).val * 100) / 100);
+      const val = await askNumber('Ángulo (°) entre las dos líneas, de 0 a 180', Math.round(angSector(doc, tmp).val * 100) / 100, false, 'angle');
       if (val === null) return;
       if (val < 0 || val > 180) return bad('El ángulo debe estar entre 0° y 180°');
-      list.push({ t: 'ANG', refs: [lns[0], lns[1]], v: angTrue(doc, tmp, val), s1: tmp.s1, s2: tmp.s2, ...(dlgRef ? { ref: true } : {}) });
+      list.push({ t: 'ANG', refs: [lns[0], lns[1]], v: angTrue(doc, tmp, val), s1: tmp.s1, s2: tmp.s2, ...(dlgExpr ? { expr: dlgExpr } : {}), ...(dlgRef ? { ref: true } : {}) });
       break;
     }
     case 'RAD': {
@@ -1290,7 +1318,7 @@ async function applyCon(kind) {
       const r0 = curveOf(crv[0]).r;
       const val0 = await askNumber(allC ? 'Diámetro (φ)' : 'Radio (R)', Math.round((allC ? 2 * r0 : r0) * 1000) / 1000);
       if (val0 === null || val0 <= 0) return;
-      crv.forEach((c) => list.push({ t: 'RAD', refs: [c], v: allC ? val0 / 2 : val0, ...(dlgRef ? { ref: true } : {}) }));
+      crv.forEach((c) => list.push({ t: 'RAD', refs: [c], v: allC ? val0 / 2 : val0, ...(dlgExpr ? { expr: dlgExpr } : {}), ...(dlgRef ? { ref: true } : {}) }));
       break;
     }
     default: return;
@@ -1351,13 +1379,18 @@ async function editDimension(id) {
   if (!k || k.v === undefined) return;
   const isC = k.t === 'RAD' && k.refs[0] in doc.circles;
   const now = dimValue(doc, k); // las de referencia muestran el valor medido en este momento
-  const val0 = await askNumber(k.t === 'ANG' ? 'Ángulo (°)' : k.t === 'RAD' ? (isC ? 'Diámetro (φ)' : 'Radio (R)') : 'Distancia', Math.round((isC ? 2 * now : now) * 1000) / 1000, !!k.ref);
+  const shown = isC ? 2 * now : now;
+  // si la cota se definio con una formula, se vuelve a mostrar la formula (siempre que siga dando el valor actual)
+  let initial = Math.round(shown * 1000) / 1000;
+  if (k.expr && !k.ref) { try { if (Math.abs(parseValue(k.expr, { angle: k.t === 'ANG' }) - shown) <= 1e-6 * Math.max(1, Math.abs(shown))) initial = k.expr; } catch { /* formula invalida: valor */ } }
+  const val0 = await askNumber(k.t === 'ANG' ? 'Ángulo (°)' : k.t === 'RAD' ? (isC ? 'Diámetro (φ)' : 'Radio (R)') : 'Distancia', initial, !!k.ref, k.t === 'ANG' ? 'angle' : 'len');
   if (val0 === null || (!dlgRef && k.t !== 'ANG' && val0 <= 0)) return;
   pushUndo();
   if (dlgRef) { k.ref = true; afterChange(); return; } // es (o pasa a ser) cota de referencia: no toca el solver
   if (k.t === 'ANG' && (val0 < 0 || val0 > 180)) { rollback(); toast('El ángulo debe estar entre 0° y 180°'); afterChange(); return; }
   const val = isC ? val0 / 2 : k.t === 'ANG' ? angTrue(doc, { ...k, ref: false, v: k.ref ? (angSector(doc, k).A * 180) / Math.PI : k.v }, val0) : val0;
   k.v = val; delete k.ref;
+  if (dlgExpr) k.expr = dlgExpr; else delete k.expr;
   const r = solve(doc, []);
   if (!r.ok) { rollback(); toast('Valor imposible con las restricciones actuales. Usa «Solo lectura» para solo medirla'); }
   afterChange();
