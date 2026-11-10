@@ -1,7 +1,7 @@
 // Puente entre el documento y el solver de restricciones (planegcs, de FreeCAD, en WASM).
 import { init_planegcs_module, GcsWrapper } from '@salusoft89/planegcs';
 import { conRefs } from './model.js';
-import { arcSweepOf } from './geom.js';
+import { arcSweepOf, splineSamples, closestOnPolyline } from './geom.js';
 
 let g = null;
 
@@ -68,6 +68,96 @@ function conPrims(doc, id, k) {
   }
 }
 
+// Relaciones con splines (punto sobre spline y tangencias). El spline no es una primitiva del
+// solver: en cada pasada se linealiza como su tangente en el punto mas cercano (recta fija) y
+// solve() repite hasta converger (Newton). Cada relacion lleva el punto de contacto en refs.
+const SPL = new Set(['PONS', 'TANLS', 'TANCS']);
+const hasSpl = (doc) => Object.values(doc.cons).some((k) => SPL.has(k.t) && !k.ref && doc.splines?.[k.refs[1]]);
+
+function splinePrims(doc, pos) {
+  const out = [], cache = {};
+  const P = (id) => pos?.pts?.[id] || doc.pts[id];
+  const poly = (sid) => (cache[sid] ||= splineSamples(doc.splines[sid].pts.map(P), doc.splines[sid].closed, 32));
+  let n = 0;
+  for (const [id, k] of Object.entries(doc.cons)) {
+    if (!SPL.has(k.t) || k.ref || !doc.splines?.[k.refs[1]]) continue;
+    const pid = k.t === 'PONS' ? k.refs[0] : k.refs[2];
+    const f = closestOnPolyline(poly(k.refs[1]), P(pid));
+    if (!f) continue;
+    const a = `__sa${n}`, b = `__sb${n}`, l = `__sl${n}`, o = `__so${n}`, oc = `__sc${n}`;
+    n++;
+    const tangency = k.t !== 'PONS';
+    const R = Math.abs(f.k) > 1e-6 ? 1 / Math.abs(f.k) : Infinity;
+    if (tangency && R < 1e5) {
+      // tangencia: el spline se sustituye por su circulo osculador en el punto de contacto (centro sobre la
+      // normal por el punto mas cercano); asi la linealizacion incluye la curvatura y el Newton converge
+      const s = Math.sign(f.k);
+      out.push({ id: o, type: 'point', x: f.x - f.ty * R * s, y: f.y + f.tx * R * s, fixed: true });
+      out.push({ id: oc, type: 'circle', c_id: o, radius: R }, { id: `${oc}_r`, type: 'circle_radius', c_id: oc, radius: R });
+      out.push({ id: `${id}_s`, type: 'point_on_circle', p_id: pid, c_id: oc });
+      // el contacto T se define sin redundancia (en la tangencia dos curvas se cortan en un solo punto,
+      // lo que haria singular el sistema): T sobre el circulo osculador y sobre la normal comun
+      if (k.t === 'TANLS') {
+        out.push({ id: `__sr${n}`, type: 'line', p1_id: o, p2_id: pid });
+        out.push({ id: `${id}_p`, type: 'point_on_line_pl', p_id: pid, l_id: k.refs[0] });
+        out.push({ id: `${id}_q`, type: 'perpendicular_ll', l1_id: `__sr${n}`, l2_id: k.refs[0] });
+      } else {
+        const arc = k.refs[0] in doc.arcs;
+        const cc = (arc ? doc.arcs : doc.circles)[k.refs[0]].c;
+        out.push({ id: `__sr${n}`, type: 'line', p1_id: o, p2_id: cc });
+        out.push({ id: `${id}_p`, type: 'point_on_line_pl', p_id: pid, l_id: `__sr${n}` });
+        out.push(arc ? { id: `${id}_q`, type: 'tangent_ca', c_id: oc, a_id: k.refs[0] } : { id: `${id}_q`, type: 'tangent_cc', c1_id: oc, c2_id: k.refs[0] });
+      }
+      continue;
+    }
+    // punto sobre spline (o tramo recto): recta fija tangente al spline en el punto mas cercano
+    out.push({ id: a, type: 'point', x: f.x, y: f.y, fixed: true }, { id: b, type: 'point', x: f.x + f.tx * 10, y: f.y + f.ty * 10, fixed: true }, { id: l, type: 'line', p1_id: a, p2_id: b });
+    out.push({ id: `${id}_s`, type: 'point_on_line_pl', p_id: pid, l_id: l });
+    if (k.t === 'TANLS') {
+      out.push({ id: `${id}_p`, type: 'point_on_line_pl', p_id: pid, l_id: k.refs[0] });
+      out.push({ id: `${id}_q`, type: 'parallel', l1_id: k.refs[0], l2_id: l });
+    } else if (k.t === 'TANCS') {
+      const arc = k.refs[0] in doc.arcs;
+      const cc = (arc ? doc.arcs : doc.circles)[k.refs[0]].c;
+      out.push(arc ? { id: `${id}_p`, type: 'point_on_arc', p_id: pid, a_id: k.refs[0] } : { id: `${id}_p`, type: 'point_on_circle', p_id: pid, c_id: k.refs[0] });
+      out.push({ id: `__sr${n}`, type: 'line', p1_id: cc, p2_id: pid });
+      out.push({ id: `${id}_q`, type: 'perpendicular_ll', l1_id: `__sr${n}`, l2_id: l });
+    }
+  }
+  return out;
+}
+
+// Distancia maxima de un punto de contacto a su spline (para validar la convergencia).
+function splineResidual(doc, res) {
+  let worst = 0;
+  for (const k of Object.values(doc.cons)) {
+    if (!SPL.has(k.t) || k.ref || !doc.splines?.[k.refs[1]]) continue;
+    const sp = doc.splines[k.refs[1]];
+    const P = (id) => res.pts[id] || doc.pts[id];
+    const f = closestOnPolyline(splineSamples(sp.pts.map(P), sp.closed, 32), P(k.t === 'PONS' ? k.refs[0] : k.refs[2]));
+    if (f) worst = Math.max(worst, f.d);
+  }
+  return worst;
+}
+
+// Una o varias pasadas del solver (varias si hay relaciones con splines).
+function solveLoop(doc, pos, extra) {
+  const spl = hasSpl(doc);
+  let cur = pos, res = null;
+  for (let i = 0; i < (spl ? 30 : 1); i++) {
+    res = runSolve(build(doc, cur, spl ? [...(extra || []), ...splinePrims(doc, cur)] : extra));
+    if (!spl) break;
+    let d = 0;
+    for (const [id, q] of Object.entries(res.pts)) {
+      const o = cur?.pts?.[id] || doc.pts[id];
+      if (o) d = Math.max(d, Math.hypot(q.x - o.x, q.y - o.y));
+    }
+    cur = { pts: res.pts, circles: res.circles, arcs: res.arcs };
+    if (d < 1e-7) break;
+  }
+  return res;
+}
+
 function build(doc, pos, extra) {
   const out = [];
   const P = (id) => pos?.pts?.[id] || doc.pts[id];
@@ -125,11 +215,11 @@ export function solve(doc, targets = []) {
       extra.push({ id: `__t${i}`, type: 'point', x: t.x, y: t.y, fixed: true });
       extra.push({ id: `__d${i}`, type: 'p2p_distance', p1_id: t.id, p2_id: `__t${i}`, distance: 0, scale: 0.02 });
     });
-    const r1 = runSolve(build(doc, null, extra));
+    const r1 = solveLoop(doc, null, extra);
     pos = { pts: r1.pts, circles: r1.circles, arcs: r1.arcs };
   }
-  const res = runSolve(build(doc, pos, null));
-  const ok = (res.status === 0 || res.status === 1) && res.conflicts.length === 0;
+  const res = solveLoop(doc, pos, null);
+  const ok = (res.status === 0 || res.status === 1) && res.conflicts.length === 0 && (!hasSpl(doc) || splineResidual(doc, res) < 1e-3);
   if (ok) commit(doc, res);
   return { ok, conflicts: res.conflicts, status: res.status };
 }

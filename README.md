@@ -16,7 +16,7 @@ CAD 2D parametrico para iPad (uso personal), inspirado en Updraw. PWA: se instal
 - Cotas de referencia (solo lectura, en cursiva): miden en vivo y no entran al solver, para medir resultados sin generar conflictos.
 - Splines por puntos (Catmull-Rom centripeta, abiertos o cerrados): pasan por puntos reales del dibujo y se pueden rellenar y exportar.
 - Trazado de trayectorias: marca un punto con "Trazar punto" y al arrastrar el mecanismo deja su trayectoria; se puede convertir en un spline editable.
-- Generador de levas de disco (seguidor en linea, con o sin rodillo; leyes cicloidal, armonica, parabolica, uniforme; angulo de presion y deteccion de socavado) y equidistante de splines.
+- Splines como elementos de primera clase: punto sobre spline, intersecciones (recta, arco, circulo y otro spline) y tangencias (recta o circulo/arco con spline) que siguen al dibujo al arrastrar. Equidistante de splines y SVG de corte laser a escala real.
 - SVG para corte laser: escala real en mm, solo trazo continuo, splines como curvas Bezier exactas, un color y grosor de trazo fino.
 - Interruptores de vista: restricciones, puntos, cotas y textos.
 - Escala del patron de linea por elemento.

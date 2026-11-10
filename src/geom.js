@@ -203,3 +203,94 @@ export function splineBezier(P, closed = false) {
   }
   return out;
 }
+
+// ---- consultas sobre poligonales (para relaciones con splines) ----
+const dedupe = (pts, tol = 1e-6) => {
+  const out = [];
+  for (const p of pts) if (!out.some((q) => Math.hypot(p.x - q.x, p.y - q.y) < tol)) out.push(p);
+  return out;
+};
+
+// Punto mas cercano de la poligonal P a p: { x, y, d, tx, ty, k } con (tx,ty) tangente unitaria y k la
+// curvatura con signo (>0 gira a la izquierda). Tangente y curvatura se interpolan entre los tramos
+// vecinos para que varien de forma continua (sin saltos en los vertices de la poligonal), lo que hace
+// converger al solver cuando el punto de contacto cae cerca de un vertice.
+export function closestOnPolyline(P, p) {
+  let best = null;
+  for (let i = 0; i < P.length - 1; i++) {
+    const a = P[i], b = P[i + 1];
+    if (Math.hypot(b.x - a.x, b.y - a.y) < 1e-12) continue;
+    const c = closestOnSeg(p, a, b);
+    const d = Math.hypot(p.x - c.x, p.y - c.y);
+    if (!best || d < best.d) best = { x: c.x, y: c.y, d, i, u: c.t };
+  }
+  if (!best) return null;
+  const n = P.length - 1;
+  const closed = Math.hypot(P[0].x - P[n].x, P[0].y - P[n].y) < 1e-9;
+  const seg = (j) => {
+    if (closed) j = ((j % n) + n) % n;
+    else if (j < 0 || j >= n) return null;
+    const a = P[j], b = P[j + 1], L = Math.hypot(b.x - a.x, b.y - a.y);
+    return L > 1e-12 ? { tx: (b.x - a.x) / L, ty: (b.y - a.y) / L, L } : null;
+  };
+  const m = seg(best.i);
+  const lo = best.u < 0.5;
+  const n0 = seg(lo ? best.i - 1 : best.i), n1 = seg(lo ? best.i : best.i + 1);
+  const w = lo ? best.u + 0.5 : best.u - 0.5; // peso del 2.o tramo
+  let tx = m.tx, ty = m.ty, k = 0;
+  if (n0 && n1) {
+    tx = (1 - w) * n0.tx + w * n1.tx; ty = (1 - w) * n0.ty + w * n1.ty;
+    const l = Math.hypot(tx, ty) || 1; tx /= l; ty /= l;
+    k = Math.atan2(n0.tx * n1.ty - n0.ty * n1.tx, n0.tx * n1.tx + n0.ty * n1.ty) / ((n0.L + n1.L) / 2);
+  }
+  return { x: best.x, y: best.y, d: best.d, tx, ty, k };
+}
+
+// Cruces de la poligonal con la recta infinita por a y b.
+export function polylineLine(P, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y, out = [];
+  const f = (q) => dx * (q.y - a.y) - dy * (q.x - a.x);
+  for (let i = 0; i < P.length - 1; i++) {
+    const f0 = f(P[i]), f1 = f(P[i + 1]);
+    if (f0 === f1 || f0 * f1 > 0) continue;
+    const t = f0 / (f0 - f1);
+    out.push({ x: P[i].x + t * (P[i + 1].x - P[i].x), y: P[i].y + t * (P[i + 1].y - P[i].y) });
+  }
+  return dedupe(out);
+}
+
+// Cruces de la poligonal con el circulo (c, r).
+export function polylineCircle(P, c, r) {
+  const out = [];
+  for (let i = 0; i < P.length - 1; i++) {
+    const a = P[i], b = P[i + 1];
+    const d = { x: b.x - a.x, y: b.y - a.y }, f = { x: a.x - c.x, y: a.y - c.y };
+    const A = d.x * d.x + d.y * d.y, B = 2 * (f.x * d.x + f.y * d.y), C = f.x * f.x + f.y * f.y - r * r;
+    if (A < 1e-18) continue;
+    const D = B * B - 4 * A * C;
+    if (D < 0) continue;
+    const s = Math.sqrt(D);
+    for (const t of [(-B - s) / (2 * A), (-B + s) / (2 * A)]) {
+      if (t >= 0 && t <= 1) out.push({ x: a.x + t * d.x, y: a.y + t * d.y });
+    }
+  }
+  return dedupe(out);
+}
+
+// Cruces entre dos poligonales.
+export function polylinePolyline(P, Q) {
+  const out = [];
+  for (let i = 0; i < P.length - 1; i++) {
+    const a = P[i], b = P[i + 1];
+    for (let j = 0; j < Q.length - 1; j++) {
+      const c = Q[j], d = Q[j + 1];
+      const r = { x: b.x - a.x, y: b.y - a.y }, s = { x: d.x - c.x, y: d.y - c.y };
+      const den = r.x * s.y - r.y * s.x;
+      if (Math.abs(den) < 1e-14) continue;
+      const t = ((c.x - a.x) * s.y - (c.y - a.y) * s.x) / den;
+      const u = ((c.x - a.x) * r.y - (c.y - a.y) * r.x) / den;
+      if (t >= 0 && t <= 1 && u >= 0 && u <= 1) out.push({ x: a.x + t * r.x, y: a.y + t * r.y });
+    }
+  }
+  return dedupe(out);
+}

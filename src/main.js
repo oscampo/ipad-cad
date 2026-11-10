@@ -6,10 +6,9 @@ import {
 } from './model.js';
 import {
   dist, closestOnSeg, lineLine, lineCircle, circleCircle, signedAngle, dashFromPattern, parsePattern,
-  arcThrough3, inSweep, TAU, splineSamples, resamplePolyline,
+  arcThrough3, inSweep, TAU, splineSamples, resamplePolyline, closestOnPolyline, polylineLine, polylineCircle, polylinePolyline,
 } from './geom.js';
 import { startTrace, recordTraces, traceToSpline, offsetPolyline } from './curves.js';
-import { camProfile, LAWS } from './cam.js';
 import { splitElement } from './split.js';
 import { layoutDim, dragDim, dimValue } from './dims.js';
 import { textFrame, textHit, textPose, rawAngle, ANCHORS, ANCHOR_NAMES, LINE_SPACING } from './text.js';
@@ -98,15 +97,15 @@ function updateEnabled() {
     COI: pt >= 2,
     MID: pt === 1 && ln === 1,
     EQ: (ln >= 2 && !crv) || (crv >= 2 && !ln),
-    TAN: (ln === 1 && crv === 1) || (crv === 2 && !ln),
-    ONC: pt >= 1 && ((ln === 1 && !crv) || (crv === 1 && !ln)),
+    TAN: (ln === 1 && crv === 1 && !n.sp) || (crv === 2 && !ln && !n.sp) || (n.sp === 1 && ln + crv === 1),
+    ONC: pt >= 1 && ln + crv + n.sp === 1,
     FIX: pt + ln + crv > 0,
     DIM: (pt === 2 && !ln) || (ln === 1 && !pt) || (pt === 1 && ln === 1),
     ANG: ln === 2,
     RAD: crv >= 1,
   };
   document.querySelectorAll('[data-con]').forEach((b) => { b.disabled = !rules[b.dataset.con]; });
-  $('mkint').disabled = ln + crv !== 2;
+  $('mkint').disabled = ln + crv + n.sp !== 2;
   $('mksplit').disabled = !(ln + crv === 1 && pt >= 1);
   $('mkhatch').disabled = ln + crv + n.sp < 1;
   const selPts = sel.filter((x) => x.k === 'pt').map((x) => x.id);
@@ -219,6 +218,12 @@ function snapAt(sx, sy, o = {}) {
     if (d < bd && inSweep(cp, g.a0, g.sweep, m, 6 / (ar.r * view.s))) {
       bd = d; best = { type: 'ar', id, x: cp.x + ((m.x - cp.x) / dc) * ar.r, y: cp.y + ((m.y - cp.y) / dc) * ar.r };
     }
+  }
+  for (const [id, sp] of Object.entries(doc.splines)) {
+    const f = closestOnPolyline(splinePolyline(doc, sp, 16), m);
+    if (!f) continue;
+    const d = dist(toScreen(f), { x: sx, y: sy });
+    if (d < bd) { bd = d; best = { type: 'sp', id, x: f.x, y: f.y }; }
   }
   if (best) return best;
   if (opts.snap) { const g = gridStep(); return { type: 'free', x: Math.round(m.x / g) * g, y: Math.round(m.y / g) * g }; }
@@ -543,7 +548,7 @@ function midOf(refs) {
   return { x: pts.reduce((s, p) => s + p.x, 0) / pts.length, y: pts.reduce((s, p) => s + p.y, 0) / pts.length };
 }
 
-const GLYPH = { H: 'H', V: 'V', PAR: '∥', PERP: '⟂', EQL: '=', EQR: '=', MID: 'M', TANLC: 'T', TANCC: 'T', COL: 'Col' };
+const GLYPH = { H: 'H', V: 'V', PAR: '∥', PERP: '⟂', EQL: '=', EQR: '=', MID: 'M', TANLC: 'T', TANCC: 'T', TANLS: 'T', TANCS: 'T', PONS: '●', COL: 'Col' };
 const FONT = '-apple-system, system-ui, "Segoe UI", sans-serif';
 let mctx = null;
 // ancho de una linea de texto para altura 1 (se escala por la altura real del texto)
@@ -693,6 +698,7 @@ function pointFrom(s) {
   const id = addPoint(doc, s.x, s.y, true);
   if (s.type === 'ln') addCon(doc, { t: 'PONL', refs: [id, s.id] });
   if (s.type === 'ci' || s.type === 'ar') addCon(doc, { t: 'PONC', refs: [id, s.id] });
+  if (s.type === 'sp') addCon(doc, { t: 'PONS', refs: [id, s.id] });
   return id;
 }
 
@@ -932,7 +938,7 @@ function toolUp(p, q) {
   }
   if (tool === 'intersect') {
     const h = hitTest(p.x, p.y);
-    if (!h || (h.k !== 'ln' && h.k !== 'ci' && h.k !== 'ar')) { toast('Toca una línea, un arco o un círculo'); return; }
+    if (!h || !['ln', 'ci', 'ar', 'sp'].includes(h.k)) { toast('Toca una línea, un arco, un círculo o un spline'); return; }
     pending = pending || { items: [] };
     if (pending.items.some((i) => same(i, h))) return;
     pending.items.push(h);
@@ -995,7 +1001,13 @@ function makeIntersections(items) {
   const pts = [];
   const ln = (id) => { const l = doc.lines[id]; return [doc.pts[l.a], doc.pts[l.b]]; };
   const ci = (id) => { const c = doc.circles[id] || doc.arcs[id]; return [doc.pts[c.c], c.r]; };
-  if (a.k === 'ln' && b.k === 'ln') {
+  if (a.k === 'sp' || b.k === 'sp') {
+    const sA = a.k === 'sp' ? a : b, o = a.k === 'sp' ? b : a;
+    const P = splinePolyline(doc, doc.splines[sA.id], 24);
+    if (o.k === 'sp') pts.push(...polylinePolyline(P, splinePolyline(doc, doc.splines[o.id], 24)));
+    else if (o.k === 'ln') pts.push(...polylineLine(P, ...ln(o.id)));
+    else pts.push(...polylineCircle(P, ...ci(o.id)));
+  } else if (a.k === 'ln' && b.k === 'ln') {
     const p = lineLine(...ln(a.id), ...ln(b.id));
     if (!p) { toast('Las rectas son paralelas'); afterChange(); return; }
     pts.push(p);
@@ -1009,12 +1021,12 @@ function makeIntersections(items) {
       if (!inSweep(doc.pts[ar.c], g.a0, g.sweep, pts[i], 1e-3)) { pts.splice(i, 1); break; }
     }
   }
-  if (!pts.length) { toast('No se intersectan (dentro del tramo del arco)'); afterChange(); return; }
+  if (!pts.length) { toast(items.some((it) => it.k === 'ar') ? 'No se intersectan (dentro del tramo del arco)' : 'No se intersectan'); afterChange(); return; }
   pushUndo();
   const created = [];
   for (const q of pts) {
     const id = addPoint(doc, q.x, q.y, false);
-    for (const it of items) addCon(doc, { t: it.k === 'ln' ? 'PONL' : 'PONC', refs: [id, it.id] });
+    for (const it of items) addCon(doc, { t: it.k === 'ln' ? 'PONL' : it.k === 'sp' ? 'PONS' : 'PONC', refs: [id, it.id] });
     created.push(id);
   }
   const r = solve(doc, []);
@@ -1052,14 +1064,15 @@ function selBy() {
   const crv = sel.filter((x) => x.k === 'ci' || x.k === 'ar').map((x) => x.id);
   // un texto seleccionado aporta su punto de insercion a las restricciones
   const txPts = sel.filter((x) => x.k === 'tx').map((x) => doc.texts[x.id]?.pt).filter((q) => q && !ids('pt').includes(q));
-  return { pts: [...ids('pt'), ...txPts], lns: ids('ln'), cis: ids('ci'), ars: ids('ar'), crv };
+  return { pts: [...ids('pt'), ...txPts], lns: ids('ln'), cis: ids('ci'), ars: ids('ar'), sps: ids('sp'), crv };
 }
 const lineEnds = (id) => [doc.lines[id].a, doc.lines[id].b];
 const curveOf = (id) => doc.circles[id] || doc.arcs[id];
 
 async function applyCon(kind) {
-  const { pts, lns, crv } = selBy();
+  const { pts, lns, crv, sps } = selBy();
   const list = [];
+  let pre = null; // ajuste previo del dibujo (despues de guardar el estado para deshacer)
   const bad = (m) => { toast(m); return null; };
   switch (kind) {
     case 'H': case 'V':
@@ -1085,18 +1098,29 @@ async function applyCon(kind) {
       for (let i = 1; i < pts.length; i++) list.push({ t: 'COI', refs: [pts[0], pts[i]] });
       break;
     case 'ONC':
-      if (pts.length && lns.length === 1 && !crv.length) pts.forEach((p) => list.push({ t: 'PONL', refs: [p, lns[0]] }));
+      if (pts.length && sps.length === 1 && !lns.length && !crv.length) pts.forEach((p) => list.push({ t: 'PONS', refs: [p, sps[0]] }));
+      else if (pts.length && lns.length === 1 && !crv.length) pts.forEach((p) => list.push({ t: 'PONL', refs: [p, lns[0]] }));
       else if (pts.length && crv.length === 1 && !lns.length) pts.forEach((p) => list.push({ t: 'PONC', refs: [p, crv[0]] }));
-      else return bad('Selecciona punto(s) y una línea, arco o círculo');
+      else return bad('Selecciona punto(s) y una línea, arco, círculo o spline');
       break;
     case 'MID':
       if (pts.length !== 1 || lns.length !== 1) return bad('Selecciona 1 punto y 1 línea');
       list.push({ t: 'MID', refs: [...lineEnds(lns[0]), pts[0]] });
       break;
     case 'TAN':
-      if (lns.length === 1 && crv.length === 1) list.push({ t: 'TANLC', refs: [lns[0], crv[0]] });
+      if (sps.length === 1 && lns.length + crv.length === 1) {
+        // punto de contacto: el punto del spline mas cercano a la recta (o a la circunferencia)
+        const poly = splinePolyline(doc, doc.splines[sps[0]], 32);
+        let score;
+        if (lns.length) { const [a, b] = lineEnds(lns[0]).map((i) => doc.pts[i]); const L = dist(a, b) || 1; score = (q) => Math.abs((b.x - a.x) * (a.y - q.y) - (a.x - q.x) * (b.y - a.y)) / L; }
+        else { const o = curveOf(crv[0]), c = doc.pts[o.c]; score = (q) => Math.abs(dist(c, q) - o.r); }
+        const q0 = poly.reduce((m, q) => (score(q) < score(m) ? q : m), poly[0]);
+        const tp = addPoint(doc, q0.x, q0.y, true);
+        list.push({ t: lns.length ? 'TANLS' : 'TANCS', refs: [lns.length ? lns[0] : crv[0], sps[0], tp] });
+        pre = () => seedTangent(lns[0], sps[0], tp, poly);
+      } else if (lns.length === 1 && crv.length === 1) list.push({ t: 'TANLC', refs: [lns[0], crv[0]] });
       else if (crv.length === 2 && !lns.length) list.push({ t: 'TANCC', refs: [crv[0], crv[1]] });
-      else return bad('Selecciona línea + círculo/arco, o 2 círculos/arcos');
+      else return bad('Selecciona línea + círculo/arco, 2 círculos/arcos, o un spline + línea/círculo/arco');
       break;
     case 'FIX': {
       const ids = new Set(pts);
@@ -1144,7 +1168,30 @@ async function applyCon(kind) {
     }
     default: return;
   }
-  commitCons(list);
+  commitCons(list, pre);
+}
+
+// Arranque de la tangencia recta-spline: si la recta tiene un extremo fijo, busca la tangente exacta desde
+// ese extremo y gira el otro hasta ella, para que el solver parta cerca de la solucion (Newton).
+function seedTangent(lnId, spId, tp, poly) {
+  if (!lnId) return;
+  const l = doc.lines[lnId], A = doc.pts[l.a], B = doc.pts[l.b];
+  if (!!A.fixed === !!B.fixed) return;
+  const piv = A.fixed ? A : B, fr = A.fixed ? B : A;
+  const len = dist(piv, fr) || 1;
+  const g = (i) => { const a = poly[i], b = poly[i + 1], L = dist(a, b) || 1; return ((b.x - a.x) * (a.y - piv.y) - (b.y - a.y) * (a.x - piv.x)) / L; };
+  let best = null;
+  for (let i = 0; i < poly.length - 2; i++) {
+    const g0 = g(i), g1 = g(i + 1);
+    if (g0 * g1 > 0 || g0 === g1) continue;
+    const u = g0 / (g0 - g1), q = { x: poly[i + 1].x * u + poly[i].x * (1 - u), y: poly[i + 1].y * u + poly[i].y * (1 - u) };
+    const ang = Math.abs(signedAngle({ x: fr.x - piv.x, y: fr.y - piv.y }, { x: q.x - piv.x, y: q.y - piv.y }));
+    if (!best || ang < best.ang) best = { q, ang };
+  }
+  if (!best) return;
+  const d = dist(piv, best.q) || 1;
+  doc.pts[tp].x = best.q.x; doc.pts[tp].y = best.q.y;
+  fr.x = piv.x + ((best.q.x - piv.x) / d) * len; fr.y = piv.y + ((best.q.y - piv.y) / d) * len;
 }
 
 const SPLIT_LOST = { EQL: 'igual longitud', ANG: 'ángulo', COL: 'colineal', DISTPL: 'distancia a recta' };
@@ -1163,8 +1210,9 @@ function splitSelected() {
   afterChange();
 }
 
-function commitCons(list) {
+function commitCons(list, pre) {
   pushUndo();
+  if (pre) pre();
   list.forEach((k) => addCon(doc, k));
   const r = solve(doc, []);
   if (!r.ok) { rollback(); toast('No se pudo: entra en conflicto con otras restricciones. Si solo quieres medir, usa «Solo lectura»'); afterChange(); return; }
@@ -1403,8 +1451,8 @@ document.querySelectorAll('[data-tool]').forEach((b) => { b.onclick = () => setT
 document.querySelectorAll('[data-con]').forEach((b) => { b.onclick = () => applyCon(b.dataset.con); });
 $('mksplit').onclick = splitSelected;
 $('mkint').onclick = () => {
-  const it = sel.filter((s) => s.k === 'ln' || s.k === 'ci' || s.k === 'ar');
-  if (it.length !== 2) { toast('Selecciona 2 elementos (líneas, arcos o círculos)'); return; }
+  const it = sel.filter((s) => s.k === 'ln' || s.k === 'ci' || s.k === 'ar' || s.k === 'sp');
+  if (it.length !== 2) { toast('Selecciona 2 elementos (líneas, arcos, círculos o splines)'); return; }
   makeIntersections(it);
 };
 $('undo').onclick = undo; $('redo').onclick = redo;
@@ -1443,45 +1491,6 @@ $('spOffset').onclick = () => {
   afterChange();
   if (o.undercut > 0) toast(`La equidistante se socava en ${o.undercut} tramos: la distancia supera el radio de curvatura (mínimo ${fmt(o.minRadius)}). Revisa la curva.`);
   else toast('Equidistante creada');
-};
-
-// ---- generador de levas ----
-const CAM_DEFAULTS = { rb: 25, rr: 6, h: 12, rise: 120, dwellHigh: 30, fall: 120, bore: 6, law: 'cicloidal', ccw: true, nPts: 90 };
-function openCamDialog() {
-  const v = { ...CAM_DEFAULTS, ...(opts.cam || {}) };
-  $('camLaw').innerHTML = Object.entries(LAWS).map(([k, l]) => `<option value="${k}">${l.label}</option>`).join('');
-  for (const k of ['rb', 'rr', 'h', 'rise', 'dwellHigh', 'fall', 'bore', 'nPts']) $('cam_' + k).value = String(v[k]);
-  $('camLaw').value = v.law; $('camDir').value = v.ccw ? 'ccw' : 'cw'; $('camMsg').textContent = '';
-  $('dlgC').showModal();
-}
-$('camGen').onclick = openCamDialog;
-$('camCancel').onclick = () => $('dlgC').close();
-$('camOk').onclick = (ev) => {
-  ev.preventDefault();
-  const num = (id) => Number(String($(id).value).replace(',', '.'));
-  const v = { rb: num('cam_rb'), rr: num('cam_rr') || 0, h: num('cam_h'), rise: num('cam_rise'), dwellHigh: num('cam_dwellHigh') || 0, fall: num('cam_fall'), bore: num('cam_bore') || 0, law: $('camLaw').value, ccw: $('camDir').value === 'ccw', nPts: Math.max(24, Math.round(num('cam_nPts') || 90)) };
-  const res = camProfile({ ...v, n: 720 });
-  if (res.error) { $('camMsg').textContent = res.error; return; }
-  opts.cam = v;
-  pushUndo();
-  // centro: el punto seleccionado, o un punto nuevo en el centro de la vista
-  let cid = sel.find((x) => x.k === 'pt')?.id;
-  if (!cid) { const m = toModel(cv.getBoundingClientRect().width / 2, cv.getBoundingClientRect().height / 2); cid = addPoint(doc, m.x, m.y, false); }
-  const c = doc.pts[cid];
-  const st = style();
-  const ids = newControlPoints(res.profile, true, v.nPts, c);
-  const profile = addSpline(doc, ids, { color: st.color, ltype: 'continua', w: st.w, ls: st.ls }, true);
-  if (v.rr > 0) { // curva primitiva (trayectoria del centro del rodillo) como linea de construccion
-    addSpline(doc, newControlPoints(res.pitch, true, v.nPts, c), { color: st.color, ltype: 'fantasma', w: 1, ls: 1 }, true);
-  }
-  if (v.bore > 0) addCircle(doc, cid, v.bore / 2, { color: st.color, ltype: 'continua', w: st.w, ls: st.ls });
-  sel = [{ k: 'sp', id: profile }];
-  $('dlgC').close();
-  afterChange();
-  const warn = [];
-  if (res.maxPressureDeg > 30) warn.push(`ángulo de presión alto (${res.maxPressureDeg.toFixed(0)}°, conviene ≤ 30°)`);
-  if (res.undercut > 0) warn.push('perfil socavado: reduce el rodillo o suaviza la subida');
-  toast(`Leva creada. Ángulo de presión máx. ${res.maxPressureDeg.toFixed(1)}°` + (warn.length ? `. Atención: ${warn.join('; ')}` : ''));
 };
 
 // ---- SVG para corte laser ----

@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict';
 import { newDoc, addPoint, addLine, addCircle, addArc, addCon, addText, addSpline, deleteItems, hatchLoops, arcOf, cleanup, splinePolyline } from '../src/model.js';
 import { startTrace, recordTraces, traceToSpline, offsetPolyline } from '../src/curves.js';
-import { camProfile, displacement } from '../src/cam.js';
 import { layoutDim, dragDim, dimValue, dimText } from '../src/dims.js';
 import { textFrame, textCorners, textHit, textPose, rawAngle } from '../src/text.js';
 import { exportSVG, exportSVGLaser, exportDXF, dimLayouts, extraExtents } from '../src/export.js';
 import { splitElement } from '../src/split.js';
 import { initSolver, solve } from '../src/solver.js';
-import { lineLine, lineCircle, circleCircle, signedAngle, dashFromPattern, parsePattern, circumcircle, arcSweepOf, TAU, splineSamples, resamplePolyline, polylineLength, splineBezier } from '../src/geom.js';
+import { lineLine, lineCircle, circleCircle, signedAngle, dashFromPattern, parsePattern, circumcircle, arcSweepOf, TAU, splineSamples, resamplePolyline, polylineLength, splineBezier, closestOnPolyline, polylineLine, polylineCircle, polylinePolyline } from '../src/geom.js';
 
 await initSolver();
 const near = (a, b, eps = 1e-6, msg) => assert.ok(Math.abs(a - b) < eps, `${msg || ''} ${a} vs ${b}`);
@@ -688,31 +687,102 @@ t('equidistante: circulo hacia afuera/adentro y deteccion de socavado', () => {
   assert.ok(bad.undercut > 50, 'se invierte: ' + bad.undercut);
 });
 
-t('leva: radios, cierre, leyes de movimiento y angulo de presion', () => {
-  const base = { rb: 25, rr: 0, h: 12, rise: 120, dwellHigh: 30, fall: 120, law: 'cicloidal', ccw: true, n: 360 };
-  for (const law of ['cicloidal', 'armonico', 'parabolico', 'uniforme']) {
-    near(displacement({ ...base, law }, 0), 0, 1e-12); near(displacement({ ...base, law }, 120), 12, 1e-9);
-    near(displacement({ ...base, law }, 150), 12, 1e-9, 'reposo arriba'); near(displacement({ ...base, law }, 270), 0, 1e-9);
-    near(displacement({ ...base, law }, 330), 0, 1e-9, 'reposo abajo');
-  }
-  near(displacement(base, 60), 6, 1e-9, 'a mitad de la subida lleva la mitad');
-  const c = camProfile(base);
-  assert.equal(c.pitch.length, 360);
-  const radii = c.pitch.map((q) => Math.hypot(q.x, q.y));
-  near(Math.min(...radii), 25, 1e-9); near(Math.max(...radii), 37, 1e-9);
-  assert.ok(c.maxPressureDeg > 10 && c.maxPressureDeg < 35, 'angulo de presion plausible: ' + c.maxPressureDeg);
-  // con rodillo: el perfil queda rr por dentro de la curva primitiva y el sentido de giro invierte el perfil
-  const r = camProfile({ ...base, rr: 5, n: 720 });
-  assert.equal(r.undercut, 0);
-  const pr = r.profile.map((q) => Math.hypot(q.x, q.y));
-  near(Math.min(...pr), 25, 0.05, 'base del perfil = radio base'); near(Math.max(...pr), 37, 0.3);
-  const cw = camProfile({ ...base, ccw: false });
-  assert.ok(Math.abs(c.pitch[90].y + cw.pitch[90].y) < 1e-9 && Math.abs(c.pitch[90].x - cw.pitch[90].x) < 1e-9, 'horario = imagen especular');
-  // una carrera brusca con rodillo grande se socava
-  const harsh = camProfile({ rb: 12, rr: 11, h: 15, rise: 40, dwellHigh: 0, fall: 40, law: 'cicloidal' });
-  assert.ok(harsh.undercut > 0 || harsh.minRadius < 11, 'detecta socavado');
-  assert.ok(camProfile({ ...base, rise: 300 }).error, 'subida+reposo+bajada > 360');
-  assert.ok(camProfile({ ...base, h: 0 }).error);
+
+
+function splDoc() {
+  const d = newDoc();
+  const ids = [[0, 0], [10, 8], [20, 0], [30, 8], [40, 0]].map(([x, y]) => addPoint(d, x, y, false));
+  ids.forEach((i) => { d.pts[i].fixed = true; });
+  const sp = addSpline(d, ids, { color: 'auto', ltype: 'continua', w: 2, ls: 1 }, false);
+  return { d, ids, sp };
+}
+const distToSpl = (d, sp, p) => closestOnPolyline(splinePolyline(d, d.splines[sp], 32), p).d;
+
+t('geometria: cruces de poligonales y punto mas cercano', () => {
+  const P = [{ x: 0, y: 0 }, { x: 10, y: 10 }, { x: 20, y: 0 }];
+  const f = closestOnPolyline(P, { x: 10, y: 20 });
+  near(f.x, 10); near(f.y, 10);
+  assert.equal(polylineLine(P, { x: 0, y: 5 }, { x: 1, y: 5 }).length, 2);
+  assert.equal(polylineCircle(P, { x: 10, y: 10 }, 5).length, 2);
+  const q = polylinePolyline(P, [{ x: 0, y: 8 }, { x: 20, y: 8 }]);
+  assert.equal(q.length, 2); near(q[0].y, 8);
+});
+
+t('relacion: punto sobre spline se mantiene al arrastrar y al mover la curva', () => {
+  const { d, ids, sp } = splDoc();
+  const p = addPoint(d, 25, 3, false);
+  addCon(d, { t: 'PONS', refs: [p, sp] });
+  let r = solve(d, []);
+  assert.ok(r.ok, 'converge');
+  assert.ok(distToSpl(d, sp, d.pts[p]) < 1e-4, 'quedo sobre la curva: ' + distToSpl(d, sp, d.pts[p]));
+  // arrastrar el punto hacia otro lado: sigue sobre la curva
+  for (let i = 0; i < 10; i++) { r = solve(d, [{ id: p, x: 25 - i * 1.5, y: 20 }]); assert.ok(r.ok); }
+  assert.ok(distToSpl(d, sp, d.pts[p]) < 1e-4, 'tras arrastrar');
+  // mover la curva (liberar un punto de control): el punto la sigue
+  d.pts[ids[2]].fixed = false;
+  r = solve(d, [{ id: ids[2], x: 20, y: 14 }]);
+  assert.ok(r.ok); d.pts[ids[2]].fixed = true;
+  assert.ok(distToSpl(d, sp, d.pts[p]) < 1e-4, 'tras mover la curva');
+});
+
+t('relacion: interseccion recta-spline con ambas relaciones y fijando la recta', () => {
+  const { d, sp } = splDoc();
+  const a = addPoint(d, 5, 20, false), b = addPoint(d, 35, -10, false);
+  d.pts[a].fixed = d.pts[b].fixed = true;
+  const l = addLine(d, a, b, {});
+  const X = polylineLine(splinePolyline(d, d.splines[sp], 24), d.pts[a], d.pts[b]);
+  assert.ok(X.length >= 1);
+  const p = addPoint(d, X[0].x + 0.3, X[0].y - 0.2, false);
+  addCon(d, { t: 'PONL', refs: [p, l] }); addCon(d, { t: 'PONS', refs: [p, sp] });
+  const r = solve(d, []);
+  assert.ok(r.ok);
+  assert.ok(distToSpl(d, sp, d.pts[p]) < 1e-4);
+  const cr = (d.pts[b].x - d.pts[a].x) * (d.pts[p].y - d.pts[a].y) - (d.pts[b].y - d.pts[a].y) * (d.pts[p].x - d.pts[a].x);
+  near(cr, 0, 1e-5, 'sobre la recta');
+});
+
+t('relacion: punto fijo fuera de la curva da conflicto (no se acepta en silencio)', () => {
+  const { d, sp } = splDoc();
+  const p = addPoint(d, 20, 30, false); d.pts[p].fixed = true;
+  addCon(d, { t: 'PONS', refs: [p, sp] });
+  assert.equal(solve(d, []).ok, false);
+});
+
+t('relacion: recta tangente a spline', () => {
+  const { d, sp } = splDoc();
+  const a = addPoint(d, 5, 12, false), b = addPoint(d, 35, 12, false);
+  const l = addLine(d, a, b, {});
+  d.pts[a].fixed = true; // un extremo fijo, el otro libre: la recta gira hasta ser tangente
+  const T = addPoint(d, 10, 8, true);
+  addCon(d, { t: 'TANLS', refs: [l, sp, T] });
+  const r = solve(d, []);
+  assert.ok(r.ok, 'converge');
+  assert.ok(distToSpl(d, sp, d.pts[T]) < 1e-4, 'contacto sobre la curva');
+  // el contacto esta sobre la recta y la recta es tangente a la poligonal en ese punto
+  const A = d.pts[a], B = d.pts[b], Tp = d.pts[T];
+  near((B.x - A.x) * (Tp.y - A.y) - (B.y - A.y) * (Tp.x - A.x), 0, 1e-4, 'T sobre la recta');
+  const f = closestOnPolyline(splinePolyline(d, d.splines[sp], 32), Tp);
+  const L = Math.hypot(B.x - A.x, B.y - A.y);
+  near(Math.abs(((B.x - A.x) * f.tx + (B.y - A.y) * f.ty) / L), 1, 1e-3, 'direcciones paralelas');
+});
+
+t('relacion: circulo tangente a spline y borrado limpia las relaciones', () => {
+  const { d, sp, ids } = splDoc();
+  const c = addPoint(d, 10, 16, false); d.pts[c].fixed = true;
+  const ci = addCircle(d, c, 6, {}); // radio libre: crece/decrece hasta tocar la curva
+  const T = addPoint(d, 10, 8, true);
+  addCon(d, { t: 'TANCS', refs: [ci, sp, T] });
+  const r = solve(d, []);
+  assert.ok(r.ok, 'converge');
+  assert.ok(distToSpl(d, sp, d.pts[T]) < 1e-4);
+  near(Math.hypot(d.pts[T].x - d.pts[c].x, d.pts[T].y - d.pts[c].y), d.circles[ci].r, 1e-4, 'T sobre el circulo');
+  // tangente: el radio hacia el contacto es perpendicular a la curva
+  const f = closestOnPolyline(splinePolyline(d, d.splines[sp], 32), d.pts[T]);
+  const rx = d.pts[T].x - d.pts[c].x, ry = d.pts[T].y - d.pts[c].y;
+  near((rx * f.tx + ry * f.ty) / Math.hypot(rx, ry), 0, 2e-3, 'radio perpendicular a la curva');
+  deleteItems(d, [{ k: 'sp', id: sp }]);
+  assert.equal(Object.values(d.cons).filter((k) => k.t === 'TANCS').length, 0, 'la relacion muere con el spline');
+  assert.ok(solve(d, []).ok);
 });
 
 console.log(`\n${passed} pruebas pasaron`);

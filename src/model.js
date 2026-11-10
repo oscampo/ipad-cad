@@ -104,7 +104,7 @@ function pointsUsed(doc) {
 // Elimina lo que quedo huerfano: restricciones con referencias muertas, rellenos sin
 // contorno y puntos automaticos sin uso.
 export function cleanup(doc) {
-  const exists = (id) => id in doc.pts || id in doc.lines || id in doc.circles || id in doc.arcs;
+  const exists = (id) => id in doc.pts || id in doc.lines || id in doc.circles || id in doc.arcs || id in (doc.splines || {});
   let changed = true;
   while (changed) {
     changed = false;
