@@ -289,7 +289,7 @@ export function exportSVGLaser(doc, o = {}) {
     else out[mode].push(`<path d="M${pt(a0)} A${r} ${r} 0 ${sweep > Math.PI ? 1 : 0} 0 ${pt(a0 + sweep)}"/>`);
   }
   for (const { e: sp, mode } of splines) {
-    const segs = splineBezier(sp.pts.map((id) => doc.pts[id]), sp.closed);
+    const segs = splineBezier(sp.pts.map((id) => doc.pts[id]), sp.closed, sp.ts);
     if (!segs.length) continue;
     const q = (pt) => `${X(pt.x)} ${Y(pt.y)}`;
     out[mode].push(`<path d="M${q(segs[0].p0)} ${segs.map((b) => `C${q(b.c1)} ${q(b.c2)} ${q(b.p1)}`).join(' ')}${sp.closed ? ' Z' : ''}"/>`);

@@ -10,7 +10,8 @@ import { cleanFileBase } from '../src/files.js';
 import { parseValue, evalExpr, isPlainNumber } from '../src/expr.js';
 import { trimAt, extendEnd, cutsOf, linearArray, mirrorCopy, circularArray } from '../src/edit.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from '../src/lock.js';
-import { initSolver, solve } from '../src/solver.js';
+import { initSolver, solve, reparamSplines } from '../src/solver.js';
+import { bsplineThrough, bsplinePoint } from '../src/bspline.js';
 import { lineLine, lineCircle, circleCircle, signedAngle, dashFromPattern, parsePattern, circumcircle, arcSweepOf, TAU, splineSamples, resamplePolyline, polylineLength, splineBezier, closestOnPolyline, polylineLine, polylineCircle, polylinePolyline } from '../src/geom.js';
 
 await initSolver();
@@ -701,7 +702,7 @@ function splDoc() {
   const sp = addSpline(d, ids, { color: 'auto', ltype: 'continua', w: 2, ls: 1 }, false);
   return { d, ids, sp };
 }
-const distToSpl = (d, sp, p) => closestOnPolyline(splinePolyline(d, d.splines[sp], 32), p).d;
+const distToSpl = (d, sp, p) => closestOnPolyline(splinePolyline(d, d.splines[sp], 400), p).d; // muestreo fino: el punto queda sobre la curva exacta
 
 t('geometria: cruces de poligonales y punto mas cercano', () => {
   const P = [{ x: 0, y: 0 }, { x: 10, y: 10 }, { x: 20, y: 0 }];
@@ -1238,6 +1239,59 @@ t('matriz circular: 4 instancias a 90, restricciones H/V se intercambian, omitir
   assert.equal(Object.values(d2.cons).filter((k) => k.t === 'H' || k.t === 'V').length, 1);
   const q = d2.pts[d2.lines[r2.made[1].id].a];
   near(Math.hypot(q.x, q.y), 5, 1e-9);
+});
+
+
+t('B-spline: pasa por los puntos (abierto y cerrado) con parametros dados o calculados', () => {
+  const Q = [{ x: 0, y: 0 }, { x: 10, y: 8 }, { x: 22, y: 10 }, { x: 34, y: 3 }, { x: 44, y: -4 }];
+  for (const closed of [false, true]) {
+    const bs = bsplineThrough(Q, closed);
+    assert.equal(bs.G.length, closed ? Q.length : Q.length + 2);
+    Q.forEach((q, k) => { const e = bsplinePoint(bs, bs.ts[k]); near(e.x, q.x, 1e-9); near(e.y, q.y, 1e-9); });
+    if (closed) { const a = bsplinePoint(bs, bs.ts[0]), b = bsplinePoint(bs, bs.ts[0] + 1); near(a.x, b.x, 1e-9, 'periodico'); }
+    else { near(bs.G[1].x, (bs.G[0].x + bs.G[2].x) / 2, 1e-9, 'curvatura nula al inicio'); }
+  }
+  assert.equal(bsplineThrough([Q[0]], false), null);
+});
+t('spline cerrado nativo: punto sobre la curva, arrastre del punto y de la curva, tangentes', () => {
+  const d = newDoc();
+  const ids = [[20, 0], [14, 14], [0, 18], [-14, 14], [-20, 0], [-14, -14], [0, -18], [14, -14]].map(([x, y]) => addPoint(d, x, y, false));
+  ids.forEach((i) => { d.pts[i].fixed = true; });
+  const sp = addSpline(d, ids, {}, true);
+  const p = addPoint(d, 19, 6, false);
+  addCon(d, { t: 'PONS', refs: [p, sp] });
+  assert.ok(solve(d, []).ok);
+  assert.ok(distToSpl(d, sp, d.pts[p]) < 5e-5, 'sobre la curva ' + distToSpl(d, sp, d.pts[p]));
+  // da la vuelta completa (pasa por la union del periodo) sin perder la curva
+  for (let i = 1; i <= 48; i++) {
+    const a = (i / 48) * 2 * Math.PI + 0.3;
+    assert.ok(solve(d, [{ id: p, x: 30 * Math.cos(a), y: 30 * Math.sin(a) }]).ok, 'paso ' + i);
+    assert.ok(distToSpl(d, sp, d.pts[p]) < 5e-5, 'sobre la curva en el paso ' + i);
+  }
+  // un punto de la curva libre: arrastrarlo la deforma y el punto ligado sigue sobre ella
+  d.pts[ids[1]].fixed = false;
+  for (let i = 1; i <= 10; i++) assert.ok(solve(d, [{ id: ids[1], x: 14 + i, y: 14 + i }]).ok);
+  near(d.pts[ids[1]].x, 24, 1e-6);
+  assert.ok(distToSpl(d, sp, d.pts[p]) < 5e-5);
+  assert.ok(Array.isArray(d.splines[sp].ts), 'con relaciones conserva sus parametros');
+  // reparametrizar tras el arrastre y seguir cumpliendo
+  reparamSplines(d);
+  assert.ok(distToSpl(d, sp, d.pts[p]) < 5e-5, 'tras reparametrizar');
+  // recta horizontal tangente por arriba y circulo tangente por fuera
+  const a = addPoint(d, -30, 25, false), b = addPoint(d, 30, 25, false);
+  const l = addLine(d, a, b, {}); addCon(d, { t: 'H', refs: [l] });
+  // como en la app: el contacto arranca en el punto de la curva mas cercano a la recta
+  const q0 = splinePolyline(d, d.splines[sp], 32).reduce((m, q) => (q.y > m.y ? q : m));
+  const T = addPoint(d, q0.x, q0.y, true);
+  addCon(d, { t: 'TANLS', refs: [l, sp, T] });
+  assert.ok(solve(d, []).ok, 'tangente con recta');
+  assert.ok(distToSpl(d, sp, d.pts[T]) < 5e-5);
+  near(d.pts[a].y, d.pts[T].y, 1e-6, 'la recta toca en T');
+  const top = Math.max(...splinePolyline(d, d.splines[sp], 200).map((q) => q.y));
+  near(d.pts[T].y, top, 1e-3, 'toca en el punto mas alto');
+  // sin relaciones, el spline deja de guardar parametros
+  deleteItems(d, Object.keys(d.cons).map((id) => ({ k: 'co', id })));
+  assert.equal(d.splines[sp].ts, undefined);
 });
 
 console.log(`\n${passed} pruebas pasaron`);

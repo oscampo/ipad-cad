@@ -1,5 +1,5 @@
 import wasmUrl from '@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url';
-import { initSolver, solve } from './solver.js';
+import { initSolver, solve, reparamSplines } from './solver.js';
 import {
   newDoc, addPoint, addLine, addCircle, addArc, addText, addSpline, splinePolyline, addCon, cleanup, deleteItems, clone, hatchLoops,
   allLtypes, PALETTE, arcOf,
@@ -1089,7 +1089,7 @@ function toolMove(p) {
 function toolUp(p, q) {
   const d = drag; drag = null;
   if (tool === 'select') {
-    if (d?.started) { afterChange(); return; }
+    if (d?.started) { reparamSplines(doc); afterChange(); return; }
     selectAt(p);
     return;
   }

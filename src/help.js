@@ -73,7 +73,7 @@ export const HELP_HTML = `
 
 <details><summary>Splines y trazados (levas y trayectorias)</summary>
 <ul>
-<li>Un spline pasa por puntos reales del dibujo. Esos puntos se comportan como puntos libres hasta que los restrinjas; los puntos ligados al spline lo deforman al arrastrarlos.</li>
+<li>Un spline es un B-spline cúbico que pasa por puntos reales del dibujo. Esos puntos se comportan como puntos libres hasta que los restrinjas; los puntos ligados al spline lo deforman al arrastrarlos.</li>
 <li>El spline es un elemento de primera clase: puede tener puntos sobre él, intersecciones y tangencias con líneas, círculos y arcos.</li>
 <li><b>Trazar punto</b>: hace que un punto dibuje su trayectoria al mover el mecanismo. <b>Trazado a spline</b> convierte la trayectoria (la primera vuelta) en un spline editable.</li>
 <li><b>Equidistante</b>: curva paralela a un spline a una distancia dada (por ejemplo el radio del rodillo de una leva). Avisa si la distancia supera el radio de curvatura.</li>
@@ -106,7 +106,7 @@ export const HELP_HTML = `
 <details open><summary>Solver y créditos</summary>
 <p>Las restricciones las resuelve <b>PlaneGCS</b>, el solver geométrico 2D del módulo <i>Sketcher</i> de <b>FreeCAD</b>, cuyo código original es de <b>Konstantinos Poulios</b> (© 2011, parte del proyecto FreeCAD, licencia LGPL).</p>
 <p>La app lo usa compilado a WebAssembly mediante el paquete <b>@salusoft89/planegcs</b> (v1.3.0), un build wasm y envoltorio JavaScript de <b>Salusoft89</b>, con licencia LGPL-2.0-or-later: <a href="https://github.com/Salusoft89/planegcs" target="_blank" rel="noopener">github.com/Salusoft89/planegcs</a>. FreeCAD: <a href="https://www.freecad.org" target="_blank" rel="noopener">freecad.org</a>.</p>
-<p>Los splines <b>no</b> son primitivas del solver: la app linealiza sus relaciones (punto sobre, tangencias) en cada iteración y repite hasta converger. Por eso las tangencias con splines son aproximadas en tramos casi rectos.</p>
+<p>Los splines son <b>B-splines cúbicos</b> que pasan por sus puntos (abiertos, con curvatura nula en los extremos, o cerrados periódicos) y usan los B-splines nativos de PlaneGCS: el punto sobre spline y las tangencias con líneas, círculos y arcos las resuelve el solver de forma exacta, junto con el resto del dibujo.</p>
 <p>Otros componentes: íconos <b>Lucide</b> (licencia ISC) y empaquetado con <b>Vite</b> (licencia MIT).</p></details>
 
 <details><summary>Límites conocidos</summary>

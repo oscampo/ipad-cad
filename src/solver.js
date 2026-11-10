@@ -1,13 +1,14 @@
 // Puente entre el documento y el solver de restricciones (planegcs, de FreeCAD, en WASM).
 import { init_planegcs_module, GcsWrapper } from '@salusoft89/planegcs';
 import { conRefs } from './model.js';
-import { arcSweepOf, splineSamples, closestOnPolyline } from './geom.js';
+import { arcSweepOf, closestOnPolyline } from './geom.js';
+import { bsplineThrough, bsplineSamples, bsplinePoint, bsplineTangent, sampleParam, chordParams, validParams } from './bspline.js';
 
 let g = null;
 
 export async function initSolver(wasmUrl) {
   const mod = await init_planegcs_module(wasmUrl ? { locateFile: () => wasmUrl } : undefined);
-  g = new GcsWrapper(new mod.GcsSystem());
+  g = new GcsWrapper(new mod.GcsSystem(), mod);
 }
 
 // 'l' linea, 'c' circulo, 'a' arco, 'p' punto
@@ -68,121 +69,134 @@ function conPrims(doc, id, k) {
   }
 }
 
-// Relaciones con splines (punto sobre spline y tangencias). El spline no es una primitiva del
-// solver: en cada pasada se linealiza como su tangente en el punto mas cercano (recta fija) y
-// solve() repite hasta converger (Newton). Cada relacion lleva el punto de contacto en refs.
+// ---------------------------------------------------------------- splines
+// Un spline con relaciones entra al solver como B-spline nativo de planegcs: sus polos son incognitas
+// auxiliares, cada punto de dato queda sobre su nudo (alineacion interna) y, si es abierto, los extremos
+// llevan la condicion de curvatura nula (punto medio). Con eso la curva queda determinada por los puntos
+// de dato, igual que al dibujarla (bspline.js).
+//  - PONS (punto sobre spline): point_on_bspline con el parametro libre.
+//  - TANLS / TANCS (recta o circulo/arco tangente al spline): el punto de contacto T va sobre el spline
+//    (parametro libre) y sobre la otra curva, y el angulo entre ambas en T es 0 o 180 grados
+//    (angle_via_point_and_param).
 const SPL = new Set(['PONS', 'TANLS', 'TANCS']);
-const hasSpl = (doc) => Object.values(doc.cons).some((k) => SPL.has(k.t) && !k.ref && doc.splines?.[k.refs[1]]);
+const splCon = (doc, k) => SPL.has(k.t) && !k.ref && !!doc.splines?.[k.refs[1]];
+const hasSpl = (doc) => Object.values(doc.cons).some((k) => splCon(doc, k));
+// punto que la relacion pone sobre el spline
+const splPoint = (k) => (k.t === 'PONS' ? k.refs[0] : k.refs[2]);
+const isClosed = (sp) => !!sp.closed && sp.pts.length >= 3;
 
-function splinePrims(doc, pos) {
-  const out = [], cache = {};
-  const P = (id) => pos?.pts?.[id] || doc.pts[id];
-  const poly = (sid) => (cache[sid] ||= splineSamples(doc.splines[sid].pts.map(P), doc.splines[sid].closed, 32));
-  let n = 0;
-  for (const [id, k] of Object.entries(doc.cons)) {
-    if (!SPL.has(k.t) || k.ref || !doc.splines?.[k.refs[1]]) continue;
-    const pid = k.t === 'PONS' ? k.refs[0] : k.refs[2];
-    const f = closestOnPolyline(poly(k.refs[1]), P(pid));
-    if (!f) continue;
-    const a = `__sa${n}`, b = `__sb${n}`, l = `__sl${n}`, o = `__so${n}`, oc = `__sc${n}`;
-    n++;
-    const tangency = k.t !== 'PONS';
-    const R = Math.abs(f.k) > 1e-6 ? 1 / Math.abs(f.k) : Infinity;
-    if (tangency && R < 1e5) {
-      // tangencia: el spline se sustituye por su circulo osculador en el punto de contacto (centro sobre la
-      // normal por el punto mas cercano); asi la linealizacion incluye la curvatura y el Newton converge
-      const s = Math.sign(f.k);
-      out.push({ id: o, type: 'point', x: f.x - f.ty * R * s, y: f.y + f.tx * R * s, fixed: true });
-      out.push({ id: oc, type: 'circle', c_id: o, radius: R }, { id: `${oc}_r`, type: 'circle_radius', c_id: oc, radius: R });
-      out.push({ id: `${id}_s`, type: 'point_on_circle', p_id: pid, c_id: oc });
-      // el contacto T se define sin redundancia (en la tangencia dos curvas se cortan en un solo punto,
-      // lo que haria singular el sistema): T sobre el circulo osculador y sobre la normal comun
-      if (k.t === 'TANLS') {
-        out.push({ id: `__sr${n}`, type: 'line', p1_id: o, p2_id: pid });
-        out.push({ id: `${id}_p`, type: 'point_on_line_pl', p_id: pid, l_id: k.refs[0] });
-        out.push({ id: `${id}_q`, type: 'perpendicular_ll', l1_id: `__sr${n}`, l2_id: k.refs[0] });
-      } else {
-        const arc = k.refs[0] in doc.arcs;
-        const cc = (arc ? doc.arcs : doc.circles)[k.refs[0]].c;
-        out.push({ id: `__sr${n}`, type: 'line', p1_id: o, p2_id: cc });
-        out.push({ id: `${id}_p`, type: 'point_on_line_pl', p_id: pid, l_id: `__sr${n}` });
-        out.push(arc ? { id: `${id}_q`, type: 'tangent_ca', c_id: oc, a_id: k.refs[0] } : { id: `${id}_q`, type: 'tangent_cc', c1_id: oc, c2_id: k.refs[0] });
-      }
-      continue;
-    }
-    // punto sobre spline (o tramo recto): recta fija tangente al spline en el punto mas cercano
-    out.push({ id: a, type: 'point', x: f.x, y: f.y, fixed: true }, { id: b, type: 'point', x: f.x + f.tx * 10, y: f.y + f.ty * 10, fixed: true }, { id: l, type: 'line', p1_id: a, p2_id: b });
-    out.push({ id: `${id}_s`, type: 'point_on_line_pl', p_id: pid, l_id: l });
-    if (k.t === 'TANLS') {
-      out.push({ id: `${id}_p`, type: 'point_on_line_pl', p_id: pid, l_id: k.refs[0] });
-      out.push({ id: `${id}_q`, type: 'parallel', l1_id: k.refs[0], l2_id: l });
-    } else if (k.t === 'TANCS') {
-      const arc = k.refs[0] in doc.arcs;
-      const cc = (arc ? doc.arcs : doc.circles)[k.refs[0]].c;
-      out.push(arc ? { id: `${id}_p`, type: 'point_on_arc', p_id: pid, a_id: k.refs[0] } : { id: `${id}_p`, type: 'point_on_circle', p_id: pid, c_id: k.refs[0] });
-      out.push({ id: `__sr${n}`, type: 'line', p1_id: cc, p2_id: pid });
-      out.push({ id: `${id}_q`, type: 'perpendicular_ll', l1_id: `__sr${n}`, l2_id: l });
+// Parametros de los puntos de un spline durante una resolucion: los guardados o, si no hay, los de la
+// longitud de cuerda con las posiciones actuales del documento (se guardan al aceptar la solucion).
+function tsFor(doc, sid, memo) {
+  if (memo[sid]) return memo[sid];
+  const sp = doc.splines[sid], closed = isClosed(sp);
+  memo[sid] = validParams(sp.ts, sp.pts.length, closed) ? sp.ts : chordParams(sp.pts.map((id) => doc.pts[id]), closed);
+  return memo[sid];
+}
+const curveOf = (doc, sid, P, memo) => { const sp = doc.splines[sid]; return bsplineThrough(sp.pts.map(P), isClosed(sp), tsFor(doc, sid, memo)); };
+
+// Parametro inicial de un punto sobre el spline: el guardado si sigue siendo valido; si no, el mas cercano.
+function initialParam(bs, k, p, hint) {
+  if (Number.isFinite(hint)) return hint;
+  if (Number.isFinite(k.u)) { const e = bsplinePoint(bs, k.u); if (Math.hypot(e.x - p.x, e.y - p.y) < 1e-6) return k.u; }
+  const f = closestOnPolyline(bsplineSamples(bs, 32), p);
+  return f ? sampleParam(bs, 32, f.i, f.u) : bs.ts[0];
+}
+
+// Primitivas nativas de los splines con relaciones.
+function nativeSplinePrims(doc, pos, memo) {
+  const out = [], P = (id) => pos?.pts?.[id] || doc.pts[id];
+  const used = new Set();
+  for (const k of Object.values(doc.cons)) if (splCon(doc, k)) used.add(k.refs[1]);
+  const curves = {};
+  for (const sid of used) {
+    const sp = doc.splines[sid], bs = curveOf(doc, sid, P, memo);
+    if (!bs) continue;
+    curves[sid] = bs;
+    const n = sp.pts.length, M = bs.G.length, pole = (i) => `__bp:${sid}:${i}`;
+    bs.G.forEach((q, i) => out.push({ id: pole(i), type: 'point', x: q.x, y: q.y, fixed: false }));
+    out.push({ id: `__bs:${sid}`, type: 'bspline', pole_ids: bs.G.map((_, i) => pole(i)), weights: bs.G.map(() => 1), knots: bs.ts, mult: bs.closed ? bs.ts.map(() => 1) : [4, ...Array(n - 2).fill(1), 4], degree: 3, periodic: bs.closed });
+    sp.pts.forEach((pid, i) => out.push({ id: `__ka:${sid}:${i}`, type: 'internal_alignment_knot_point', b_id: `__bs:${sid}`, p_id: pid, knotindex: i }));
+    if (!bs.closed) {
+      out.push({ id: `__ns:${sid}`, type: 'p2p_symmetric_ppp', p1_id: pole(0), p2_id: pole(2), p_id: pole(1) });
+      out.push({ id: `__ne:${sid}`, type: 'p2p_symmetric_ppp', p1_id: pole(M - 3), p2_id: pole(M - 1), p_id: pole(M - 2) });
     }
   }
+  for (const [id, k] of Object.entries(doc.cons)) {
+    if (!splCon(doc, k) || !curves[k.refs[1]]) continue;
+    const bs = curves[k.refs[1]], pid = splPoint(k), b_id = `__bs:${k.refs[1]}`, name = `__u:${id}`;
+    const u = initialParam(bs, k, P(pid), pos?.u?.[id]);
+    out.push({ type: 'param', name, value: u, fixed: false });
+    out.push({ id: k.t === 'PONS' ? id : `${id}_s`, type: 'point_on_bspline', p_id: pid, b_id, pointparam: name });
+    if (k.t === 'PONS') continue;
+    // tangencia: T sobre la otra curva y angulo 0 o 180 entre las tangentes (el que este mas cerca ahora)
+    const tg = bsplineTangent(bs, u), o = k.refs[0];
+    let dir;
+    if (k.t === 'TANLS') {
+      const l = doc.lines[o], A = P(l.a), B = P(l.b);
+      dir = { x: B.x - A.x, y: B.y - A.y };
+      out.push({ id: `${id}_p`, type: 'point_on_line_pl', p_id: pid, l_id: o });
+    } else {
+      const arc = o in doc.arcs, C = P((arc ? doc.arcs : doc.circles)[o].c), T = P(pid);
+      dir = { x: -(T.y - C.y), y: T.x - C.x }; // tangente antihoraria del circulo en T
+      out.push(arc ? { id: `${id}_p`, type: 'point_on_arc', p_id: pid, a_id: o } : { id: `${id}_p`, type: 'point_on_circle', p_id: pid, c_id: o });
+    }
+    out.push({ id, type: 'angle_via_point_and_param', crv1_id: b_id, crv2_id: o, p_id: pid, cparam: name, angle: tg.x * dir.x + tg.y * dir.y >= 0 ? 0 : Math.PI });
+  }
   return out;
+}
+
+// Lleva el parametro de cada punto sobre spline a su dominio. Devuelve los que el solver dejo fuera (habia
+// extrapolado la curva): { id: parametro corregido }, para repetir la resolucion desde ahi.
+function fixParams(doc, res, memo) {
+  const redo = {};
+  for (const [id, k] of Object.entries(doc.cons)) {
+    const u = res.params[`__u:${id}`];
+    if (!splCon(doc, k) || !Number.isFinite(u)) continue;
+    const sp = doc.splines[k.refs[1]], ts = tsFor(doc, k.refs[1], memo);
+    const t0 = ts[0], t1 = ts[ts.length - 1], T = t1 - t0;
+    if (isClosed(sp)) {
+      const w = t0 + ((((u - t0) % T) + T) % T);
+      if (u < t0 || u >= t1 + (ts[1] - t0)) redo[id] = w; // fuera del tramo que el solver evalua bien
+      res.params[`__u:${id}`] = w;
+    } else if (u < t0 - 1e-9 || u > t1 + 1e-9) {
+      redo[id] = Math.min(t1, Math.max(t0, u));
+    }
+  }
+  return redo;
 }
 
 // Distancia maxima de un punto de contacto a su spline (para validar la convergencia).
 function splineResidual(doc, res) {
   let worst = 0;
-  for (const k of Object.values(doc.cons)) {
-    if (!SPL.has(k.t) || k.ref || !doc.splines?.[k.refs[1]]) continue;
-    const sp = doc.splines[k.refs[1]];
-    const P = (id) => res.pts[id] || doc.pts[id];
-    const f = closestOnPolyline(splineSamples(sp.pts.map(P), sp.closed, 32), P(k.t === 'PONS' ? k.refs[0] : k.refs[2]));
-    if (f) worst = Math.max(worst, f.d);
+  const memo = res.ts || {};
+  const P = (id) => res.pts[id] || doc.pts[id];
+  for (const [id, k] of Object.entries(doc.cons)) {
+    if (!splCon(doc, k)) continue;
+    // el punto debe estar sobre la curva en el parametro que encontro el solver (dentro del dominio)
+    const bs = curveOf(doc, k.refs[1], P, memo), u = res.params?.[`__u:${id}`];
+    if (!bs || !Number.isFinite(u)) continue;
+    const e = bsplinePoint(bs, u), q = P(splPoint(k));
+    worst = Math.max(worst, Math.hypot(e.x - q.x, e.y - q.y));
   }
   return worst;
 }
 
-// Arrastrar un punto ligado a un spline (PONS) deforma el spline: los dos puntos de control del tramo
-// donde cae el punto se desplazan (repartiendo el desplazamiento segun su cercania) para que la curva
-// pase por el destino. Devuelve las posiciones iniciales para la resolucion, o null si no aplica.
-function splineDragPos(doc, live) {
-  let pos = null;
-  for (const t of live) {
-    const P0 = doc.pts[t.id];
-    for (const k of Object.values(doc.cons)) {
-      if (k.t !== 'PONS' || k.ref || k.refs[0] !== t.id) continue;
-      const sp = doc.splines?.[k.refs[1]];
-      if (!sp || sp.pts.includes(t.id) || sp.pts.length < 2) continue;
-      const per = 32, n = sp.pts.length;
-      const f = closestOnPolyline(splineSamples(sp.pts.map((id) => pos?.pts?.[id] || doc.pts[id]), sp.closed, per), P0);
-      if (!f) continue;
-      const span = Math.floor(f.i / per), us = ((f.i % per) + f.u) / per;
-      const ends = [[sp.pts[span % n], 1 - us], [sp.pts[(span + 1) % n], us]].filter(([id]) => !doc.pts[id].fixed);
-      const den = ends.reduce((a, [, w]) => a + w * w, 0);
-      if (den < 1e-9) continue;
-      const dx = t.x - P0.x, dy = t.y - P0.y;
-      pos ||= { pts: {} };
-      for (const [id, w] of ends) {
-        const cur = pos.pts[id] || doc.pts[id];
-        pos.pts[id] = { x: cur.x + (w / den) * dx, y: cur.y + (w / den) * dy };
-      }
-    }
-  }
-  return pos;
-}
-
-// Una o varias pasadas del solver (varias si hay relaciones con splines).
+// Una pasada del solver; con splines se repite si un punto de contacto se salio del dominio de la curva
+// (el solver habia extrapolado) para resolver de nuevo desde el parametro corregido.
 function solveLoop(doc, pos, extra) {
   const spl = hasSpl(doc);
+  const memo = {};
   let cur = pos, res = null;
-  for (let i = 0; i < (spl ? 30 : 1); i++) {
-    res = runSolve(build(doc, cur, spl ? [...(extra || []), ...splinePrims(doc, cur)] : extra));
+  for (let i = 0; i < (spl ? 4 : 1); i++) {
+    res = runSolve(build(doc, cur, [...(spl ? nativeSplinePrims(doc, cur, memo) : []), ...(extra || [])]));
+    res.ts = memo;
     if (!spl) break;
-    let d = 0;
-    for (const [id, q] of Object.entries(res.pts)) {
-      const o = cur?.pts?.[id] || doc.pts[id];
-      if (o) d = Math.max(d, Math.hypot(q.x - o.x, q.y - o.y));
-    }
-    cur = { pts: res.pts, circles: res.circles, arcs: res.arcs };
-    if (d < 1e-7) break;
+    const redo = fixParams(doc, res, memo);
+    if (!Object.keys(redo).length) break;
+    const u = {};
+    for (const [name, v] of Object.entries(res.params)) if (name.startsWith('__u:')) u[name.slice(4)] = v;
+    cur = { pts: res.pts, circles: res.circles, arcs: res.arcs, u: { ...u, ...redo } };
   }
   return res;
 }
@@ -210,9 +224,13 @@ function build(doc, pos, extra) {
 
 function runSolve(prims) {
   g.clear_data();
-  g.push_primitives_and_params(prims);
+  const names = [];
+  for (const p of prims) if (p.type === 'param') { g.push_sketch_param(p.name, p.value, !!p.fixed); names.push(p.name); }
+  g.push_primitives_and_params(prims.filter((p) => p.type !== 'param'));
   const status = g.solve();
   g.apply_solution();
+  const params = {};
+  for (const n of names) params[n] = g.get_sketch_param_value(n);
   const conflicts = g.has_gcs_conflicting_constraints() ? g.get_gcs_conflicting_constraints() : [];
   const pts = {}, circles = {}, arcs = {};
   for (const p of g.sketch_index.get_primitives()) {
@@ -220,7 +238,7 @@ function runSolve(prims) {
     else if (p.type === 'circle') circles[p.id] = p.radius;
     else if (p.type === 'arc') arcs[p.id] = p.radius;
   }
-  return { status, conflicts, pts, circles, arcs };
+  return { status, conflicts, pts, circles, arcs, params };
 }
 
 function commit(doc, res) {
@@ -229,6 +247,8 @@ function commit(doc, res) {
   }
   for (const [id, r] of Object.entries(res.circles)) if (doc.circles[id]) doc.circles[id].r = r;
   for (const [id, r] of Object.entries(res.arcs)) if (doc.arcs[id]) doc.arcs[id].r = Math.abs(r);
+  for (const [name, v] of Object.entries(res.params || {})) if (name.startsWith('__u:') && doc.cons[name.slice(4)]) doc.cons[name.slice(4)].u = v;
+  for (const [sid, ts] of Object.entries(res.ts || {})) if (doc.splines[sid]) doc.splines[sid].ts = ts;
 }
 
 // Resuelve el documento. targets (opcional): [{id,x,y}] puntos que el usuario arrastra;
@@ -244,13 +264,35 @@ export function solve(doc, targets = []) {
       extra.push({ id: `__t${i}`, type: 'point', x: t.x, y: t.y, fixed: true });
       extra.push({ id: `__d${i}`, type: 'p2p_distance', p1_id: t.id, p2_id: `__t${i}`, distance: 0, scale: 0.02 });
     });
-    const r1 = solveLoop(doc, splineDragPos(doc, live), extra);
-    pos = { pts: r1.pts, circles: r1.circles, arcs: r1.arcs };
+    const r1 = solveLoop(doc, null, extra);
+    const u = {};
+    for (const [name, v] of Object.entries(r1.params || {})) if (name.startsWith('__u:')) u[name.slice(4)] = v;
+    pos = { pts: r1.pts, circles: r1.circles, arcs: r1.arcs, u };
   }
   const res = solveLoop(doc, pos, null);
   const ok = (res.status === 0 || res.status === 1) && res.conflicts.length === 0 && (!hasSpl(doc) || splineResidual(doc, res) < 1e-3);
   if (ok) commit(doc, res);
   return { ok, conflicts: res.conflicts, status: res.status };
+}
+
+// Tras mover los puntos de un spline con relaciones, sus parametros (fijos mientras se resuelve) pueden
+// quedar desproporcionados respecto de las distancias reales y la curva ondula. Esto los recalcula con la
+// longitud de cuerda actual y vuelve a resolver; si no converge, deja los anteriores. Devuelve true si cambio.
+export function reparamSplines(doc) {
+  const old = {}, oldU = {};
+  for (const [sid, sp] of Object.entries(doc.splines || {})) {
+    const closed = isClosed(sp);
+    if (!validParams(sp.ts, sp.pts.length, closed)) continue;
+    const ts = chordParams(sp.pts.map((id) => doc.pts[id]), closed);
+    if (ts.every((v, i) => Math.abs(v - sp.ts[i]) < 1e-3)) continue;
+    old[sid] = sp.ts; sp.ts = ts;
+  }
+  if (!Object.keys(old).length) return false;
+  for (const [id, k] of Object.entries(doc.cons)) if (SPL.has(k.t) && old[k.refs[1]] && 'u' in k) { oldU[id] = k.u; delete k.u; }
+  if (solve(doc, []).ok) return true;
+  for (const [sid, ts] of Object.entries(old)) doc.splines[sid].ts = ts;
+  for (const [id, u] of Object.entries(oldU)) doc.cons[id].u = u;
+  return false;
 }
 
 export { conRefs };

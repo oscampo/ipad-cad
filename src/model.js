@@ -67,8 +67,20 @@ export function addSpline(doc, ptIds, style, closed = false) {
 }
 
 // Poligonal muestreada del spline (coordenadas del modelo).
+// sp.ts (parametros de los puntos) solo existe en los splines con relaciones: asi la curva que se dibuja es
+// exactamente la que resolvio el solver. Sin relaciones se recalculan con la longitud de cuerda.
+const polyCache = new Map();
 export function splinePolyline(doc, sp, per = 16) {
-  return splineSamples(sp.pts.map((p) => doc.pts[p]), sp.closed, per);
+  const P = sp.pts.map((p) => doc.pts[p]);
+  let key = `${per}|${sp.closed ? 1 : 0}|${sp.ts ? sp.ts.join(',') : ''}`;
+  for (const q of P) key += `|${q.x},${q.y}`;
+  let hit = polyCache.get(key);
+  if (!hit) {
+    hit = splineSamples(P, sp.closed, per, sp.ts);
+    if (polyCache.size > 300) polyCache.clear();
+    polyCache.set(key, hit);
+  }
+  return hit;
 }
 
 // Texto con punto de insercion (un punto real del documento, asi admite restricciones).
@@ -115,6 +127,10 @@ export function cleanup(doc) {
       const keep = sp.pts.filter((p) => p in doc.pts);
       if (keep.length !== sp.pts.length) { sp.pts = keep; changed = true; }
       if (sp.pts.length < 2) { delete doc.splines[id]; changed = true; }
+    }
+    // un spline sin relaciones no conserva parametros fijos
+    for (const [id, sp] of Object.entries(doc.splines || {})) {
+      if (sp.ts && !Object.values(doc.cons).some((k) => (k.t === 'PONS' || k.t === 'TANLS' || k.t === 'TANCS') && k.refs[1] === id)) delete sp.ts;
     }
     for (const id of Object.keys(doc.traces || {})) if (!(id in doc.pts)) { delete doc.traces[id]; changed = true; }
     for (const [id, t] of Object.entries(doc.texts || {})) {

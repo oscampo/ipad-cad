@@ -1,4 +1,5 @@
 // Geometria 2D pura (sin DOM), reutilizable en pruebas de Node.
+import { bsplineThrough, bsplineSamples, bsplineBezier } from './bspline.js';
 export const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 
 export function closestOnSeg(p, a, b) {
@@ -113,35 +114,16 @@ export function arcThrough3(A, M, B) {
 }
 
 // ---------------------------------------------------------------- splines
-// Curva que pasa por todos los puntos P (Catmull-Rom centripeta: sin bucles ni picos).
-// closed: curva cerrada. per: muestras por tramo. Devuelve la poligonal muestreada.
-export function splineSamples(P, closed = false, per = 16) {
+// Curva que pasa por todos los puntos P: B-spline cubico interpolante (ver bspline.js), el mismo que
+// resuelve el solver. closed: curva cerrada. per: muestras por tramo. ts: parametros de los puntos (si no
+// se dan o no corresponden, se calculan con la longitud de cuerda). Devuelve la poligonal muestreada.
+export function splineSamples(P, closed = false, per = 16, ts = null) {
   const n = P.length;
   if (n < 2) return P.map((p) => ({ x: p.x, y: p.y }));
-  if (n === 2 && !closed) return [{ x: P[0].x, y: P[0].y }, { x: P[1].x, y: P[1].y }];
-  const refl = (a, b) => ({ x: 2 * a.x - b.x, y: 2 * a.y - b.y });
-  const at = (i) => {
-    if (closed) return P[((i % n) + n) % n];
-    if (i < 0) return refl(P[0], P[1]);
-    if (i >= n) return refl(P[n - 1], P[n - 2]);
-    return P[i];
-  };
-  const segs = closed ? n : n - 1;
-  const out = [{ x: P[0].x, y: P[0].y }];
-  const knot = (a, b) => Math.sqrt(Math.max(Math.hypot(b.x - a.x, b.y - a.y), 1e-9));
-  const lerp = (a, b, k) => ({ x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k });
-  for (let i = 0; i < segs; i++) {
-    const p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2);
-    const t0 = 0, t1 = t0 + knot(p0, p1), t2 = t1 + knot(p1, p2), t3 = t2 + knot(p2, p3);
-    for (let k = 1; k <= per; k++) {
-      if (k === per) { out.push({ x: p2.x, y: p2.y }); break; }
-      const t = t1 + ((t2 - t1) * k) / per;
-      const a1 = lerp(p0, p1, (t - t0) / (t1 - t0)), a2 = lerp(p1, p2, (t - t1) / (t2 - t1)), a3 = lerp(p2, p3, (t - t2) / (t3 - t2));
-      const b1 = lerp(a1, a2, (t - t0) / (t2 - t0)), b2 = lerp(a2, a3, (t - t1) / (t3 - t1));
-      out.push(lerp(b1, b2, (t - t1) / (t2 - t1)));
-    }
-  }
-  return out;
+  if (n === 2) return closed ? [{ x: P[0].x, y: P[0].y }, { x: P[1].x, y: P[1].y }, { x: P[0].x, y: P[0].y }] : [{ x: P[0].x, y: P[0].y }, { x: P[1].x, y: P[1].y }];
+  const bs = bsplineThrough(P, closed, ts);
+  if (!bs) return P.map((p) => ({ x: p.x, y: p.y }));
+  return bsplineSamples(bs, per);
 }
 
 // Longitud acumulada de una poligonal.
@@ -170,38 +152,16 @@ export function resamplePolyline(P, n) {
   return out;
 }
 
-// El mismo spline que splineSamples, pero como tramos de Bezier cubica exactos
-// (p0, c1, c2, p1): cada tramo de una Catmull-Rom centripeta es un polinomio cubico.
-// Sirve para exportar curvas suaves (SVG para corte laser) sin facetas.
-export function splineBezier(P, closed = false) {
+// El mismo spline que splineSamples, pero como tramos de Bezier cubica exactos (p0, c1, c2, p1): cada
+// tramo del B-spline es un polinomio cubico. Sirve para exportar curvas suaves (SVG para corte laser).
+export function splineBezier(P, closed = false, ts = null) {
   const n = P.length;
   if (n < 2) return [];
   const lerp = (a, b, k) => ({ x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k });
-  if (n === 2 && !closed) return [{ p0: P[0], c1: lerp(P[0], P[1], 1 / 3), c2: lerp(P[0], P[1], 2 / 3), p1: P[1] }];
-  const refl = (a, b) => ({ x: 2 * a.x - b.x, y: 2 * a.y - b.y });
-  const at = (i) => {
-    if (closed) return P[((i % n) + n) % n];
-    if (i < 0) return refl(P[0], P[1]);
-    if (i >= n) return refl(P[n - 1], P[n - 2]);
-    return P[i];
-  };
-  const knot = (a, b) => Math.sqrt(Math.max(Math.hypot(b.x - a.x, b.y - a.y), 1e-9));
-  const segs = closed ? n : n - 1, out = [];
-  for (let i = 0; i < segs; i++) {
-    const p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2);
-    const t1 = knot(p0, p1), t2 = t1 + knot(p1, p2), t3 = t2 + knot(p2, p3), t0 = 0, dt = t2 - t1;
-    const m = (a, b, ta, tb) => ({ x: (b.x - a.x) / (tb - ta), y: (b.y - a.y) / (tb - ta) });
-    const a01 = m(p0, p1, t0, t1), a02 = m(p0, p2, t0, t2), a12 = m(p1, p2, t1, t2);
-    const a13 = m(p1, p3, t1, t3), a23 = m(p2, p3, t2, t3);
-    const m1 = { x: a01.x - a02.x + a12.x, y: a01.y - a02.y + a12.y };
-    const m2 = { x: a12.x - a13.x + a23.x, y: a12.y - a13.y + a23.y };
-    out.push({
-      p0: p1, p1: p2,
-      c1: { x: p1.x + (m1.x * dt) / 3, y: p1.y + (m1.y * dt) / 3 },
-      c2: { x: p2.x - (m2.x * dt) / 3, y: p2.y - (m2.y * dt) / 3 },
-    });
-  }
-  return out;
+  const seg = (a, b) => ({ p0: a, c1: lerp(a, b, 1 / 3), c2: lerp(a, b, 2 / 3), p1: b });
+  if (n === 2) return closed ? [seg(P[0], P[1]), seg(P[1], P[0])] : [seg(P[0], P[1])];
+  const bs = bsplineThrough(P, closed, ts);
+  return bs ? bsplineBezier(bs) : [];
 }
 
 // ---- consultas sobre poligonales (para relaciones con splines) ----
