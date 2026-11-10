@@ -1,12 +1,14 @@
 import wasmUrl from '@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url';
 import { initSolver, solve } from './solver.js';
 import {
-  newDoc, addPoint, addLine, addCircle, addCon, cleanup, deleteItems, clone, hatchLoops,
-  allLtypes, PALETTE,
+  newDoc, addPoint, addLine, addCircle, addArc, addCon, cleanup, deleteItems, clone, hatchLoops,
+  allLtypes, PALETTE, arcOf,
 } from './model.js';
 import {
   dist, closestOnSeg, lineLine, lineCircle, circleCircle, signedAngle, dashFromPattern, parsePattern,
+  arcThrough3, inSweep, TAU,
 } from './geom.js';
+import { splitElement } from './split.js';
 import { exportSVG, exportDXF } from './export.js';
 import { iconSvg } from './icons.js';
 
@@ -68,7 +70,7 @@ function redo() {
   pending = null; sel = sel.filter(exists); afterChange();
 }
 function exists(s) {
-  return s.k === 'pt' ? s.id in doc.pts : s.k === 'ln' ? s.id in doc.lines : s.k === 'ci' ? s.id in doc.circles : s.k === 'ha' ? s.id in doc.hatches : s.id in doc.cons;
+  return s.k === 'pt' ? s.id in doc.pts : s.k === 'ln' ? s.id in doc.lines : s.k === 'ci' ? s.id in doc.circles : s.k === 'ar' ? s.id in doc.arcs : s.k === 'ha' ? s.id in doc.hatches : s.id in doc.cons;
 }
 let saveTimer = 0;
 function persist() {
@@ -81,25 +83,27 @@ function afterChange() { updateButtons(); updateEnabled(); syncPanel(); persist(
 
 // Un boton de restriccion solo se activa si la seleccion actual le sirve (mismas reglas que applyCon).
 function updateEnabled() {
-  const n = { pt: 0, ln: 0, ci: 0 };
-  for (const s of sel) if (s.k in n) n[s.k]++;
-  const { pt, ln, ci } = n;
+  const n = { pt: 0, ln: 0, ci: 0, ar: 0 };
+  for (const x of sel) if (x.k in n) n[x.k]++;
+  const { pt, ln } = n;
+  const crv = n.ci + n.ar;
   const rules = {
     H: ln >= 1 || pt >= 2, V: ln >= 1 || pt >= 2,
-    PAR: ln >= 2, PERP: ln >= 2,
+    PAR: ln >= 2, PERP: ln >= 2, COL: ln >= 2,
     COI: pt >= 2,
     MID: pt === 1 && ln === 1,
-    EQ: ln >= 2 || ci >= 2,
-    TAN: (ln === 1 && ci === 1) || (ci === 2 && !ln),
-    ONC: pt >= 1 && (ln === 1 || ci === 1) && !(ln && ci),
-    FIX: pt + ln + ci > 0,
+    EQ: (ln >= 2 && !crv) || (crv >= 2 && !ln),
+    TAN: (ln === 1 && crv === 1) || (crv === 2 && !ln),
+    ONC: pt >= 1 && ((ln === 1 && !crv) || (crv === 1 && !ln)),
+    FIX: pt + ln + crv > 0,
     DIM: (pt === 2 && !ln) || (ln === 1 && !pt) || (pt === 1 && ln === 1),
     ANG: ln === 2,
-    RAD: ci >= 1,
+    RAD: crv >= 1,
   };
   document.querySelectorAll('[data-con]').forEach((b) => { b.disabled = !rules[b.dataset.con]; });
-  $('mkint').disabled = ln + ci !== 2;
-  $('mkhatch').disabled = ln + ci < 1;
+  $('mkint').disabled = ln + crv !== 2;
+  $('mksplit').disabled = !(ln + crv === 1 && pt >= 1);
+  $('mkhatch').disabled = ln + crv < 1;
   $('del').disabled = !sel.length;
 }
 
@@ -158,6 +162,16 @@ function snapAt(sx, sy, o = {}) {
     const d = Math.abs(dc - ci.r) * view.s;
     if (d < bd) { bd = d; best = { type: 'ci', id, x: cp.x + ((m.x - cp.x) / dc) * ci.r, y: cp.y + ((m.y - cp.y) / dc) * ci.r }; }
   }
+  for (const [id, ar] of Object.entries(doc.arcs)) {
+    const cp = doc.pts[ar.c];
+    const dc = dist(cp, m);
+    if (dc < 1e-9) continue;
+    const d = Math.abs(dc - ar.r) * view.s;
+    const g = arcOf(doc, ar);
+    if (d < bd && inSweep(cp, g.a0, g.sweep, m, 6 / (ar.r * view.s))) {
+      bd = d; best = { type: 'ar', id, x: cp.x + ((m.x - cp.x) / dc) * ar.r, y: cp.y + ((m.y - cp.y) / dc) * ar.r };
+    }
+  }
   if (best) return best;
   if (opts.snap) { const g = gridStep(); return { type: 'free', x: Math.round(m.x / g) * g, y: Math.round(m.y / g) * g }; }
   return { type: 'free', x: m.x, y: m.y };
@@ -181,6 +195,12 @@ function hitTest(sx, sy) {
   for (const [id, ci] of Object.entries(doc.circles)) {
     const d = Math.abs(dist(doc.pts[ci.c], m) - ci.r) * view.s;
     if (d < bd) { bd = d; best = { k: 'ci', id }; }
+  }
+  for (const [id, ar] of Object.entries(doc.arcs)) {
+    const cp = doc.pts[ar.c];
+    const d = Math.abs(dist(cp, m) - ar.r) * view.s;
+    const g = arcOf(doc, ar);
+    if (d < bd && inSweep(cp, g.a0, g.sweep, m, 8 / Math.max(ar.r * view.s, 1))) { bd = d; best = { k: 'ar', id }; }
   }
   if (best) return best;
   for (const [id, h] of Object.entries(doc.hatches)) {
@@ -253,6 +273,14 @@ export function render(c, W, H, v, o) {
     if (o.ui && isSel('ci', id)) { c.setLineDash([]); c.strokeStyle = theme.sel + '88'; c.lineWidth = (ci.w + 6) * dpr; c.beginPath(); c.arc(s.x * dpr, s.y * dpr, ci.r * v.s * dpr, 0, 7); c.stroke(); }
     applyStroke(c, ci.color, ci.w, ci.ltype, o);
     c.beginPath(); c.arc(s.x * dpr, s.y * dpr, ci.r * v.s * dpr, 0, Math.PI * 2); c.stroke();
+  }
+  for (const [id, ar] of Object.entries(doc.arcs)) {
+    const sc = toScreen(doc.pts[ar.c]);
+    const { a0, sweep } = arcOf(doc, ar);
+    const trace = () => { c.beginPath(); c.arc(sc.x * dpr, sc.y * dpr, ar.r * v.s * dpr, -a0, -(a0 + sweep), true); };
+    if (o.ui && isSel('ar', id)) { c.setLineDash([]); c.strokeStyle = theme.sel + '88'; c.lineWidth = (ar.w + 6) * dpr; trace(); c.stroke(); }
+    applyStroke(c, ar.color, ar.w, ar.ltype, o);
+    trace(); c.stroke();
   }
   for (const [id, l] of Object.entries(doc.lines)) {
     const a = toScreen(doc.pts[l.a]), b = toScreen(doc.pts[l.b]);
@@ -346,15 +374,17 @@ function midOf(refs) {
     if (r in doc.pts) pts.push(doc.pts[r]);
     else if (r in doc.lines) pts.push(doc.pts[doc.lines[r].a], doc.pts[doc.lines[r].b]);
     else if (r in doc.circles) pts.push(doc.pts[doc.circles[r].c]);
+    else if (r in doc.arcs) pts.push(doc.pts[doc.arcs[r].c]);
   }
   if (!pts.length) return null;
   return { x: pts.reduce((s, p) => s + p.x, 0) / pts.length, y: pts.reduce((s, p) => s + p.y, 0) / pts.length };
 }
 
-const GLYPH = { H: 'H', V: 'V', PAR: '∥', PERP: '⟂', EQL: '=', EQR: '=', MID: 'M', TANLC: 'T', TANCC: 'T' };
+const GLYPH = { H: 'H', V: 'V', PAR: '∥', PERP: '⟂', EQL: '=', EQR: '=', MID: 'M', TANLC: 'T', TANCC: 'T', COL: 'Col' };
 function drawConstraints(c, o) {
   const used = {};
   for (const [id, k] of Object.entries(doc.cons)) {
+    if (k.hidden) continue;
     const chosen = isSel('co', id);
     const col = chosen ? theme.sel : theme.accent;
     let m;
@@ -378,7 +408,7 @@ function drawConstraints(c, o) {
       const l = doc.lines[k.refs[0]]; if (!l) continue;
       const s = toScreen(midOf(k.refs)); label(c, fmt(k.v) + '°', s.x + 14, s.y - 14, id, col);
     } else if (k.t === 'RAD') {
-      const ci = doc.circles[k.refs[0]]; if (!ci) continue;
+      const ci = doc.circles[k.refs[0]] || doc.arcs[k.refs[0]]; if (!ci) continue;
       const p = doc.pts[ci.c], s = toScreen({ x: p.x + ci.r * 0.7071, y: p.y + ci.r * 0.7071 });
       label(c, 'R' + fmt(k.v), s.x + 10, s.y - 10, id, col);
     } else if (GLYPH[k.t] && (m = midOf(k.refs))) {
@@ -406,6 +436,43 @@ function drawPreview(c) {
       c.beginPath(); c.moveTo(a.x * dpr, a.y * dpr); c.lineTo(sp.x * dpr, sp.y * dpr); c.stroke();
       label(c, fmt(dist(doc.pts[pending.start], s)), (a.x + sp.x) / 2, (a.y + sp.y) / 2 - 14, null, theme.accent);
     }
+    if (tool === 'arcc' && pending?.center) {
+      const cc = toScreen(doc.pts[pending.center]);
+      if (!pending.start) {
+        const r = dist(cc, sp);
+        c.setLineDash([6 * dpr, 4 * dpr]); c.beginPath(); c.arc(cc.x * dpr, cc.y * dpr, r * dpr, 0, 7); c.stroke();
+        label(c, 'R' + fmt(r / view.s), cc.x, cc.y - r - 14, null, theme.accent);
+      } else {
+        const C = doc.pts[pending.center], S = doc.pts[pending.start];
+        const a0 = Math.atan2(S.y - C.y, S.x - C.x);
+        const aE = Math.atan2(s.y - C.y, s.x - C.x);
+        let sw = (((aE - a0) % TAU) + TAU) % TAU;
+        if (sw < 1e-4) sw = TAU;
+        c.setLineDash([6 * dpr, 4 * dpr]); c.beginPath();
+        c.arc(cc.x * dpr, cc.y * dpr, dist(C, S) * view.s * dpr, -a0, -(a0 + sw), true); c.stroke();
+        label(c, fmt((sw * 180) / Math.PI) + '°', cc.x, cc.y - dist(C, S) * view.s - 14, null, theme.accent);
+      }
+    }
+    if (tool === 'arc3' && pending?.a) {
+      const A = doc.pts[pending.a];
+      c.setLineDash([6 * dpr, 4 * dpr]); c.beginPath();
+      if (!pending.m) {
+        const a = toScreen(A); c.moveTo(a.x * dpr, a.y * dpr); c.lineTo(sp.x * dpr, sp.y * dpr); c.stroke();
+      } else {
+        const g3 = arcThrough3(A, pending.m, s);
+        if (g3) {
+          const cc = toScreen(g3.c);
+          const S0 = g3.startIsA ? A : s, E0 = g3.startIsA ? s : A;
+          const a0 = Math.atan2(S0.y - g3.c.y, S0.x - g3.c.x), aE = Math.atan2(E0.y - g3.c.y, E0.x - g3.c.x);
+          let sw = (((aE - a0) % TAU) + TAU) % TAU;
+          if (sw < 1e-4) sw = TAU;
+          c.arc(cc.x * dpr, cc.y * dpr, g3.r * view.s * dpr, -a0, -(a0 + sw), true); c.stroke();
+          label(c, 'R' + fmt(g3.r), cc.x, cc.y - g3.r * view.s - 14, null, theme.accent);
+        }
+        const m = toScreen(pending.m);
+        c.setLineDash([]); c.beginPath(); c.arc(m.x * dpr, m.y * dpr, 4 * dpr, 0, 7); c.stroke();
+      }
+    }
     if (tool === 'circle' && pending?.center) {
       const cc = toScreen(doc.pts[pending.center]);
       const r = dist(cc, sp);
@@ -424,7 +491,7 @@ function pointFrom(s) {
   if (s.type === 'pt') return s.id;
   const id = addPoint(doc, s.x, s.y, true);
   if (s.type === 'ln') addCon(doc, { t: 'PONL', refs: [id, s.id] });
-  if (s.type === 'ci') addCon(doc, { t: 'PONC', refs: [id, s.id] });
+  if (s.type === 'ci' || s.type === 'ar') addCon(doc, { t: 'PONC', refs: [id, s.id] });
   return id;
 }
 
@@ -522,12 +589,13 @@ function toolDown(p) {
   if (tool === 'select') {
     const h = hitTest(p.x, p.y);
     drag = { p0: p, hit: h, started: false };
-    if (h && (h.k === 'pt' || h.k === 'ln' || h.k === 'ci')) {
+    if (h && (h.k === 'pt' || h.k === 'ln' || h.k === 'ci' || h.k === 'ar')) {
       const m = toModel(p.x, p.y);
       drag.m0 = m;
       drag.orig = h.k === 'pt' ? { [h.id]: { ...doc.pts[h.id] } }
         : h.k === 'ln' ? { [doc.lines[h.id].a]: { ...doc.pts[doc.lines[h.id].a] }, [doc.lines[h.id].b]: { ...doc.pts[doc.lines[h.id].b] } } : {};
       if (h.k === 'ci') drag.r0 = doc.circles[h.id].r;
+      if (h.k === 'ar') drag.r0 = doc.arcs[h.id].r;
     }
   } else {
     drag = { p0: p, moved: false };
@@ -544,8 +612,8 @@ function toolMove(p) {
   }
   const m = toModel(p.x, p.y);
   const h = drag.hit;
-  if (h.k === 'ci') {
-    const ci = doc.circles[h.id], c = doc.pts[ci.c];
+  if (h.k === 'ci' || h.k === 'ar') {
+    const ci = h.k === 'ci' ? doc.circles[h.id] : doc.arcs[h.id], c = doc.pts[ci.c];
     const r0 = ci.r; ci.r = Math.max(0.01, dist(c, m));
     const res = solve(doc, []);
     if (!res.ok) ci.r = r0;
@@ -596,9 +664,46 @@ function toolUp(p, q) {
     pending = null; finishEdit();
     return;
   }
+  if (tool === 'arcc') {
+    if (!pending) { pushUndo(); pending = { center: pointFrom(sUp) }; draw(); return; }
+    if (!pending.start) {
+      if (sUp.type === 'pt' && sUp.id === pending.center) return;
+      if (dist(doc.pts[pending.center], sUp) < 1e-6) { toast('Radio nulo'); return; }
+      pending.start = pointFrom(sUp); draw(); return;
+    }
+    const C = doc.pts[pending.center], S = doc.pts[pending.start];
+    const r = dist(C, S);
+    let tap = sUp;
+    if (tap.type !== 'pt') {
+      // el extremo se proyecta sobre la circunferencia (ignora imanes a otros elementos)
+      const d = dist(C, tap) || 1;
+      tap = { type: 'free', x: C.x + ((tap.x - C.x) / d) * r, y: C.y + ((tap.y - C.y) / d) * r };
+    }
+    pushUndo();
+    const endId = pointFrom(tap);
+    if (endId === pending.start) { rollback(); toast('El extremo no puede ser el inicio'); return; }
+    addArc(doc, pending.center, pending.start, endId, r, style());
+    pending = null; finishEdit();
+    return;
+  }
+  if (tool === 'arc3') {
+    if (!pending) { pushUndo(); pending = { a: pointFrom(sUp) }; draw(); return; }
+    if (!pending.m) {
+      if (sUp.type === 'pt' && sUp.id === pending.a) return;
+      pending.m = { x: sUp.x, y: sUp.y }; draw(); return;
+    }
+    pushUndo();
+    const bId = pointFrom(sUp);
+    const g3 = arcThrough3(doc.pts[pending.a], pending.m, doc.pts[bId]);
+    if (!g3 || bId === pending.a) { rollback(); toast('Los 3 puntos deben ser distintos y no colineales'); return; }
+    const cid = addPoint(doc, g3.c.x, g3.c.y, false);
+    addArc(doc, cid, g3.startIsA ? pending.a : bId, g3.startIsA ? bId : pending.a, g3.r, style());
+    pending = null; finishEdit();
+    return;
+  }
   if (tool === 'intersect') {
     const h = hitTest(p.x, p.y);
-    if (!h || (h.k !== 'ln' && h.k !== 'ci')) { toast('Toca una línea o un círculo'); return; }
+    if (!h || (h.k !== 'ln' && h.k !== 'ci' && h.k !== 'ar')) { toast('Toca una línea, un arco o un círculo'); return; }
     pending = pending || { items: [] };
     if (pending.items.some((i) => same(i, h))) return;
     pending.items.push(h);
@@ -618,14 +723,22 @@ function makeIntersections(items) {
   const [a, b] = items;
   const pts = [];
   const ln = (id) => { const l = doc.lines[id]; return [doc.pts[l.a], doc.pts[l.b]]; };
-  const ci = (id) => { const c = doc.circles[id]; return [doc.pts[c.c], c.r]; };
+  const ci = (id) => { const c = doc.circles[id] || doc.arcs[id]; return [doc.pts[c.c], c.r]; };
   if (a.k === 'ln' && b.k === 'ln') {
     const p = lineLine(...ln(a.id), ...ln(b.id));
     if (!p) { toast('Las rectas son paralelas'); afterChange(); return; }
     pts.push(p);
-  } else if (a.k === 'ci' && b.k === 'ci') pts.push(...circleCircle(...ci(a.id), ...ci(b.id)));
+  } else if (a.k !== 'ln' && b.k !== 'ln') pts.push(...circleCircle(...ci(a.id), ...ci(b.id)));
   else { const l = a.k === 'ln' ? a : b, c = a.k === 'ln' ? b : a; pts.push(...lineCircle(...ln(l.id), ...ci(c.id))); }
-  if (!pts.length) { toast('No se intersectan'); afterChange(); return; }
+  // en un arco solo valen los puntos dentro de su tramo
+  for (let i = pts.length - 1; i >= 0; i--) {
+    for (const it of items) {
+      if (it.k !== 'ar') continue;
+      const ar = doc.arcs[it.id], g = arcOf(doc, ar);
+      if (!inSweep(doc.pts[ar.c], g.a0, g.sweep, pts[i], 1e-3)) { pts.splice(i, 1); break; }
+    }
+  }
+  if (!pts.length) { toast('No se intersectan (dentro del tramo del arco)'); afterChange(); return; }
   pushUndo();
   const created = [];
   for (const q of pts) {
@@ -656,12 +769,15 @@ function askNumber(labelText, initial) {
 }
 
 function selBy() {
-  return { pts: sel.filter((s) => s.k === 'pt').map((s) => s.id), lns: sel.filter((s) => s.k === 'ln').map((s) => s.id), cis: sel.filter((s) => s.k === 'ci').map((s) => s.id) };
+  const ids = (k) => sel.filter((x) => x.k === k).map((x) => x.id);
+  const crv = sel.filter((x) => x.k === 'ci' || x.k === 'ar').map((x) => x.id);
+  return { pts: ids('pt'), lns: ids('ln'), cis: ids('ci'), ars: ids('ar'), crv };
 }
 const lineEnds = (id) => [doc.lines[id].a, doc.lines[id].b];
+const curveOf = (id) => doc.circles[id] || doc.arcs[id];
 
 async function applyCon(kind) {
-  const { pts, lns, cis } = selBy();
+  const { pts, lns, crv } = selBy();
   const list = [];
   const bad = (m) => { toast(m); return null; };
   switch (kind) {
@@ -674,33 +790,37 @@ async function applyCon(kind) {
       if (lns.length < 2) return bad('Selecciona 2 líneas');
       for (let i = 1; i < lns.length; i++) list.push({ t: kind, refs: [lns[0], lns[i]] });
       break;
+    case 'COL':
+      if (lns.length < 2) return bad('Selecciona 2 o más líneas');
+      for (let i = 1; i < lns.length; i++) list.push({ t: 'COL', refs: [lns[0], lns[i]] });
+      break;
     case 'EQ':
-      if (lns.length >= 2) for (let i = 1; i < lns.length; i++) list.push({ t: 'EQL', refs: [lns[0], lns[i]] });
-      else if (cis.length >= 2) for (let i = 1; i < cis.length; i++) list.push({ t: 'EQR', refs: [cis[0], cis[i]] });
-      else return bad('Selecciona 2 líneas o 2 círculos');
+      if (lns.length >= 2 && !crv.length) for (let i = 1; i < lns.length; i++) list.push({ t: 'EQL', refs: [lns[0], lns[i]] });
+      else if (crv.length >= 2 && !lns.length) for (let i = 1; i < crv.length; i++) list.push({ t: 'EQR', refs: [crv[0], crv[i]] });
+      else return bad('Selecciona 2 líneas, o 2 círculos/arcos');
       break;
     case 'COI':
       if (pts.length < 2) return bad('Selecciona 2 puntos');
       for (let i = 1; i < pts.length; i++) list.push({ t: 'COI', refs: [pts[0], pts[i]] });
       break;
     case 'ONC':
-      if (pts.length && lns.length === 1) pts.forEach((p) => list.push({ t: 'PONL', refs: [p, lns[0]] }));
-      else if (pts.length && cis.length === 1) pts.forEach((p) => list.push({ t: 'PONC', refs: [p, cis[0]] }));
-      else return bad('Selecciona punto(s) y una línea o un círculo');
+      if (pts.length && lns.length === 1 && !crv.length) pts.forEach((p) => list.push({ t: 'PONL', refs: [p, lns[0]] }));
+      else if (pts.length && crv.length === 1 && !lns.length) pts.forEach((p) => list.push({ t: 'PONC', refs: [p, crv[0]] }));
+      else return bad('Selecciona punto(s) y una línea, arco o círculo');
       break;
     case 'MID':
       if (pts.length !== 1 || lns.length !== 1) return bad('Selecciona 1 punto y 1 línea');
       list.push({ t: 'MID', refs: [...lineEnds(lns[0]), pts[0]] });
       break;
     case 'TAN':
-      if (lns.length === 1 && cis.length === 1) list.push({ t: 'TANLC', refs: [lns[0], cis[0]] });
-      else if (cis.length === 2 && !lns.length) list.push({ t: 'TANCC', refs: [cis[0], cis[1]] });
-      else return bad('Selecciona línea + círculo, o 2 círculos');
+      if (lns.length === 1 && crv.length === 1) list.push({ t: 'TANLC', refs: [lns[0], crv[0]] });
+      else if (crv.length === 2 && !lns.length) list.push({ t: 'TANCC', refs: [crv[0], crv[1]] });
+      else return bad('Selecciona línea + círculo/arco, o 2 círculos/arcos');
       break;
     case 'FIX': {
       const ids = new Set(pts);
       lns.forEach((l) => lineEnds(l).forEach((p) => ids.add(p)));
-      cis.forEach((c) => ids.add(doc.circles[c].c));
+      crv.forEach((c) => { const o = curveOf(c); ids.add(o.c); if (o.a) { ids.add(o.a); ids.add(o.b); } });
       if (!ids.size) return bad('Selecciona puntos o elementos a fijar');
       pushUndo();
       const allFixed = [...ids].every((i) => doc.pts[i].fixed);
@@ -732,15 +852,31 @@ async function applyCon(kind) {
       break;
     }
     case 'RAD': {
-      if (!cis.length) return bad('Selecciona un círculo');
-      const val = await askNumber('Radio', Math.round(doc.circles[cis[0]].r * 1000) / 1000);
+      if (!crv.length) return bad('Selecciona un círculo o arco');
+      const val = await askNumber('Radio', Math.round(curveOf(crv[0]).r * 1000) / 1000);
       if (val === null || val <= 0) return;
-      cis.forEach((c) => list.push({ t: 'RAD', refs: [c], v: val }));
+      crv.forEach((c) => list.push({ t: 'RAD', refs: [c], v: val }));
       break;
     }
     default: return;
   }
   commitCons(list);
+}
+
+const SPLIT_LOST = { EQL: 'igual longitud', ANG: 'ángulo', COL: 'colineal', DISTPL: 'distancia a recta' };
+function splitSelected() {
+  const els = sel.filter((x) => x.k === 'ln' || x.k === 'ci' || x.k === 'ar');
+  const pts = sel.filter((x) => x.k === 'pt').map((x) => x.id);
+  if (els.length !== 1 || !pts.length) { toast('Selecciona 1 segmento, arco o círculo y los puntos que lo dividen'); return; }
+  pushUndo();
+  const res = splitElement(doc, els[0].id, pts);
+  if (!res.ok) { rollback(); toast(res.msg); afterChange(); return; }
+  const r = solve(doc, []);
+  if (!r.ok) { rollback(); toast('No se pudo dividir: conflicto con las restricciones'); afterChange(); return; }
+  sel = res.pieces.map((id) => ({ k: els[0].k === 'ln' ? 'ln' : 'ar', id }));
+  const lost = [...new Set(res.dropped)].map((t) => SPLIT_LOST[t] || t);
+  toast(`Dividido en ${res.pieces.length}` + (lost.length ? `. No se pudo heredar: ${lost.join(', ')}` : ''));
+  afterChange();
 }
 
 function commitCons(list) {
@@ -769,7 +905,7 @@ function applyStyle(prop, value) {
   let touched = false;
   if (sel.length) pushUndo();
   for (const s of sel) {
-    const o = s.k === 'ln' ? doc.lines[s.id] : s.k === 'ci' ? doc.circles[s.id] : s.k === 'ha' && prop === 'color' ? doc.hatches[s.id] : null;
+    const o = s.k === 'ln' ? doc.lines[s.id] : s.k === 'ci' ? doc.circles[s.id] : s.k === 'ar' ? doc.arcs[s.id] : s.k === 'ha' && prop === 'color' ? doc.hatches[s.id] : null;
     if (o) { o[prop] = value; touched = true; }
   }
   if (sel.length && !touched) undoStack.pop();
@@ -807,7 +943,7 @@ function drawSample(canvas, pattern, color) {
 }
 
 function syncPanel() {
-  const first = sel.map((s) => (s.k === 'ln' ? doc.lines[s.id] : s.k === 'ci' ? doc.circles[s.id] : null)).find(Boolean);
+  const first = sel.map((s) => (s.k === 'ln' ? doc.lines[s.id] : s.k === 'ci' ? doc.circles[s.id] : s.k === 'ar' ? doc.arcs[s.id] : null)).find(Boolean);
   const hat = sel.map((s) => (s.k === 'ha' ? doc.hatches[s.id] : null)).find(Boolean);
   if (first) { cur.color = first.color; cur.ltype = first.ltype; cur.w = first.w; }
   else if (hat) cur.color = hat.color;
@@ -830,10 +966,10 @@ function updateHatchFromPanel() {
 }
 
 function createHatch() {
-  const ids = sel.filter((s) => s.k === 'ln' || s.k === 'ci').map((s) => s.id);
-  if (!ids.length) { toast('Selecciona las líneas/círculos que forman el contorno'); return; }
+  const ids = sel.filter((s) => s.k === 'ln' || s.k === 'ci' || s.k === 'ar').map((s) => s.id);
+  if (!ids.length) { toast('Selecciona las líneas, arcos o círculos que forman el contorno'); return; }
   const h = { ids, kind: $('hKind').value, angle: Number($('hAngle').value) || 0, spacing: Math.max(2, Number($('hSpace').value) || 8), alpha: Number($('hAlpha').value), color: cur.color };
-  if (!hatchLoops(doc, h).length) { toast('El contorno debe ser cerrado (≥3 líneas encadenadas) o un círculo'); return; }
+  if (!hatchLoops(doc, h).length) { toast('El contorno debe ser cerrado (líneas y arcos encadenados) o un círculo'); return; }
   pushUndo();
   const id = 'h' + (++doc.n);
   doc.hatches[id] = h;
@@ -847,7 +983,9 @@ const HINTS = {
   point: 'Toca para colocar un punto (sobre una línea o círculo queda restringido a él).',
   line: 'Toca inicio y fin (encadena); o arrastra un segmento. Esc/Seleccionar termina.',
   circle: 'Toca el centro y luego un punto del borde.',
-  intersect: 'Toca dos elementos (línea/círculo) para crear su punto de intersección.',
+  intersect: 'Toca dos elementos (línea, arco o círculo) para crear su punto de intersección.',
+  arcc: 'Arco por centro y extremos: toca el centro, el inicio y el fin (sentido antihorario).',
+  arc3: 'Arco por 3 puntos: toca el inicio, un punto intermedio y el fin.',
 };
 function updateStatus(p) {
   let txt = HINTS[tool];
@@ -856,6 +994,7 @@ function updateStatus(p) {
     if (s.k === 'pt') { const q = doc.pts[s.id]; txt = `Punto (${fmt(q.x)}, ${fmt(q.y)})${q.fixed ? ' fijo' : ''}`; }
     else if (s.k === 'ln') { const [a, b] = lineEnds(s.id).map((i) => doc.pts[i]); txt = `Línea: longitud ${fmt(dist(a, b))}, ángulo ${fmt((Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI)}°`; }
     else if (s.k === 'ci') txt = `Círculo: radio ${fmt(doc.circles[s.id].r)}`;
+    else if (s.k === 'ar') { const g = arcOf(doc, doc.arcs[s.id]); txt = `Arco: radio ${fmt(doc.arcs[s.id].r)}, ${fmt((g.sweep * 180) / Math.PI)}°`; }
     else if (s.k === 'ha') txt = 'Relleno seleccionado';
     else if (s.k === 'co') txt = 'Restricción/cota seleccionada';
   } else if (sel.length > 1) txt = `${sel.length} elementos seleccionados`;
@@ -874,6 +1013,7 @@ function contentBounds() {
   const xs = [], ys = [];
   for (const p of Object.values(doc.pts)) { xs.push(p.x); ys.push(p.y); }
   for (const c of Object.values(doc.circles)) { const p = doc.pts[c.c]; xs.push(p.x - c.r, p.x + c.r); ys.push(p.y - c.r, p.y + c.r); }
+  for (const a of Object.values(doc.arcs)) { const p = doc.pts[a.c]; xs.push(p.x - a.r, p.x + a.r); ys.push(p.y - a.r, p.y + a.r); }
   if (!xs.length) return null;
   return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
 }
@@ -888,7 +1028,7 @@ function fitView() {
 }
 function loadDoc(d) {
   if (!d || typeof d !== 'object' || !d.pts || !d.lines || !d.circles) throw new Error('Archivo no válido');
-  doc = { n: 0, cons: {}, hatches: {}, ltypes: {}, ...d };
+  doc = { n: 0, cons: {}, hatches: {}, ltypes: {}, arcs: {}, ...d };
   undoStack = []; redoStack = []; sel = []; pending = null;
 }
 function exportPNG() {
@@ -917,9 +1057,10 @@ function setTool(t) {
 }
 document.querySelectorAll('[data-tool]').forEach((b) => { b.onclick = () => setTool(b.dataset.tool); });
 document.querySelectorAll('[data-con]').forEach((b) => { b.onclick = () => applyCon(b.dataset.con); });
+$('mksplit').onclick = splitSelected;
 $('mkint').onclick = () => {
-  const it = sel.filter((s) => s.k === 'ln' || s.k === 'ci');
-  if (it.length !== 2) { toast('Selecciona 2 elementos (líneas/círculos)'); return; }
+  const it = sel.filter((s) => s.k === 'ln' || s.k === 'ci' || s.k === 'ar');
+  if (it.length !== 2) { toast('Selecciona 2 elementos (líneas, arcos o círculos)'); return; }
   makeIntersections(it);
 };
 $('undo').onclick = undo; $('redo').onclick = redo;
@@ -1000,7 +1141,7 @@ window.addEventListener('keydown', (e) => {
   else if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); }
   else if (k === 'escape') { if (pending) cancelPending(); else { sel = []; afterChange(); } }
   else if (k === 'delete' || k === 'backspace') $('del').click();
-  else if (!e.ctrlKey && !e.metaKey) { const m = { v: 'select', p: 'point', l: 'line', c: 'circle', i: 'intersect' }[k]; if (m) setTool(m); }
+  else if (!e.ctrlKey && !e.metaKey) { const m = { v: 'select', p: 'point', l: 'line', c: 'circle', i: 'intersect', a: 'arc3', r: 'arcc' }[k]; if (m) setTool(m); }
 });
 window.addEventListener('keyup', (e) => { if (e.code === 'Space') spaceDown = false; });
 window.addEventListener('resize', resize);

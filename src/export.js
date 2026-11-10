@@ -1,10 +1,11 @@
-import { hatchLoops, allLtypes } from './model.js';
+import { hatchLoops, allLtypes, arcOf } from './model.js';
 import { dashFromPattern } from './geom.js';
 
 function bounds(doc) {
   const xs = [], ys = [];
   for (const p of Object.values(doc.pts)) { xs.push(p.x); ys.push(p.y); }
   for (const c of Object.values(doc.circles)) { const p = doc.pts[c.c]; xs.push(p.x - c.r, p.x + c.r); ys.push(p.y - c.r, p.y + c.r); }
+  for (const a of Object.values(doc.arcs || {})) { const p = doc.pts[a.c]; xs.push(p.x - a.r, p.x + a.r); ys.push(p.y - a.r, p.y + a.r); }
   if (!xs.length) return null;
   return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
 }
@@ -51,6 +52,14 @@ export function exportSVG(doc, ltScale = 1) {
     const p = doc.pts[c.c];
     out.push(`<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="${n(c.r * K)}" fill="none" stroke="${col(c.color)}" stroke-width="${c.w}"${dash(c.ltype)}/>`);
   }
+  for (const ar of Object.values(doc.arcs || {})) {
+    const p = doc.pts[ar.c], { a0, sweep } = arcOf(doc, ar);
+    const pt = (t) => `${X(p.x + ar.r * Math.cos(t))} ${Y(p.y + ar.r * Math.sin(t))}`;
+    const R = n(ar.r * K);
+    const attrs = `fill="none" stroke="${col(ar.color)}" stroke-width="${ar.w}"${dash(ar.ltype)}`;
+    if (sweep > Math.PI * 2 - 1e-6) out.push(`<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="${R}" ${attrs}/>`);
+    else out.push(`<path d="M${pt(a0)} A${R} ${R} 0 ${sweep > Math.PI ? 1 : 0} 0 ${pt(a0 + sweep)}" ${attrs}/>`);
+  }
   for (const l of Object.values(doc.lines)) {
     const a = doc.pts[l.a], q = doc.pts[l.b];
     out.push(`<line x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(q.x)}" y2="${Y(q.y)}" stroke="${col(l.color)}" stroke-width="${l.w}"${dash(l.ltype)}/>`);
@@ -72,6 +81,12 @@ export function exportDXF(doc) {
   for (const c of Object.values(doc.circles)) {
     const p = doc.pts[c.c];
     g(0, 'CIRCLE'); g(8, '0'); g(10, p.x); g(20, p.y); g(30, 0); g(40, c.r);
+  }
+  for (const ar of Object.values(doc.arcs || {})) {
+    const p = doc.pts[ar.c], { a0, sweep } = arcOf(doc, ar);
+    if (sweep > Math.PI * 2 - 1e-6) { g(0, 'CIRCLE'); g(8, '0'); g(10, p.x); g(20, p.y); g(30, 0); g(40, ar.r); continue; }
+    const deg = (t) => ((((t * 180) / Math.PI) % 360) + 360) % 360;
+    g(0, 'ARC'); g(8, '0'); g(10, p.x); g(20, p.y); g(30, 0); g(40, ar.r); g(50, deg(a0)); g(51, deg(a0 + sweep));
   }
   for (const p of Object.values(doc.pts)) if (!p.auto) { g(0, 'POINT'); g(8, '0'); g(10, p.x); g(20, p.y); g(30, 0); }
   g(0, 'ENDSEC'); g(0, 'EOF');

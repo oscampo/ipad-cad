@@ -68,3 +68,46 @@ export function parsePattern(text) {
   if (!nums.length || nums.some((n) => !Number.isFinite(n))) return null;
   return nums;
 }
+
+// ---------------------------------------------------------------- arcos
+export const TAU = Math.PI * 2;
+export const norm = (a) => ((a % TAU) + TAU) % TAU;
+
+// Circulo por 3 puntos; null si son colineales.
+export function circumcircle(a, b, c) {
+  const d = 2 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
+  if (Math.abs(d) < 1e-12) return null;
+  const a2 = a.x * a.x + a.y * a.y, b2 = b.x * b.x + b.y * b.y, c2 = c.x * c.x + c.y * c.y;
+  const x = (a2 * (b.y - c.y) + b2 * (c.y - a.y) + c2 * (a.y - b.y)) / d;
+  const y = (a2 * (c.x - b.x) + b2 * (a.x - c.x) + c2 * (b.x - a.x)) / d;
+  return { c: { x, y }, r: Math.hypot(a.x - x, a.y - y) };
+}
+
+// Arco antihorario del centro c desde el punto a hasta el punto b.
+// Si a y b coinciden, es el arco de 360 grados.
+export function arcSweepOf(c, a, b) {
+  const a0 = Math.atan2(a.y - c.y, a.x - c.x), a1 = Math.atan2(b.y - c.y, b.x - c.x);
+  let sweep = norm(a1 - a0);
+  if (sweep < 1e-7) sweep = TAU;
+  return { a0, sweep };
+}
+
+// ¿El punto p (visto desde c) cae dentro del barrido [a0, a0+sweep]? tol en radianes.
+export function inSweep(c, a0, sweep, p, tol = 0) {
+  const d = norm(Math.atan2(p.y - c.y, p.x - c.x) - a0);
+  return d <= sweep + tol || d >= TAU - tol;
+}
+
+// Angulo del punto p respecto de a0, en [0, 2pi).
+export const angleFrom = (c, a0, p) => norm(Math.atan2(p.y - c.y, p.x - c.x) - a0);
+
+// Arco por 3 puntos A (inicio), M (intermedio) y B (fin). El arco del solver es siempre
+// antihorario: si A->B antihorario no pasa por M, el arco real va de B a A.
+export function arcThrough3(A, M, B) {
+  const cc = circumcircle(A, M, B);
+  if (!cc) return null;
+  const ang = (p) => Math.atan2(p.y - cc.c.y, p.x - cc.c.x);
+  const sAB = norm(ang(B) - ang(A));
+  const sAM = norm(ang(M) - ang(A));
+  return { c: cc.c, r: cc.r, startIsA: sAM < sAB };
+}

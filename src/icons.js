@@ -30,7 +30,13 @@ const custom = {
   'con-v': S('<path d="M12 3v18"/><circle cx="12" cy="3.5" r="1.5" fill="currentColor"/><circle cx="12" cy="20.5" r="1.5" fill="currentColor"/><path d="M6 9v6M18 9v6" opacity=".35"/>'),
   'con-par': S('<path d="M4 15 14 5M10 21 20 11"/>'),
   'con-perp': S('<path d="M5 4v16h16"/><path d="M5 14h6v6"/>'),
-  'con-coi': S('<circle cx="12" cy="12" r="3" fill="currentColor"/><circle cx="12" cy="12" r="8"/>'),
+  // coincidente: dos lineas de distinta inclinacion que se unen en un punto (V invertida)
+  'con-coi': S('<path d="M3 20 11 4.5 21 16"/><circle cx="11" cy="4.5" r="2.3" fill="currentColor"/>'),
+  // colineal: extremo de una linea, tramo punteado, inicio de otra linea
+  'con-col': S('<path d="M1.5 12H6"/><circle cx="7.6" cy="12" r="1.7" fill="currentColor"/><path d="M11 12h.01M14 12h.01"/><circle cx="16.4" cy="12" r="1.7" fill="currentColor"/><path d="M18 12h4.5"/>'),
+  'arc-c': S('<path d="M5 19V5M5 19h14" opacity=".4"/><path d="M19 19A14 14 0 0 0 5 5"/><circle cx="5" cy="19" r="1.8" fill="currentColor"/><circle cx="19" cy="19" r="1.8" fill="currentColor"/><circle cx="5" cy="5" r="1.8" fill="currentColor"/>'),
+  'arc-3': S('<path d="M4 19Q12 1 20 19"/><circle cx="4" cy="19" r="1.8" fill="currentColor"/><circle cx="12" cy="10" r="1.8" fill="currentColor"/><circle cx="20" cy="19" r="1.8" fill="currentColor"/>'),
+  split: S('<path d="M3 12h18"/><path d="M9 6l6 12"/><circle cx="12" cy="12" r="2.4" fill="var(--btn, #fff)"/>'),
   'con-mid': S('<path d="M3 12h18"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/><path d="M3 8v8M21 8v8M8 9.5v5M16 9.5v5" opacity=".45"/>'),
   'con-tan': S('<circle cx="12" cy="14" r="6"/><path d="M3 8h18"/>'),
   'con-onc': S('<path d="M3 19 21 5"/><circle cx="12" cy="12" r="2.8" fill="var(--btn, #fff)"/><circle cx="12" cy="12" r="1" fill="currentColor"/>'),
