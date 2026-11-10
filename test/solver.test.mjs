@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { newDoc, addPoint, addLine, addCircle, addArc, addCon, hatchLoops, arcOf } from '../src/model.js';
+import { newDoc, addPoint, addLine, addCircle, addArc, addCon, addText, deleteItems, hatchLoops, arcOf } from '../src/model.js';
+import { layoutDim, dragDim } from '../src/dims.js';
+import { textFrame, textCorners, textHit } from '../src/text.js';
+import { exportSVG, exportDXF } from '../src/export.js';
 import { splitElement } from '../src/split.js';
 import { initSolver, solve } from '../src/solver.js';
 import { lineLine, lineCircle, circleCircle, signedAngle, dashFromPattern, parsePattern, circumcircle, arcSweepOf, TAU } from '../src/geom.js';
@@ -270,6 +273,142 @@ t('dividir: errores claros y relleno con cadena de arcos', () => {
   const loops = hatchLoops(e.d, { ids: [e.A, l1, l2] });
   assert.equal(loops.length, 1);
   assert.ok(loops[0].pts.length > 20, 'el arco se muestrea');
+});
+
+
+// ---------------------------------------------------------------- cotas y textos
+const VIEW = { s: 10, ox: 0, oy: 0 };
+
+t('cotas: distancia con flechas, lineas de extension y etiqueta reposicionable', () => {
+  const d = newDoc();
+  const a = addPoint(d, 0, 0), b = addPoint(d, 10, 0);
+  const k = { t: 'DIST', refs: [a, b], v: 10 };
+  let L = layoutDim(d, k, VIEW);
+  assert.equal(L.arrows.length, 2);
+  assert.equal(L.lines.length, 3, '2 extension + linea de cota');
+  assert.equal(L.label.text, '10');
+  // flechas hacia fuera (hacia las lineas de extension) cuando cabe
+  assert.ok(L.arrows[0].dx < 0 && L.arrows[1].dx > 0);
+  const y0 = L.label.y;
+  assert.ok(dragDim(d, k, VIEW, { x: 50, y: -60 }));
+  L = layoutDim(d, k, VIEW);
+  assert.ok(Math.abs(L.label.y - y0) > 20, 'la cota se desplazo');
+  near(k.lt, 0.5, 1e-9, 'etiqueta en el medio');
+  // cota corta: flechas por fuera apuntando hacia dentro
+  const e = addPoint(d, 1, 0);
+  const short = layoutDim(d, { t: 'DIST', refs: [a, e], v: 1 }, VIEW);
+  assert.ok(short.arrows[0].dx > 0 && short.arrows[1].dx < 0, 'flechas exteriores');
+  // etiqueta arrastrada fuera del tramo prolonga la linea de cota
+  dragDim(d, k, VIEW, { x: 200, y: -60 });
+  assert.ok(k.lt > 1);
+  const L2 = layoutDim(d, k, VIEW);
+  assert.ok(Math.max(...L2.lines.flatMap((l) => [l[0], l[2]])) > 105, 'linea prolongada hasta la etiqueta');
+});
+
+t('cotas: angulo con arco, flechas, lineas de extension y radio ajustable', () => {
+  const d = newDoc();
+  const o = addPoint(d, 0, 0), a = addPoint(d, 4, 0), b = addPoint(d, 0, 4);
+  const l1 = addLine(d, o, a, {}), l2 = addLine(d, o, b, {});
+  const k = { t: 'ANG', refs: [l1, l2], v: 90 };
+  const L = layoutDim(d, k, VIEW);
+  assert.equal(L.arcs.length, 1);
+  assert.equal(L.arrows.length, 2);
+  assert.equal(L.label.text, '90°');
+  assert.ok(L.lines.length >= 1, 'las rectas son cortas: hay extensiones');
+  assert.ok(dragDim(d, k, VIEW, { x: 200, y: -200 }));
+  assert.ok(layoutDim(d, k, VIEW).arcs[0].r > L.arcs[0].r, 'el radio crecio');
+  const p1 = addPoint(d, 0, 5), p2 = addPoint(d, 4, 5);
+  const l3 = addLine(d, p1, p2, {});
+  assert.equal(layoutDim(d, { t: 'ANG', refs: [l1, l3], v: 0 }, VIEW).arcs.length, 0, 'paralelas: solo etiqueta');
+});
+
+t('cotas: circulo muestra phi con el diametro y arco muestra R', () => {
+  const d = newDoc();
+  const o = addPoint(d, 0, 0), p = addPoint(d, 5, 0), q = addPoint(d, 0, 5);
+  const c = addCircle(d, o, 5, {});
+  const A = addArc(d, o, p, q, 5, {});
+  const kc = { t: 'RAD', refs: [c], v: 5 };
+  const Lc = layoutDim(d, kc, VIEW);
+  assert.equal(Lc.label.text, 'φ10');
+  assert.equal(Lc.arrows.length, 2);
+  const ka = { t: 'RAD', refs: [A], v: 5 };
+  const La = layoutDim(d, ka, VIEW);
+  assert.equal(La.label.text, 'R5');
+  assert.equal(La.arrows.length, 1);
+  assert.equal(La.arcs.length, 0, 'por defecto cae dentro del tramo');
+  dragDim(d, ka, VIEW, { x: -100, y: 100 }); // fuera del tramo del arco (cuadrante opuesto)
+  assert.ok(layoutDim(d, ka, VIEW).arcs.some((x) => x.dashed), 'arco de extension');
+  assert.ok(dragDim(d, kc, VIEW, { x: 0, y: -80 }));
+  near(kc.lp, 8, 1e-9);
+  const lc2 = layoutDim(d, kc, VIEW);
+  assert.ok(lc2.lines[0].some((v) => Math.abs(v) > 60), 'linea extendida hasta una etiqueta fuera del circulo');
+});
+
+const measure = (l) => 0.6 * l.length;
+
+t('texto: caja segun el punto de insercion (esquinas, medios y centro)', () => {
+  const d = newDoc();
+  const p = addPoint(d, 10, 20);
+  const T = { pt: p, text: 'ABCDE', h: 2, ang: 0, anchor: 'bl' };
+  let f = textFrame(T, measure);
+  near(f.w, 6); near(f.hh, 2.4);
+  near(f.xmin, 0); near(f.ymin, 0);
+  f = textFrame({ ...T, anchor: 'mc' }, measure);
+  near(f.xmin, -3); near(f.ymin, -1.2); near(f.ymax, 1.2);
+  f = textFrame({ ...T, anchor: 'tr' }, measure);
+  near(f.xmin, -6); near(f.ymax, 0); near(f.ymin, -2.4);
+  f = textFrame({ ...T, anchor: 'ml' }, measure);
+  near(f.xmin, 0); near(f.ymax, 1.2);
+  const two = textFrame({ ...T, text: 'AB\nABCDEF' }, measure);
+  near(two.w, 7.2); near(two.hh, 4.8);
+});
+
+t('texto: la orientacion gira la caja alrededor del punto de insercion y el golpe la respeta', () => {
+  const d = newDoc();
+  const p = addPoint(d, 0, 0);
+  const T = { pt: p, text: 'ABCDE', h: 2, ang: 90, anchor: 'bl' };
+  const cs = textCorners(d, T, measure);
+  // 90 grados: el ancho (6) queda a lo largo de +y y la altura (2.4) hacia -x
+  near(cs[1].x, 0, 1e-9); near(cs[1].y, 6, 1e-9);
+  near(cs[3].x, -2.4, 1e-9); near(cs[3].y, 0, 1e-9);
+  assert.ok(textHit(d, T, { x: -1, y: 3 }, measure));
+  assert.ok(!textHit(d, T, { x: 3, y: 1 }, measure), 'sin girar estaria dentro; girado, no');
+  assert.ok(textHit(d, { ...T, ang: 0 }, { x: 3, y: 1 }, measure));
+});
+
+t('texto: el punto de insercion es un punto real y admite restricciones; borrar el punto borra el texto', () => {
+  const d = newDoc();
+  const a = addPoint(d, 0, 0), b = addPoint(d, 10, 0), p = addPoint(d, 3, 4, false);
+  d.pts[a].fixed = d.pts[b].fixed = true;
+  const L = addLine(d, a, b, {});
+  const tid = addText(d, p, 'hola', { h: 2, ang: 30, anchor: 'mc' });
+  addCon(d, { t: 'PONL', refs: [p, L] });
+  assert.ok(solve(d).ok);
+  near(d.pts[p].y, 0, 1e-6);
+  assert.ok(tid in d.texts);
+  deleteItems(d, [{ k: 'pt', id: p }]);
+  assert.ok(!(tid in d.texts), 'el texto desaparece con su punto');
+});
+
+
+t('exportar: SVG y DXF incluyen arcos, textos con rotacion y escala de patron', () => {
+  const d = newDoc();
+  const a = addPoint(d, 0, 0), b = addPoint(d, 10, 5), c = addPoint(d, 0, 10), e = addPoint(d, 5, 5);
+  addLine(d, a, b, { color: '#dc2626', ltype: 'eje', w: 2, ls: 0.5 });
+  addArc(d, a, b, c, 11.18, { color: 'auto', ltype: 'oculta', w: 2 });
+  addText(d, e, 'Hola <A>\nlinea 2', { h: 2, ang: 30, anchor: 'mc' });
+  const svg = exportSVG(d, 1);
+  assert.ok(svg.includes('<text transform="translate('), 'texto en SVG');
+  assert.ok(svg.includes('rotate(-30)'), 'rotacion del texto');
+  assert.ok(svg.includes('&lt;A&gt;'), 'se escapa el texto');
+  assert.equal(svg.split('<tspan').length - 1, 2, 'una tspan por linea');
+  assert.ok(svg.includes('A'), 'arco como path');
+  const d1 = svg.match(/stroke="#dc2626"[^>]*stroke-dasharray="([^"]+)"/)[1].split(' ').map(Number);
+  near(d1[0], 14 * 3 * 0.5, 1e-6, 'la escala del patron por elemento se aplica');
+  const rows = exportDXF(d).trim().split('\r\n');
+  assert.equal(rows.length % 2, 0, 'pares codigo/valor');
+  assert.equal(rows.filter((r) => r === 'TEXT').length, 2);
+  assert.equal(rows.filter((r) => r === 'ARC').length, 1);
 });
 
 console.log(`\n${passed} pruebas pasaron`);

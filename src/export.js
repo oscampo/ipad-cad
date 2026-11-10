@@ -1,5 +1,6 @@
 import { hatchLoops, allLtypes, arcOf } from './model.js';
 import { dashFromPattern } from './geom.js';
+import { textFrame, LINE_SPACING } from './text.js';
 
 function bounds(doc) {
   const xs = [], ys = [];
@@ -21,8 +22,8 @@ export function exportSVG(doc, ltScale = 1) {
   const W = n((b.x1 - b.x0) * K + pad * 2), H = n((b.y1 - b.y0) * K + pad * 2);
   const X = (x) => n((x - b.x0) * K + pad), Y = (y) => n((b.y1 - y) * K + pad);
   const lt = allLtypes(doc);
-  const dash = (t) => {
-    const d = dashFromPattern((lt[t] || lt.continua).pattern, 0.6).map((v) => n(Math.max(v, 0.01) * 3 * ltScale));
+  const dash = (t, ls = 1) => {
+    const d = dashFromPattern((lt[t] || lt.continua).pattern, 0.6).map((v) => n(Math.max(v, 0.01) * 3 * ltScale * (ls || 1)));
     return d.length ? ` stroke-dasharray="${d.join(' ')}"` : '';
   };
   const out = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`, `<rect width="100%" height="100%" fill="#fff"/>`];
@@ -50,19 +51,30 @@ export function exportSVG(doc, ltScale = 1) {
   }
   for (const c of Object.values(doc.circles)) {
     const p = doc.pts[c.c];
-    out.push(`<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="${n(c.r * K)}" fill="none" stroke="${col(c.color)}" stroke-width="${c.w}"${dash(c.ltype)}/>`);
+    out.push(`<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="${n(c.r * K)}" fill="none" stroke="${col(c.color)}" stroke-width="${c.w}"${dash(c.ltype, c.ls)}/>`);
   }
   for (const ar of Object.values(doc.arcs || {})) {
     const p = doc.pts[ar.c], { a0, sweep } = arcOf(doc, ar);
     const pt = (t) => `${X(p.x + ar.r * Math.cos(t))} ${Y(p.y + ar.r * Math.sin(t))}`;
     const R = n(ar.r * K);
-    const attrs = `fill="none" stroke="${col(ar.color)}" stroke-width="${ar.w}"${dash(ar.ltype)}`;
+    const attrs = `fill="none" stroke="${col(ar.color)}" stroke-width="${ar.w}"${dash(ar.ltype, ar.ls)}`;
     if (sweep > Math.PI * 2 - 1e-6) out.push(`<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="${R}" ${attrs}/>`);
     else out.push(`<path d="M${pt(a0)} A${R} ${R} 0 ${sweep > Math.PI ? 1 : 0} 0 ${pt(a0 + sweep)}" ${attrs}/>`);
   }
   for (const l of Object.values(doc.lines)) {
     const a = doc.pts[l.a], q = doc.pts[l.b];
-    out.push(`<line x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(q.x)}" y2="${Y(q.y)}" stroke="${col(l.color)}" stroke-width="${l.w}"${dash(l.ltype)}/>`);
+    out.push(`<line x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(q.x)}" y2="${Y(q.y)}" stroke="${col(l.color)}" stroke-width="${l.w}"${dash(l.ltype, l.ls)}/>`);
+  }
+  // textos: ancho aproximado (0.6 de la altura por caracter) solo para alinear
+  const approx = (ln) => 0.6 * ln.length;
+  for (const t of Object.values(doc.texts || {})) {
+    const P = doc.pts[t.pt];
+    if (!P) continue;
+    const f = textFrame(t, approx);
+    const anchor = { l: 'start', c: 'middle', r: 'end' }[t.anchor?.[1] ?? 'l'];
+    const esc = (x) => x.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const lines = f.lines.map((ln, i) => `<tspan x="${n((anchor === 'start' ? f.xmin : anchor === 'middle' ? f.xmin + f.w / 2 : f.xmin + f.w) * K)}" y="${n((-f.ymax + (i * LINE_SPACING + 0.95) * t.h) * K)}">${esc(ln)}</tspan>`).join('');
+    out.push(`<text transform="translate(${X(P.x)} ${Y(P.y)}) rotate(${n(-(t.ang || 0))})" font-family="sans-serif" font-size="${n(t.h * K)}" text-anchor="${anchor}" fill="${col(t.color)}">${lines}</text>`);
   }
   out.push('</svg>');
   return out.join('\n');
@@ -87,6 +99,21 @@ export function exportDXF(doc) {
     if (sweep > Math.PI * 2 - 1e-6) { g(0, 'CIRCLE'); g(8, '0'); g(10, p.x); g(20, p.y); g(30, 0); g(40, ar.r); continue; }
     const deg = (t) => ((((t * 180) / Math.PI) % 360) + 360) % 360;
     g(0, 'ARC'); g(8, '0'); g(10, p.x); g(20, p.y); g(30, 0); g(40, ar.r); g(50, deg(a0)); g(51, deg(a0 + sweep));
+  }
+  // textos: una entidad TEXT por linea, alineada segun el punto de insercion (ancho aproximado)
+  for (const t of Object.values(doc.texts || {})) {
+    const P = doc.pts[t.pt];
+    if (!P) continue;
+    const f = textFrame(t, (ln) => 0.6 * ln.length);
+    const a = ((t.ang || 0) * Math.PI) / 180, c0 = Math.cos(a), s0 = Math.sin(a);
+    const h72 = { l: 0, c: 1, r: 2 }[t.anchor?.[1] ?? 'l'];
+    f.lines.forEach((ln, i) => {
+      const x = h72 === 0 ? f.xmin : h72 === 1 ? f.xmin + f.w / 2 : f.xmin + f.w;
+      const y = f.ymax - (i + 1) * 1.2 * t.h + 0.2 * t.h; // linea base
+      const wx = P.x + x * c0 - y * s0, wy = P.y + x * s0 + y * c0;
+      g(0, 'TEXT'); g(8, '0'); g(10, wx); g(20, wy); g(30, 0); g(40, t.h); g(1, ln.replace(/\s+/g, ' '));
+      g(50, (((t.ang || 0) % 360) + 360) % 360); g(72, h72); g(11, wx); g(21, wy); g(31, 0); g(73, 0);
+    });
   }
   for (const p of Object.values(doc.pts)) if (!p.auto) { g(0, 'POINT'); g(8, '0'); g(10, p.x); g(20, p.y); g(30, 0); }
   g(0, 'ENDSEC'); g(0, 'EOF');

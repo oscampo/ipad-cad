@@ -18,7 +18,7 @@ export const PALETTE = [
 ];
 
 export function newDoc() {
-  return { n: 0, pts: {}, lines: {}, circles: {}, arcs: {}, cons: {}, hatches: {}, ltypes: {} };
+  return { n: 0, pts: {}, lines: {}, circles: {}, arcs: {}, texts: {}, cons: {}, hatches: {}, ltypes: {} };
 }
 
 export function nextId(doc, prefix) {
@@ -59,6 +59,14 @@ export function arcOf(doc, arc) {
   return arcSweepOf(doc.pts[arc.c], doc.pts[arc.a], doc.pts[arc.b]);
 }
 
+// Texto con punto de insercion (un punto real del documento, asi admite restricciones).
+// anchor: 'tl','tc','tr','ml','mc','mr','bl','bc','br' (vertical + horizontal); ang en grados.
+export function addText(doc, pt, text, opts = {}) {
+  const id = nextId(doc, 't');
+  doc.texts[id] = { pt, text, h: opts.h ?? 4, ang: opts.ang ?? 0, anchor: opts.anchor ?? 'bl', color: opts.color ?? 'auto' };
+  return id;
+}
+
 export function addCon(doc, con) {
   const id = nextId(doc, 'k');
   doc.cons[id] = con;
@@ -75,6 +83,7 @@ function pointsUsed(doc) {
   for (const l of Object.values(doc.lines)) { used.add(l.a); used.add(l.b); }
   for (const c of Object.values(doc.circles)) used.add(c.c);
   for (const a of Object.values(doc.arcs)) { used.add(a.c); used.add(a.a); used.add(a.b); }
+  for (const t of Object.values(doc.texts || {})) used.add(t.pt);
   for (const k of Object.values(doc.cons)) for (const r of conRefs(k)) used.add(r);
   return used;
 }
@@ -88,6 +97,9 @@ export function cleanup(doc) {
     changed = false;
     for (const [id, k] of Object.entries(doc.cons)) {
       if (!conRefs(k).every(exists)) { delete doc.cons[id]; changed = true; }
+    }
+    for (const [id, t] of Object.entries(doc.texts || {})) {
+      if (!(t.pt in doc.pts)) { delete doc.texts[id]; changed = true; }
     }
     for (const [id, h] of Object.entries(doc.hatches)) {
       h.ids = h.ids.filter((e) => e in doc.lines || e in doc.circles || e in doc.arcs);
@@ -110,6 +122,7 @@ export function deleteItems(doc, items) {
     } else if (k === 'ln') delete doc.lines[id];
     else if (k === 'ci') delete doc.circles[id];
     else if (k === 'ar') delete doc.arcs[id];
+    else if (k === 'tx') delete doc.texts[id];
     else if (k === 'ha') delete doc.hatches[id];
     else if (k === 'co') delete doc.cons[id];
   }

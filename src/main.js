@@ -1,7 +1,7 @@
 import wasmUrl from '@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url';
 import { initSolver, solve } from './solver.js';
 import {
-  newDoc, addPoint, addLine, addCircle, addArc, addCon, cleanup, deleteItems, clone, hatchLoops,
+  newDoc, addPoint, addLine, addCircle, addArc, addText, addCon, cleanup, deleteItems, clone, hatchLoops,
   allLtypes, PALETTE, arcOf,
 } from './model.js';
 import {
@@ -9,6 +9,8 @@ import {
   arcThrough3, inSweep, TAU,
 } from './geom.js';
 import { splitElement } from './split.js';
+import { layoutDim, dragDim } from './dims.js';
+import { textFrame, textHit, ANCHORS, ANCHOR_NAMES, LINE_SPACING } from './text.js';
 import { exportSVG, exportDXF } from './export.js';
 import { iconSvg } from './icons.js';
 
@@ -23,7 +25,7 @@ let doc = newDoc();
 let view = { ox: 200, oy: 300, s: 3 }; // px por unidad; y del modelo hacia arriba
 let tool = 'select';
 let sel = []; // [{k:'pt'|'ln'|'ci'|'ha', id}]
-let cur = { color: 'auto', ltype: 'continua', w: 2 };
+let cur = { color: 'auto', ltype: 'continua', w: 2, ls: 1, tx: { h: null, ang: 0, anchor: 'bl' } };
 const opts = { grid: true, snap: false, cons: true, touch: false, ltScale: 1, labels: true, sections: {} };
 let undoStack = [], redoStack = [];
 let pending = null; // estado de la herramienta en curso
@@ -70,7 +72,7 @@ function redo() {
   pending = null; sel = sel.filter(exists); afterChange();
 }
 function exists(s) {
-  return s.k === 'pt' ? s.id in doc.pts : s.k === 'ln' ? s.id in doc.lines : s.k === 'ci' ? s.id in doc.circles : s.k === 'ar' ? s.id in doc.arcs : s.k === 'ha' ? s.id in doc.hatches : s.id in doc.cons;
+  return s.k === 'pt' ? s.id in doc.pts : s.k === 'ln' ? s.id in doc.lines : s.k === 'ci' ? s.id in doc.circles : s.k === 'ar' ? s.id in doc.arcs : s.k === 'tx' ? s.id in doc.texts : s.k === 'ha' ? s.id in doc.hatches : s.id in doc.cons;
 }
 let saveTimer = 0;
 function persist() {
@@ -85,6 +87,7 @@ function afterChange() { updateButtons(); updateEnabled(); syncPanel(); persist(
 function updateEnabled() {
   const n = { pt: 0, ln: 0, ci: 0, ar: 0 };
   for (const x of sel) if (x.k in n) n[x.k]++;
+  n.pt += sel.filter((x) => x.k === 'tx').length;
   const { pt, ln } = n;
   const crv = n.ci + n.ar;
   const rules = {
@@ -186,6 +189,10 @@ function hitTest(sx, sy) {
     if (d < bd) { bd = d; best = { k: 'pt', id }; }
   }
   if (best) return best;
+  // un texto se toma por su caja (antes que las lineas que pasen por debajo)
+  for (const [id, t] of Object.entries(doc.texts)) {
+    if (doc.pts[t.pt] && textHit(doc, t, m, measureRel, 2 / view.s)) return { k: 'tx', id };
+  }
   bd = 11;
   for (const [id, l] of Object.entries(doc.lines)) {
     const c = closestOnSeg(m, doc.pts[l.a], doc.pts[l.b]);
@@ -245,12 +252,12 @@ function hatchPath(h, v = view) {
   return path;
 }
 
-function applyStroke(c, color, w, ltype, o) {
+function applyStroke(c, color, w, ltype, o, ls = 1) {
   const lt = allLtypes(doc)[ltype] || allLtypes(doc).continua;
   c.strokeStyle = colorOf(color, o);
   c.lineWidth = w * dpr;
   c.lineCap = 'butt';
-  const d = dashFromPattern(lt.pattern, 0.6).map((x) => Math.max(x, 0.01) * 3 * opts.ltScale * dpr);
+  const d = dashFromPattern(lt.pattern, 0.6).map((x) => Math.max(x, 0.01) * 3 * opts.ltScale * (ls || 1) * dpr);
   c.setLineDash(d);
 }
 
@@ -271,7 +278,7 @@ export function render(c, W, H, v, o) {
     const p = doc.pts[ci.c];
     const s = toScreen(p);
     if (o.ui && isSel('ci', id)) { c.setLineDash([]); c.strokeStyle = theme.sel + '88'; c.lineWidth = (ci.w + 6) * dpr; c.beginPath(); c.arc(s.x * dpr, s.y * dpr, ci.r * v.s * dpr, 0, 7); c.stroke(); }
-    applyStroke(c, ci.color, ci.w, ci.ltype, o);
+    applyStroke(c, ci.color, ci.w, ci.ltype, o, ci.ls);
     c.beginPath(); c.arc(s.x * dpr, s.y * dpr, ci.r * v.s * dpr, 0, Math.PI * 2); c.stroke();
   }
   for (const [id, ar] of Object.entries(doc.arcs)) {
@@ -279,21 +286,22 @@ export function render(c, W, H, v, o) {
     const { a0, sweep } = arcOf(doc, ar);
     const trace = () => { c.beginPath(); c.arc(sc.x * dpr, sc.y * dpr, ar.r * v.s * dpr, -a0, -(a0 + sweep), true); };
     if (o.ui && isSel('ar', id)) { c.setLineDash([]); c.strokeStyle = theme.sel + '88'; c.lineWidth = (ar.w + 6) * dpr; trace(); c.stroke(); }
-    applyStroke(c, ar.color, ar.w, ar.ltype, o);
+    applyStroke(c, ar.color, ar.w, ar.ltype, o, ar.ls);
     trace(); c.stroke();
   }
   for (const [id, l] of Object.entries(doc.lines)) {
     const a = toScreen(doc.pts[l.a]), b = toScreen(doc.pts[l.b]);
     if (o.ui && isSel('ln', id)) { c.setLineDash([]); c.strokeStyle = theme.sel + '88'; c.lineWidth = (l.w + 6) * dpr; c.beginPath(); c.moveTo(a.x * dpr, a.y * dpr); c.lineTo(b.x * dpr, b.y * dpr); c.stroke(); }
-    applyStroke(c, l.color, l.w, l.ltype, o);
+    applyStroke(c, l.color, l.w, l.ltype, o, l.ls);
     c.beginPath(); c.moveTo(a.x * dpr, a.y * dpr); c.lineTo(b.x * dpr, b.y * dpr); c.stroke();
   }
   c.setLineDash([]);
+  drawTexts(c, o);
   if (o.cons) drawConstraints(c, o);
   if (o.ui) {
     for (const [id, p] of Object.entries(doc.pts)) {
       const s = toScreen(p);
-      const selp = isSel('pt', id);
+      const selp = isSel('pt', id) || sel.some((x) => x.k === 'tx' && doc.texts[x.id]?.pt === id);
       c.fillStyle = selp ? theme.sel : o.fg;
       if (p.fixed) c.fillRect((s.x - 4) * dpr, (s.y - 4) * dpr, 8 * dpr, 8 * dpr);
       else { c.beginPath(); c.arc(s.x * dpr, s.y * dpr, (selp ? 5 : 3.2) * dpr, 0, 7); c.fill(); }
@@ -381,42 +389,69 @@ function midOf(refs) {
 }
 
 const GLYPH = { H: 'H', V: 'V', PAR: '∥', PERP: '⟂', EQL: '=', EQR: '=', MID: 'M', TANLC: 'T', TANCC: 'T', COL: 'Col' };
+const FONT = '-apple-system, system-ui, "Segoe UI", sans-serif';
+let mctx = null;
+// ancho de una linea de texto para altura 1 (se escala por la altura real del texto)
+function measureRel(line) {
+  if (!mctx) mctx = document.createElement('canvas').getContext('2d');
+  mctx.font = `100px ${FONT}`;
+  return mctx.measureText(line).width / 100;
+}
+
+function drawTexts(c, o) {
+  for (const [id, t] of Object.entries(doc.texts)) {
+    const P = doc.pts[t.pt];
+    if (!P) continue;
+    const S = toScreen(P), f = textFrame(t, measureRel), sc = view.s;
+    c.save();
+    c.translate(S.x * dpr, S.y * dpr);
+    c.rotate(-((t.ang || 0) * Math.PI) / 180);
+    c.font = `${t.h * sc * dpr}px ${FONT}`;
+    c.fillStyle = colorOf(t.color, o); c.textBaseline = 'top'; c.textAlign = 'left';
+    f.lines.forEach((ln, i) => c.fillText(ln, f.xmin * sc * dpr, (-f.ymax * sc + (i * LINE_SPACING + 0.1) * t.h * sc) * dpr));
+    if (o.ui && isSel('tx', id)) {
+      c.strokeStyle = theme.sel; c.lineWidth = 1.5 * dpr; c.setLineDash([5 * dpr, 3 * dpr]);
+      c.strokeRect(f.xmin * sc * dpr, -f.ymax * sc * dpr, f.w * sc * dpr, f.hh * sc * dpr);
+    }
+    c.restore();
+  }
+}
+
+// cabeza de flecha con la punta en (x,y) apuntando hacia (dx,dy); medidas en px de pantalla
+function arrowHead(c, { x, y, dx, dy }) {
+  const len = 9, w = 3.2, bx = x - dx * len, by = y - dy * len, nx = -dy, ny = dx;
+  c.beginPath();
+  c.moveTo(x * dpr, y * dpr); c.lineTo((bx + nx * w) * dpr, (by + ny * w) * dpr); c.lineTo((bx - nx * w) * dpr, (by - ny * w) * dpr);
+  c.closePath(); c.fill();
+}
+
+function drawDim(c, id, k, col) {
+  const L = layoutDim(doc, k, view);
+  c.save();
+  c.strokeStyle = col; c.fillStyle = col; c.lineWidth = dpr; c.setLineDash([]);
+  for (const l of L.lines) { c.beginPath(); c.moveTo(l[0] * dpr, l[1] * dpr); c.lineTo(l[2] * dpr, l[3] * dpr); c.stroke(); }
+  for (const a of L.arcs) {
+    c.beginPath(); c.arc(a.cx * dpr, a.cy * dpr, a.r * dpr, a.a0, a.a1, a.ccw);
+    c.setLineDash(a.dashed ? [4 * dpr, 3 * dpr] : []); c.stroke();
+  }
+  c.setLineDash([]);
+  for (const ar of L.arrows) arrowHead(c, ar);
+  c.restore();
+  if (L.label) label(c, L.label.text, L.label.x, L.label.y, id, col);
+}
+
 function drawConstraints(c, o) {
   const used = {};
   for (const [id, k] of Object.entries(doc.cons)) {
     if (k.hidden) continue;
-    const chosen = isSel('co', id);
-    const col = chosen ? theme.sel : theme.accent;
-    let m;
-    if (k.t === 'DIST' || k.t === 'DISTPL') {
-      const a = doc.pts[k.refs[0]];
-      const b = k.t === 'DIST' ? doc.pts[k.refs[1]] : null;
-      if (b) {
-        const sa = toScreen(a), sb = toScreen(b), L = dist(sa, sb) || 1;
-        const nx = -(sb.y - sa.y) / L, ny = (sb.x - sa.x) / L, off = 16;
-        c.save(); c.strokeStyle = col; c.lineWidth = dpr; c.setLineDash([]);
-        c.beginPath();
-        c.moveTo(sa.x * dpr, sa.y * dpr); c.lineTo((sa.x + nx * (off + 5)) * dpr, (sa.y + ny * (off + 5)) * dpr);
-        c.moveTo(sb.x * dpr, sb.y * dpr); c.lineTo((sb.x + nx * (off + 5)) * dpr, (sb.y + ny * (off + 5)) * dpr);
-        c.moveTo((sa.x + nx * off) * dpr, (sa.y + ny * off) * dpr); c.lineTo((sb.x + nx * off) * dpr, (sb.y + ny * off) * dpr);
-        c.stroke(); c.restore();
-        label(c, fmt(k.v), (sa.x + sb.x) / 2 + nx * off, (sa.y + sb.y) / 2 + ny * off, id, col);
-      } else {
-        const s = toScreen(a); label(c, fmt(k.v), s.x + 18, s.y - 14, id, col);
-      }
-    } else if (k.t === 'ANG') {
-      const l = doc.lines[k.refs[0]]; if (!l) continue;
-      const s = toScreen(midOf(k.refs)); label(c, fmt(k.v) + '°', s.x + 14, s.y - 14, id, col);
-    } else if (k.t === 'RAD') {
-      const ci = doc.circles[k.refs[0]] || doc.arcs[k.refs[0]]; if (!ci) continue;
-      const p = doc.pts[ci.c], s = toScreen({ x: p.x + ci.r * 0.7071, y: p.y + ci.r * 0.7071 });
-      label(c, 'R' + fmt(k.v), s.x + 10, s.y - 10, id, col);
-    } else if (GLYPH[k.t] && (m = midOf(k.refs))) {
-      const s = toScreen(m);
-      used[`${Math.round(s.x)},${Math.round(s.y)}`] = (used[`${Math.round(s.x)},${Math.round(s.y)}`] || 0) + 1;
-      const n = used[`${Math.round(s.x)},${Math.round(s.y)}`] - 1;
-      label(c, GLYPH[k.t], s.x + 12 + n * 18, s.y + 14, id, col);
-    }
+    const col = isSel('co', id) ? theme.sel : theme.accent;
+    if (k.t === 'DIST' || k.t === 'DISTPL' || k.t === 'ANG' || k.t === 'RAD') { drawDim(c, id, k, col); continue; }
+    const m = GLYPH[k.t] && midOf(k.refs);
+    if (!m) continue;
+    const sp = toScreen(m);
+    const key = `${Math.round(sp.x)},${Math.round(sp.y)}`;
+    used[key] = (used[key] || 0) + 1;
+    label(c, GLYPH[k.t], sp.x + 12 + (used[key] - 1) * 18, sp.y + 14, id, col);
   }
 }
 
@@ -485,7 +520,7 @@ function drawPreview(c) {
 
 // ---------------------------------------------------------------- entrada
 function pos(e) { const r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
-const style = () => ({ color: cur.color, ltype: cur.ltype, w: cur.w });
+const style = () => ({ color: cur.color, ltype: cur.ltype, w: cur.w, ls: cur.ls });
 
 function pointFrom(s) {
   if (s.type === 'pt') return s.id;
@@ -597,6 +632,12 @@ function toolDown(p) {
       if (h.k === 'ci') drag.r0 = doc.circles[h.id].r;
       if (h.k === 'ar') drag.r0 = doc.arcs[h.id].r;
     }
+    if (h && h.k === 'co' && doc.cons[h.id]?.v !== undefined) drag.dim = true;
+    if (h && h.k === 'tx') {
+      const pid = doc.texts[h.id].pt;
+      drag.m0 = toModel(p.x, p.y);
+      drag.orig = { [pid]: { ...doc.pts[pid] } };
+    }
   } else {
     drag = { p0: p, moved: false };
   }
@@ -605,6 +646,12 @@ function toolDown(p) {
 function toolMove(p) {
   if (!drag) return;
   if (tool !== 'select') { if (dist(p, drag.p0) > 8) drag.moved = true; return; }
+  if (drag.dim) {
+    if (!drag.started) { if (dist(p, drag.p0) < 5) return; drag.started = true; pushUndo(); }
+    dragDim(doc, doc.cons[drag.hit.id], view, p);
+    draw();
+    return;
+  }
   if (!drag.hit || !drag.orig) return;
   if (!drag.started) {
     if (dist(p, drag.p0) < 6) return;
@@ -664,6 +711,7 @@ function toolUp(p, q) {
     pending = null; finishEdit();
     return;
   }
+  if (tool === 'text') { placeText(sUp); return; }
   if (tool === 'arcc') {
     if (!pending) { pushUndo(); pending = { center: pointFrom(sUp) }; draw(); return; }
     if (!pending.start) {
@@ -711,6 +759,37 @@ function toolUp(p, q) {
     if (pending.items.length === 2) { const it = pending.items; pending = null; sel = []; makeIntersections(it); }
     else { toast('Toca el segundo elemento'); afterChange(); }
   }
+}
+
+function niceHeight() {
+  // altura "redonda" mas cercana a ~16 px en pantalla
+  const raw = 16 / view.s, pw = Math.pow(10, Math.floor(Math.log10(raw)));
+  const cand = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].map((m) => m * pw);
+  return cand.reduce((b, v) => (Math.abs(v - raw) < Math.abs(b - raw) ? v : b), cand[0]);
+}
+
+function askText(labelText, initial) {
+  return new Promise((resolve) => {
+    const dlg = $('dlgT'), inp = $('dlgTInput');
+    $('dlgTLabel').textContent = labelText;
+    inp.value = initial;
+    let done = false;
+    const finish = (v) => { if (done) return; done = true; dlg.close(); resolve(v); };
+    $('dlgTOk').onclick = (ev) => { ev.preventDefault(); finish(inp.value); };
+    $('dlgTCancel').onclick = () => finish(null);
+    dlg.oncancel = () => finish(null);
+    dlg.showModal(); inp.focus();
+  });
+}
+
+async function placeText(sUp) {
+  pushUndo();
+  const pid = pointFrom(sUp); // el punto de insercion es un punto real: admite restricciones
+  const val = await askText('Texto (Enter = nueva línea)', '');
+  if (val === null || !val.trim()) { rollback(); afterChange(); return; }
+  const id = addText(doc, pid, val, { h: cur.tx.h ?? niceHeight(), ang: cur.tx.ang, anchor: cur.tx.anchor, color: cur.color });
+  sel = [{ k: 'tx', id }];
+  finishEdit();
 }
 
 function finishEdit(keepPending) {
@@ -771,7 +850,9 @@ function askNumber(labelText, initial) {
 function selBy() {
   const ids = (k) => sel.filter((x) => x.k === k).map((x) => x.id);
   const crv = sel.filter((x) => x.k === 'ci' || x.k === 'ar').map((x) => x.id);
-  return { pts: ids('pt'), lns: ids('ln'), cis: ids('ci'), ars: ids('ar'), crv };
+  // un texto seleccionado aporta su punto de insercion a las restricciones
+  const txPts = sel.filter((x) => x.k === 'tx').map((x) => doc.texts[x.id]?.pt).filter((q) => q && !ids('pt').includes(q));
+  return { pts: [...ids('pt'), ...txPts], lns: ids('ln'), cis: ids('ci'), ars: ids('ar'), crv };
 }
 const lineEnds = (id) => [doc.lines[id].a, doc.lines[id].b];
 const curveOf = (id) => doc.circles[id] || doc.arcs[id];
@@ -853,9 +934,12 @@ async function applyCon(kind) {
     }
     case 'RAD': {
       if (!crv.length) return bad('Selecciona un círculo o arco');
-      const val = await askNumber('Radio', Math.round(curveOf(crv[0]).r * 1000) / 1000);
-      if (val === null || val <= 0) return;
-      crv.forEach((c) => list.push({ t: 'RAD', refs: [c], v: val }));
+      const allC = crv.every((id) => id in doc.circles), allA = crv.every((id) => id in doc.arcs);
+      if (!allC && !allA) return bad('Selecciona solo círculos o solo arcos');
+      const r0 = curveOf(crv[0]).r;
+      const val0 = await askNumber(allC ? 'Diámetro (φ)' : 'Radio (R)', Math.round((allC ? 2 * r0 : r0) * 1000) / 1000);
+      if (val0 === null || val0 <= 0) return;
+      crv.forEach((c) => list.push({ t: 'RAD', refs: [c], v: allC ? val0 / 2 : val0 }));
       break;
     }
     default: return;
@@ -890,8 +974,10 @@ function commitCons(list) {
 async function editDimension(id) {
   const k = doc.cons[id];
   if (!k || k.v === undefined) return;
-  const val = await askNumber(k.t === 'ANG' ? 'Ángulo (°)' : k.t === 'RAD' ? 'Radio' : 'Distancia', k.v);
-  if (val === null || (k.t !== 'ANG' && val <= 0)) return;
+  const isC = k.t === 'RAD' && k.refs[0] in doc.circles;
+  const val0 = await askNumber(k.t === 'ANG' ? 'Ángulo (°)' : k.t === 'RAD' ? (isC ? 'Diámetro (φ)' : 'Radio (R)') : 'Distancia', isC ? 2 * k.v : k.v);
+  if (val0 === null || (k.t !== 'ANG' && val0 <= 0)) return;
+  const val = isC ? val0 / 2 : val0;
   pushUndo();
   const old = k.v; k.v = val;
   const r = solve(doc, []);
@@ -905,7 +991,7 @@ function applyStyle(prop, value) {
   let touched = false;
   if (sel.length) pushUndo();
   for (const s of sel) {
-    const o = s.k === 'ln' ? doc.lines[s.id] : s.k === 'ci' ? doc.circles[s.id] : s.k === 'ar' ? doc.arcs[s.id] : s.k === 'ha' && prop === 'color' ? doc.hatches[s.id] : null;
+    const o = s.k === 'ln' ? doc.lines[s.id] : s.k === 'ci' ? doc.circles[s.id] : s.k === 'ar' ? doc.arcs[s.id] : (s.k === 'ha' || s.k === 'tx') && prop === 'color' ? (s.k === 'ha' ? doc.hatches[s.id] : doc.texts[s.id]) : null;
     if (o) { o[prop] = value; touched = true; }
   }
   if (sel.length && !touched) undoStack.pop();
@@ -942,11 +1028,44 @@ function drawSample(canvas, pattern, color) {
   c.beginPath(); c.moveTo(6 * dpr, 12 * dpr); c.lineTo((w - 6) * dpr, 12 * dpr); c.stroke();
 }
 
+function syncTextPanel(txt) {
+  const src = txt || { text: '', h: cur.tx.h ?? '', ang: cur.tx.ang, anchor: cur.tx.anchor };
+  if (document.activeElement !== $('txContent')) $('txContent').value = src.text;
+  if (document.activeElement !== $('txAngle')) $('txAngle').value = String(src.ang ?? 0);
+  if (document.activeElement !== $('txSize')) $('txSize').value = src.h === '' ? '' : String(Math.round(src.h * 1000) / 1000);
+  $('txContent').disabled = !txt;
+  [...$('txAnchors').children].forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.a === src.anchor)));
+}
+
+function applyText(prop, value) {
+  if (prop === 'h' || prop === 'ang' || prop === 'anchor') cur.tx[prop] = value;
+  const ts = sel.filter((x) => x.k === 'tx').map((x) => doc.texts[x.id]);
+  if (ts.length) { pushUndo(); ts.forEach((t) => { t[prop] = value; }); }
+  afterChange();
+}
+
+function buildAnchors() {
+  const box = $('txAnchors');
+  box.innerHTML = '';
+  ANCHORS.forEach((a) => {
+    const b = document.createElement('button');
+    b.dataset.a = a; b.title = 'Punto de inserción: ' + ANCHOR_NAMES[a]; b.setAttribute('aria-label', b.title);
+    const x = { l: 5, c: 12, r: 19 }[a[1]], y = { t: 5, m: 12, b: 19 }[a[0]];
+    b.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="1" opacity=".55"/><circle cx="${x}" cy="${y}" r="3" fill="currentColor"/></svg>`;
+    b.onclick = () => applyText('anchor', a);
+    box.appendChild(b);
+  });
+}
+
 function syncPanel() {
   const first = sel.map((s) => (s.k === 'ln' ? doc.lines[s.id] : s.k === 'ci' ? doc.circles[s.id] : s.k === 'ar' ? doc.arcs[s.id] : null)).find(Boolean);
   const hat = sel.map((s) => (s.k === 'ha' ? doc.hatches[s.id] : null)).find(Boolean);
-  if (first) { cur.color = first.color; cur.ltype = first.ltype; cur.w = first.w; }
+  const txt = sel.map((s) => (s.k === 'tx' ? doc.texts[s.id] : null)).find(Boolean);
+  if (first) { cur.color = first.color; cur.ltype = first.ltype; cur.w = first.w; cur.ls = first.ls ?? 1; }
   else if (hat) cur.color = hat.color;
+  else if (txt) cur.color = txt.color;
+  $('ltEl').value = String(cur.ls ?? 1);
+  syncTextPanel(txt);
   fillLtypes();
   $('weight').value = String(cur.w);
   [...$('swatches').children].forEach((b) => b.classList.toggle('on', b.dataset.val === cur.color));
@@ -984,6 +1103,7 @@ const HINTS = {
   line: 'Toca inicio y fin (encadena); o arrastra un segmento. Esc/Seleccionar termina.',
   circle: 'Toca el centro y luego un punto del borde.',
   intersect: 'Toca dos elementos (línea, arco o círculo) para crear su punto de intersección.',
+  text: 'Toca donde va el punto de insercion del texto (puede ser un punto existente).',
   arcc: 'Arco por centro y extremos: toca el centro, el inicio y el fin (sentido antihorario).',
   arc3: 'Arco por 3 puntos: toca el inicio, un punto intermedio y el fin.',
 };
@@ -994,6 +1114,7 @@ function updateStatus(p) {
     if (s.k === 'pt') { const q = doc.pts[s.id]; txt = `Punto (${fmt(q.x)}, ${fmt(q.y)})${q.fixed ? ' fijo' : ''}`; }
     else if (s.k === 'ln') { const [a, b] = lineEnds(s.id).map((i) => doc.pts[i]); txt = `Línea: longitud ${fmt(dist(a, b))}, ángulo ${fmt((Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI)}°`; }
     else if (s.k === 'ci') txt = `Círculo: radio ${fmt(doc.circles[s.id].r)}`;
+    else if (s.k === 'tx') { const t = doc.texts[s.id]; txt = `Texto: “${t.text.split('\n')[0].slice(0, 24)}”, ${fmt(t.ang)}°, insercion ${t.anchor}`; }
     else if (s.k === 'ar') { const g = arcOf(doc, doc.arcs[s.id]); txt = `Arco: radio ${fmt(doc.arcs[s.id].r)}, ${fmt((g.sweep * 180) / Math.PI)}°`; }
     else if (s.k === 'ha') txt = 'Relleno seleccionado';
     else if (s.k === 'co') txt = 'Restricción/cota seleccionada';
@@ -1028,7 +1149,7 @@ function fitView() {
 }
 function loadDoc(d) {
   if (!d || typeof d !== 'object' || !d.pts || !d.lines || !d.circles) throw new Error('Archivo no válido');
-  doc = { n: 0, cons: {}, hatches: {}, ltypes: {}, arcs: {}, ...d };
+  doc = { n: 0, cons: {}, hatches: {}, ltypes: {}, arcs: {}, texts: {}, ...d };
   undoStack = []; redoStack = []; sel = []; pending = null;
 }
 function exportPNG() {
@@ -1077,6 +1198,10 @@ $('colorPick').oninput = (e) => applyStyle('color', e.target.value);
 ['hKind', 'hAngle', 'hSpace', 'hAlpha'].forEach((id) => { $(id).onchange = updateHatchFromPanel; });
 $('hAlpha').oninput = updateHatchFromPanel;
 $('mkhatch').onclick = createHatch;
+$('ltEl').oninput = (e) => applyStyle('ls', Number(e.target.value));
+$('txContent').onchange = (e) => applyText('text', e.target.value);
+$('txAngle').onchange = (e) => applyText('ang', Number(e.target.value) || 0);
+$('txSize').onchange = (e) => { const v = Number(e.target.value); if (v > 0) applyText('h', v); };
 
 function toggle(id, key) {
   const b = $(id);
@@ -1141,7 +1266,7 @@ window.addEventListener('keydown', (e) => {
   else if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); }
   else if (k === 'escape') { if (pending) cancelPending(); else { sel = []; afterChange(); } }
   else if (k === 'delete' || k === 'backspace') $('del').click();
-  else if (!e.ctrlKey && !e.metaKey) { const m = { v: 'select', p: 'point', l: 'line', c: 'circle', i: 'intersect', a: 'arc3', r: 'arcc' }[k]; if (m) setTool(m); }
+  else if (!e.ctrlKey && !e.metaKey) { const m = { v: 'select', p: 'point', l: 'line', c: 'circle', i: 'intersect', a: 'arc3', r: 'arcc', t: 'text' }[k]; if (m) setTool(m); }
 });
 window.addEventListener('keyup', (e) => { if (e.code === 'Space') spaceDown = false; });
 window.addEventListener('resize', resize);
@@ -1153,6 +1278,7 @@ async function boot() {
   $('ver').textContent = VERSION;
   readTheme();
   buildSwatches();
+  buildAnchors();
   try {
     const s = JSON.parse(localStorage.getItem(STORE) || 'null');
     if (s?.doc) { loadDoc(s.doc); if (s.view) view = s.view; if (s.cur) cur = { ...cur, ...s.cur }; if (s.opts) Object.assign(opts, s.opts); }
@@ -1165,6 +1291,6 @@ async function boot() {
   syncPanel(); updateButtons(); resize();
   if (!Object.keys(doc.pts).length) fitView();
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
-  window.__cad = { get doc() { return doc; }, get view() { return view; }, solve, setTool, toScreen, toModel, applyCon, get sel() { return sel; }, set sel(v) { sel = v; afterChange(); } };
+  window.__cad = { hitTest, get doc() { return doc; }, get view() { return view; }, solve, setTool, toScreen, toModel, applyCon, get sel() { return sel; }, set sel(v) { sel = v; afterChange(); } };
 }
 boot();

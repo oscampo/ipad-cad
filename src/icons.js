@@ -36,7 +36,9 @@ const custom = {
   'con-col': S('<path d="M1.5 12H6"/><circle cx="7.6" cy="12" r="1.7" fill="currentColor"/><path d="M11 12h.01M14 12h.01"/><circle cx="16.4" cy="12" r="1.7" fill="currentColor"/><path d="M18 12h4.5"/>'),
   'arc-c': S('<path d="M5 19V5M5 19h14" opacity=".4"/><path d="M19 19A14 14 0 0 0 5 5"/><circle cx="5" cy="19" r="1.8" fill="currentColor"/><circle cx="19" cy="19" r="1.8" fill="currentColor"/><circle cx="5" cy="5" r="1.8" fill="currentColor"/>'),
   'arc-3': S('<path d="M4 19Q12 1 20 19"/><circle cx="4" cy="19" r="1.8" fill="currentColor"/><circle cx="12" cy="10" r="1.8" fill="currentColor"/><circle cx="20" cy="19" r="1.8" fill="currentColor"/>'),
-  split: S('<path d="M3 12h18"/><path d="M9 6l6 12"/><circle cx="12" cy="12" r="2.4" fill="var(--btn, #fff)"/>'),
+  // dividir: tramos separados por puntos (_._._)
+  split: S('<path d="M1.5 14H6"/><circle cx="8" cy="14" r="1.7" fill="currentColor"/><path d="M10 14h4"/><circle cx="16" cy="14" r="1.7" fill="currentColor"/><path d="M18 14h4.5"/>'),
+  text: S('<path d="M5 7V5h14v2M12 5v14M9 19h6"/>'),
   'con-mid': S('<path d="M3 12h18"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/><path d="M3 8v8M21 8v8M8 9.5v5M16 9.5v5" opacity=".45"/>'),
   'con-tan': S('<circle cx="12" cy="14" r="6"/><path d="M3 8h18"/>'),
   'con-onc': S('<path d="M3 19 21 5"/><circle cx="12" cy="12" r="2.8" fill="var(--btn, #fff)"/><circle cx="12" cy="12" r="1" fill="currentColor"/>'),
