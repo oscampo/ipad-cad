@@ -24,7 +24,7 @@ import { parseValue, isPlainNumber } from './expr.js';
 import { HELP_HTML } from './help.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from './lock.js';
 
-const VERSION = '1.1.1';
+const VERSION = '1.2.0';
 const STORE = 'ipad-cad-v1';
 const $ = (id) => document.getElementById(id);
 const cv = $('cv');
@@ -382,6 +382,15 @@ function snapAt(sx, sy, o = {}) {
   if (DRAW_TOOLS.has(tool)) {
     const ix = intersectionAt(sx, sy);
     if (ix && (o.press || intReady(ix.key))) return { type: 'int', x: ix.p.x, y: ix.p.y, refs: ix.refs };
+  }
+  if (DRAW_TOOLS.has(tool)) { // punto medio de una linea (tiene prioridad sobre el resto de la linea)
+    let mb = null, md = 14;
+    for (const [id, l] of Object.entries(doc.lines)) {
+      const a = doc.pts[l.a], b = doc.pts[l.b], q = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const d = dist(toScreen(q), { x: sx, y: sy });
+      if (d < md && dist(a, b) * view.s > 24) { md = d; mb = { type: 'mid', id, x: q.x, y: q.y }; } // en lineas diminutas estorba
+    }
+    if (mb) return mb;
   }
   bd = 9;
   for (const [id, l] of Object.entries(doc.lines)) {
@@ -922,6 +931,7 @@ function drawPreview(c) {
     if (lk) s = { type: lk.end ? lk.end.type : 'free', x: lk.x, y: lk.y };
     const sp = toScreen(s);
     if (s.type === 'int') label(c, '∩', sp.x + 14, sp.y - 14, null, theme.accent);
+    if (s.type === 'mid') label(c, 'M', sp.x + 14, sp.y - 14, null, theme.accent);
     if (tool !== 'select') {
       c.setLineDash([]); c.beginPath(); c.arc(sp.x * dpr, sp.y * dpr, 7 * dpr, 0, 7);
       c.strokeStyle = s.type === 'free' ? theme.muted : theme.accent; c.stroke();
@@ -1096,6 +1106,7 @@ function pointFrom(s) {
   const id = addPoint(doc, s.x, s.y, true);
   if (s.type === 'int') for (const r of s.refs) addCon(doc, { t: r.k === 'ln' ? 'PONL' : r.k === 'sp' ? 'PONS' : r.k === 'el' ? 'PONE' : 'PONC', refs: [id, r.id], hidden: true });
   if (s.type === 'ln') addCon(doc, { t: 'PONL', refs: [id, s.id], hidden: true });
+  if (s.type === 'mid') addCon(doc, { t: 'MID', refs: [doc.lines[s.id].a, doc.lines[s.id].b, id], hidden: true });
   if (s.type === 'ci' || s.type === 'ar') addCon(doc, { t: 'PONC', refs: [id, s.id], hidden: true });
   if (s.type === 'sp') addCon(doc, { t: 'PONS', refs: [id, s.id], hidden: true });
   if (s.type === 'el') addCon(doc, { t: 'PONE', refs: [id, s.id], hidden: true });

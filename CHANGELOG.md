@@ -1,5 +1,9 @@
 # Historial de cambios
 
+## v1.2.0 (2026-11-11)
+
+- **Enganche al punto medio de las líneas** al dibujar (marca M): el punto nuevo queda con una restricción oculta de punto medio. No se ofrece en líneas muy cortas en pantalla.
+
 ## v1.1.1 (2026-11-11)
 
 - **Coincidente entre puntos lejanos**: si de golpe el solver pierde el hilo (pasaba con arcos tangentes y un punto a más de una unidad), ahora reintenta acercando los puntos poco a poco y pone la restricción al final. Antes decía «No se pudo» aunque el caso tenía solución.

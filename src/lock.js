@@ -29,7 +29,7 @@ export function originsOfPoint(doc, pid) {
 export function originsOfSnap(doc, snap) {
   if (!snap) return { lines: [], curves: [] };
   if (snap.type === 'pt') return originsOfPoint(doc, snap.id);
-  if (snap.type === 'ln') return { lines: [snap.id], curves: [] };
+  if (snap.type === 'ln' || snap.type === 'mid') return { lines: [snap.id], curves: [] };
   if (snap.type === 'ci' || snap.type === 'ar') return { lines: [], curves: [snap.id] };
   if (snap.type === 'int') {
     const o = { lines: [], curves: [] };
