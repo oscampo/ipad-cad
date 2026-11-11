@@ -9,6 +9,23 @@ export const ANCHOR_NAMES = {
 };
 export const LINE_SPACING = 1.2;
 
+// Fuentes disponibles para los textos (las de iPad/Mac con alternativas genericas). '' = la del sistema.
+export const FONTS = [
+  ['', 'Predeterminada (sistema)', '-apple-system, system-ui, "Segoe UI", sans-serif'],
+  ['sans', 'Helvetica / Arial', '"Helvetica Neue", Helvetica, Arial, sans-serif'],
+  ['serif', 'Times / Georgia', '"Times New Roman", Times, Georgia, serif'],
+  ['mono', 'Courier / Menlo', '"Courier New", Menlo, Consolas, monospace'],
+  ['verdana', 'Verdana', 'Verdana, Geneva, sans-serif'],
+  ['palatino', 'Palatino', 'Palatino, "Palatino Linotype", "Book Antiqua", serif'],
+  ['optima', 'Optima', 'Optima, Candara, "Segoe UI", sans-serif'],
+  ['futura', 'Futura', 'Futura, "Century Gothic", "Trebuchet MS", sans-serif'],
+  ['typewriter', 'American Typewriter', '"American Typewriter", "Courier New", serif'],
+  ['marker', 'Marker Felt (manuscrita)', '"Marker Felt", "Comic Sans MS", cursive'],
+  ['bradley', 'Bradley Hand (manuscrita)', '"Bradley Hand", "Segoe Script", cursive'],
+  ['snell', 'Snell Roundhand (cursiva)', '"Snell Roundhand", "Brush Script MT", cursive'],
+];
+export const fontCss = (key) => (FONTS.find((f) => f[0] === (key || '')) || FONTS[0])[2];
+
 const norm360 = (a) => ((a % 360) + 360) % 360;
 const flipAnchor = (a) => ({ t: 'b', b: 't', m: 'm' }[a[0]] + { l: 'r', r: 'l', c: 'c' }[a[1]]);
 
@@ -37,7 +54,7 @@ export function textPose(doc, t) {
 // Caja en el sistema local del texto (x a la derecha, y arriba, origen en el punto de insercion).
 export function textFrame(t, measure, anchor = t.anchor) {
   const lines = String(t.text ?? '').split('\n');
-  const w = Math.max(0.0001, ...lines.map((l) => measure(l) * t.h));
+  const w = Math.max(0.0001, ...lines.map((l) => measure(l, t.font) * t.h));
   const hh = lines.length * LINE_SPACING * t.h;
   const ax = { l: 0, c: 0.5, r: 1 }[anchor?.[1] ?? 'l'];
   const ay = { t: 0, m: 0.5, b: 1 }[anchor?.[0] ?? 'b'];

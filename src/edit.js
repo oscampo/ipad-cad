@@ -1,8 +1,9 @@
 // Recortar, extender y matriz lineal. Sin DOM (se prueba en Node). Mutan doc; quien llama hace undo/solve
 // y revierte si el solver falla.
-import { addPoint, addLine, addArc, addCircle, addEllipse, addSpline, addText, addCon, nextId, arcOf, splinePolyline, deleteItems } from './model.js';
+import { addPoint, addLine, addArc, addCircle, addEllipse, addSpline, addText, addCon, nextId, arcOf, splinePolyline, deleteItems, arcSamples, ellipsePolyline } from './model.js';
 import { dist, closestOnSeg, lineLine, lineCircle, circleCircle, polylineLine, polylineCircle, inSweep, angleFrom, norm, TAU } from './geom.js';
 import { splitElement } from './split.js';
+import { rawAngle } from './text.js';
 
 const TOL = 1e-3; // tolerancia en unidades del dibujo
 
@@ -152,9 +153,17 @@ function relocateEnd(doc, elId, owner, field, t) {
       return pid;
     }
   }
-  const free = !pointUsedElsewhere(doc, old, elId) && !pointConstrained(doc, old) && !doc.pts[old].fixed;
+  // Un extremo que solo esta "sobre" otros elementos por restricciones ocultas (las que deja una extension
+  // anterior) se desplaza de verdad: se sueltan esas restricciones y el extremo va al nuevo cruce, sin dejar
+  // puntos atras.
+  const autoOn = (k) => (k.refs || []).includes(old) && k.hidden && ['PONL', 'PONC', 'PONS'].includes(k.t) && k.refs[0] === old;
+  const onlyAuto = Object.values(doc.cons).every((k) => !(k.refs || []).includes(old) || autoOn(k));
+  const free = !pointUsedElsewhere(doc, old, elId) && onlyAuto && !doc.pts[old].fixed;
   let pid = old;
-  if (free) { doc.pts[old].x = t.x; doc.pts[old].y = t.y; }
+  if (free) {
+    for (const [kid, k] of Object.entries(doc.cons)) if (autoOn(k)) delete doc.cons[kid];
+    doc.pts[old].x = t.x; doc.pts[old].y = t.y;
+  }
   else { pid = addPoint(doc, t.x, t.y, true); owner[field] = pid; }
   for (const v of t.vias) addCon(doc, { t: conFor(v), refs: [pid, v.id], hidden: true });
   return pid;
@@ -226,29 +235,31 @@ const jclone = (o) => JSON.parse(JSON.stringify(o));
 // hvAngle: grados a los que va a parar una direccion horizontal (rotacion o reflejo); las restricciones H/V
 // solo siguen valiendo si ese angulo es multiplo de 90 (con 90 se intercambian); si no, no se copian.
 // rotDeg: giro que se suma al angulo de los textos (en el reflejo se usa axisAng).
-function makeCopy(doc, col, tf, { mirror = false, reuse = null, axisAng = 0, hvAngle, rotDeg = 0, linked = false } = {}) {
+function makeCopy(doc, col, tf, { mirror = false, reuse = null, axisAng = 0, hvAngle, rotDeg = 0, linked = false, src = null } = {}) {
   const { P, L, Ci, Ar, Sp, Tx, El, cons, hatches } = col;
+  const S = src || doc; // de donde se leen los originales (al pegar, un documento guardado al copiar)
   const M = {}, made = [];
   for (const pid of P) {
     if (reuse && reuse(pid)) { M[pid] = pid; continue; }
-    const o = doc.pts[pid], q = tf(o), np = addPoint(doc, q.x, q.y, !!o.auto);
+    const o = S.pts[pid], q = tf(o), np = addPoint(doc, q.x, q.y, !!o.auto);
     const { x, y, ...flags } = o;
     Object.assign(doc.pts[np], flags);
     if (linked) doc.pts[np].fixed = false; // la copia sigue al original
     M[pid] = np;
   }
-  for (const id of L) { const { a, b, ...st } = doc.lines[id]; M[id] = addLine(doc, M[a], M[b], st); made.push({ k: 'ln', id: M[id] }); }
-  for (const id of Ci) { const { c, r, ...st } = doc.circles[id]; M[id] = addCircle(doc, M[c], r, st); made.push({ k: 'ci', id: M[id] }); }
+  for (const id of L) { const { a, b, ...st } = S.lines[id]; M[id] = addLine(doc, M[a], M[b], st); made.push({ k: 'ln', id: M[id] }); }
+  for (const id of Ci) { const { c, r, ...st } = S.circles[id]; M[id] = addCircle(doc, M[c], r, st); made.push({ k: 'ci', id: M[id] }); }
   for (const id of Ar) {
-    const { c, a, b, r, ...st } = doc.arcs[id];
+    const { c, a, b, r, ...st } = S.arcs[id];
     M[id] = mirror ? addArc(doc, M[c], M[b], M[a], r, st) : addArc(doc, M[c], M[a], M[b], r, st);
     made.push({ k: 'ar', id: M[id] });
   }
-  for (const id of El) { const { c, a, b, ...st } = doc.ellipses[id]; M[id] = addEllipse(doc, M[c], M[a], M[b], st); made.push({ k: 'el', id: M[id] }); }
-  for (const id of Sp) { const { pts, closed, ...st } = doc.splines[id]; M[id] = addSpline(doc, pts.map((p) => M[p]), st, closed); made.push({ k: 'sp', id: M[id] }); }
+  for (const id of El) { const { c, a, b, ...st } = S.ellipses[id]; M[id] = addEllipse(doc, M[c], M[a], M[b], st); made.push({ k: 'el', id: M[id] }); }
+  for (const id of Sp) { const { pts, closed, ...st } = S.splines[id]; M[id] = addSpline(doc, pts.map((p) => M[p]), st, closed); made.push({ k: 'sp', id: M[id] }); }
   for (const id of Tx) {
-    const t = doc.texts[id];
-    M[id] = addText(doc, M[t.pt], t.text, { h: t.h, ang: mirror ? 2 * axisAng - t.ang : t.ang + rotDeg, anchor: t.anchor, color: t.color, readable: t.readable });
+    const t = S.texts[id];
+    const ang0 = t.ref && !M[t.ref] ? rawAngle(S, t) : t.ang; // alineado con una linea que no viene en la copia: conserva su orientacion
+    M[id] = addText(doc, M[t.pt], t.text, { h: t.h, ang: mirror ? 2 * axisAng - ang0 : ang0 + rotDeg, anchor: t.anchor, color: t.color, readable: t.readable, font: t.font });
     if (t.ref && M[t.ref]) doc.texts[M[id]].ref = M[t.ref];
     made.push({ k: 'tx', id: M[id] });
   }
@@ -371,4 +382,38 @@ export function circularArray(doc, items, { c, step, n, skip = new Set(), link =
   }
   if (!made.length) return { ok: false, msg: 'Todas las instancias están omitidas' };
   return { ok: true, made };
+}
+
+// ---------------------------------------------------------------- copiar y pegar
+const COPYABLE = ['pt', 'ln', 'ci', 'ar', 'sp', 'tx', 'el'];
+// Cuadro que encierra los elementos (geometria real: circulos, arcos, splines y elipses incluidos).
+export function bboxOf(doc, items) {
+  const col = collect(doc, items.filter((i) => COPYABLE.includes(i.k)));
+  const xs = [], ys = [], add = (x, y) => { xs.push(x); ys.push(y); };
+  for (const id of col.P) add(doc.pts[id].x, doc.pts[id].y);
+  for (const id of col.Ci) { const c = doc.circles[id], p = doc.pts[c.c]; add(p.x - c.r, p.y - c.r); add(p.x + c.r, p.y + c.r); }
+  for (const id of col.Ar) for (const q of arcSamples(doc, doc.arcs[id])) add(q.x, q.y);
+  for (const id of col.Sp) for (const q of splinePolyline(doc, doc.splines[id], 12)) add(q.x, q.y);
+  for (const id of col.El) for (const q of ellipsePolyline(doc, doc.ellipses[id], 48)) add(q.x, q.y);
+  if (!xs.length) return null;
+  return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
+}
+
+// Guarda lo seleccionado: una copia del documento (para que el original pueda cambiar o borrarse) y los elementos.
+export function clipOf(doc, items) {
+  const its = items.filter((i) => COPYABLE.includes(i.k));
+  const bbox = its.length ? bboxOf(doc, its) : null;
+  if (!bbox) return null;
+  return { src: JSON.parse(JSON.stringify(doc)), items: its.map((i) => ({ k: i.k, id: i.id })), bbox };
+}
+
+// Pega lo copiado de modo que el centro de su cuadro quede en target. Las restricciones y los rellenos que
+// quedaban completos dentro de lo copiado se copian tambien.
+export function pasteClip(doc, clip, target) {
+  if (!clip) return { ok: false, msg: 'No hay nada copiado' };
+  const col = collect(clip.src, clip.items);
+  if (!col.P.size) return { ok: false, msg: 'No hay nada copiado' };
+  const dx = target.x - (clip.bbox.x0 + clip.bbox.x1) / 2, dy = target.y - (clip.bbox.y0 + clip.bbox.y1) / 2;
+  const r = makeCopy(doc, col, (o) => ({ x: o.x + dx, y: o.y + dy }), { src: clip.src });
+  return { ok: true, made: r.made };
 }

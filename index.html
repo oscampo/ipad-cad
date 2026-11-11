@@ -55,6 +55,12 @@ body.nolabels .grid2 { grid-template-columns: repeat(4, 1fr); }
 body.nolabels .grid2 button span { display: none; }
 body.nolabels .grid2 button { justify-content: center; padding: 4px; }
 #bar button { padding: 4px 8px; }
+.grp { position: relative; }
+.grp .chev { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; }
+.grp .chev::after { content: ""; position: absolute; right: 3px; bottom: 3px; border-style: solid; border-width: 0 0 6px 6px; border-color: transparent transparent currentColor transparent; opacity: .7; }
+.grp.filtered::before { content: ""; position: absolute; right: 4px; top: 4px; width: 8px; height: 8px; border-radius: 4px; background: var(--warn); }
+#fly { position: fixed; z-index: 30; display: flex; flex-direction: column; gap: 4px; padding: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,.25); }
+#fly button { justify-content: flex-start; text-align: left; white-space: nowrap; }
 dialog.help { width: min(760px, calc(100vw - 16px)); max-width: none; padding: 0; }
 dialog.help .hhead { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; padding: 8px 8px 8px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
 dialog.help #helpBody { padding: 8px 16px 16px; font-size: 14px; line-height: 1.45; }
@@ -114,14 +120,17 @@ body.nopanel #panel { display: none; }
 <header id="bar">
   <button id="tTree" data-icon="list-tree" title="Árbol de elementos" aria-label="Árbol de elementos" aria-pressed="false"><i></i></button>
   <span class="sep"></span>
-  <button data-tool="select" data-icon="select" title="Seleccionar y arrastrar (V)" aria-label="Seleccionar"><i></i></button>
+  <button class="grp" data-group="sel" data-icon="select"><i></i><b class="chev"></b></button>
+  <button id="tCopy" data-icon="copy" title="Copiar la selección (Ctrl+C)" aria-label="Copiar"><i></i></button>
+  <button id="tPaste" data-icon="paste" title="Pegar: toca el punto donde va el centro de lo copiado (Ctrl+V)" aria-label="Pegar"><i></i></button>
   <button data-tool="point" data-icon="point" title="Punto (P)" aria-label="Punto"><i></i></button>
-  <button data-tool="line" data-icon="line" title="Línea (L)" aria-label="Línea"><i></i></button>
-  <button data-tool="circle" data-icon="circle" title="Círculo (C)" aria-label="Círculo"><i></i></button>
+  <button class="grp" data-group="line" data-icon="line"><i></i><b class="chev"></b></button>
+  <button class="grp" data-group="circle" data-icon="circle"><i></i><b class="chev"></b></button>
   <button data-tool="ellipse" data-icon="ellipse" title="Elipse: centro y dos ejes (O)" aria-label="Elipse"><i></i></button>
-  <button data-tool="arcc" data-icon="arc-c" title="Arco por centro y extremos (R)" aria-label="Arco por centro y extremos"><i></i></button>
-  <button data-tool="arc3" data-icon="arc-3" title="Arco por 3 puntos (A)" aria-label="Arco por 3 puntos"><i></i></button>
+  <button class="grp" data-group="arc" data-icon="arc-c"><i></i><b class="chev"></b></button>
   <button data-tool="spline" data-icon="spline" title="Spline por puntos (S)" aria-label="Spline por puntos"><i></i></button>
+  <button class="grp" data-group="rect" data-icon="rect"><i></i><b class="chev"></b></button>
+  <button data-tool="polygon" data-icon="polygon" title="Polígono regular: centro, radio y número de lados (G)" aria-label="Polígono"><i></i></button>
   <button data-tool="text" data-icon="text" title="Texto (T)" aria-label="Texto"><i></i></button>
   <button data-tool="intersect" data-icon="intersect" title="Intersección de 2 elementos (I)" aria-label="Intersección"><i></i></button>
   <button data-tool="trim" data-icon="trim" title="Recortar: arrastra sobre los tramos a quitar (X)" aria-label="Recortar"><i></i></button>
@@ -181,6 +190,7 @@ body.nopanel #panel { display: none; }
       <button id="txRead" data-icon="eye" aria-pressed="true" title="Si el texto quedaría boca abajo, se gira 180° para que se lea"><i></i><span>Legible</span></button>
     </div>
     <div class="row"><label for="txSize">Altura</label><input type="number" id="txSize" min="0.01" step="any" placeholder="auto"></div>
+    <div class="row"><label for="txFont">Fuente</label><select id="txFont"></select></div>
     <div class="row"><label>Punto de inserción</label></div>
     <div class="txa" id="txAnchors"></div>
     <small>Elige en qué punto de la caja del texto está el punto de inserción. Ese punto es un punto real: se puede acotar, fijar o relacionar con otros elementos.</small>
@@ -297,8 +307,24 @@ body.nopanel #panel { display: none; }
   <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin:4px 0"><input type="checkbox" id="cirDims" style="width:22px;height:22px;min-height:22px;margin:0">Mostrar la cota angular</label>
   <div class="actions"><button type="button" id="cirCancel">Cancelar</button><button id="cirOk" class="on">Crear copias</button></div>
 </form></dialog>
+<dialog id="dlgP"><form method="dialog">
+  <p style="margin:0 0 6px"><b>Polígono regular</b></p>
+  <div class="row"><label for="polN">Número de lados</label><input id="polN" type="number" min="3" max="64" step="1"></div>
+  <div class="row"><label for="polK">Tipo</label><select id="polK"><option value="in">Inscrito (el radio llega a un vértice)</option><option value="ci">Circunscrito (el radio llega al medio de un lado)</option></select></div>
+  <small>El ángulo del radio con la horizontal define la orientación del polígono.</small>
+  <div class="actions"><button type="button" id="polCancel">Cancelar</button><button id="polOk" class="on">Crear</button></div>
+</form></dialog>
+<dialog id="dlgF"><form method="dialog">
+  <p style="margin:0 0 6px"><b>Filtrar la selección</b></p>
+  <small>Solo se podrá seleccionar (al tocar o con el cuadro) lo que esté marcado.</small>
+  <p style="margin:8px 0 2px;font-size:13px"><b>Entidades</b></p>
+  <div id="flKinds"></div>
+  <p style="margin:8px 0 2px;font-size:13px"><b>Tipos de línea</b> <span style="color:var(--muted)">(líneas, círculos, arcos, splines y elipses)</span></p>
+  <div id="flLt"></div>
+  <div class="actions"><button type="button" id="flAll">Todo</button><button type="button" id="flNone">Nada</button><button type="button" id="flCancel">Cancelar</button><button id="flOk" class="on">Aplicar</button></div>
+</form></dialog>
 <dialog id="dlgH" class="help"><div class="hhead"><b>Ayuda</b><button id="helpClose" aria-label="Cerrar">✕</button></div><div id="helpBody"></div></dialog>
-<dialog id="dlgT"><form method="dialog"><label id="dlgTLabel" for="dlgTInput"></label><textarea id="dlgTInput" rows="2" style="width:100%;font-size:18px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--btn);color:var(--fg);font-family:inherit"></textarea><div class="actions"><button value="cancel" type="button" id="dlgTCancel">Cancelar</button><button value="ok" id="dlgTOk" class="on">Aceptar</button></div></form></dialog>
+<dialog id="dlgT"><form method="dialog"><label id="dlgTLabel" for="dlgTInput"></label><textarea id="dlgTInput" rows="2" style="width:100%;font-size:18px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--btn);color:var(--fg);font-family:inherit"></textarea><div class="row" id="dlgTFontRow" style="margin-top:6px"><label for="dlgTFont">Fuente</label><select id="dlgTFont"></select></div><div class="actions"><button value="cancel" type="button" id="dlgTCancel">Cancelar</button><button value="ok" id="dlgTOk" class="on">Aceptar</button></div></form></dialog>
 <dialog id="dlgN"><form method="dialog">
   <label id="nameLabel" for="nameInput">Nombre del archivo</label>
   <div style="display:flex;gap:6px;align-items:center"><input id="nameInput" type="text" autocomplete="off" autocapitalize="off" spellcheck="false"><b id="nameExt" style="color:var(--muted)"></b></div>

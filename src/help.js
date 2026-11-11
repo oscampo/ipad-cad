@@ -14,19 +14,27 @@ export const HELP_HTML = `
 </ul></details>
 
 <details><summary>Herramientas de dibujo (barra superior)</summary>
+<p>Los botones con una esquina marcada son <b>desplegables</b>: muestran la última herramienta usada del grupo. Toca la esquina, vuelve a tocar el botón cuando ya está activo, o mantenlo presionado para ver las demás.</p>
 <ul>
 <li><b>Seleccionar (V)</b>: selecciona, arrastra puntos, líneas o el borde de un círculo (el mecanismo se mueve según las restricciones) y, arrastrando desde un lugar vacío, selecciona con un cuadro.</li>
+<li><b>Filtrar</b> (en el desplegable de Seleccionar): elige qué se puede seleccionar, por entidades (puntos, líneas, círculos, arcos, elipses, splines, textos, rellenos, cotas) y por tipo de línea. Vale para tocar y para el cuadro de selección. Un punto rojo en el botón indica que hay filtro activo.</li>
+<li><b>Copiar</b> (Ctrl+C) y <b>Pegar</b> (Ctrl+V): Copiar guarda la selección con sus restricciones internas; Pegar pide un punto y deja el centro del cuadro que encierra lo copiado en ese punto (se ve el cuadro mientras mueves). Se puede pegar varias veces; Esc o Seleccionar termina. Lo copiado se conserva aunque borres el original, pero se pierde al cerrar la app.</li>
 <li><b>Punto (P)</b>: sobre una línea o círculo queda restringido a él.</li>
 <li><b>Línea (L)</b>: toca inicio y fin (encadena) o arrastra un segmento. Esc o Seleccionar termina.</li>
+<li><b>Línea constructiva (K)</b> (desplegable de Línea): gris (#C3C3C3), del grosor «fino» y con el tipo . ___ . (punto, hueco, trazo continuo, hueco, punto). Se dibuja como una línea normal, con bloqueo suave. No sale en el SVG de corte láser salvo que cambies su clase a Corte o Marcado.</li>
 <li><b>Círculo (C)</b>: centro y un punto del borde.</li>
+<li><b>Círculo perimetral</b> (desplegable de Círculo): toca 3 puntos no colineales; los puntos quedan sobre la circunferencia.</li>
 <li><b>Elipse (O)</b>: toca el centro; luego toca (o arrastra hasta) el extremo del primer eje y, por último, un punto del segundo eje (la elipse pasa por la proyección de ese punto sobre la perpendicular al primer eje). También puedes arrastrar desde el centro hasta el extremo del primer eje. Es un elemento propio: se selecciona, se copia, se exporta, aparece en el árbol y sus tres puntos (centro, eje 1 y eje 2) se pueden acotar y restringir. No se recorta, no se extiende y no admite intersecciones.</li>
 <li><b>Arco por centro y extremos (R)</b>: centro, inicio y fin (sentido antihorario).</li>
-<li><b>Arco por 3 puntos (A)</b>: inicio, punto intermedio y fin.</li>
+<li><b>Arco por 3 puntos (A)</b> (desplegable de Arco): inicio, punto intermedio y fin.</li>
 <li><b>Spline (S)</b>: toca los puntos por donde pasa la curva; tocar de nuevo el último (o Esc) termina, tocar el primero la cierra.</li>
-<li><b>Texto (T)</b>: toca donde va el punto de inserción.</li>
+<li><b>Rectángulo (B)</b>: toca (o arrastra entre) dos esquinas opuestas. Queda con restricciones horizontal y vertical, así que sigue siendo rectángulo al mover una esquina.</li>
+<li><b>Rectángulo de centro</b> (desplegable de Rectángulo): toca el centro y una esquina (o arrastra del centro a la esquina). El centro queda como punto medio de la diagonal.</li>
+<li><b>Polígono (G)</b>: toca el centro y el radio; luego eliges el número de lados (3 a 64) y si es <i>inscrito</i> (el radio llega a un vértice) o <i>circunscrito</i> (el radio llega al medio de un lado). El ángulo del radio con la horizontal da la orientación, con los mismos bloqueos suaves de las líneas. Queda regular al mover un vértice (vértices equidistantes del centro y lados iguales, restricciones ocultas).</li>
+<li><b>Texto (T)</b>: toca donde va el punto de inserción; en el cuadro eliges la fuente.</li>
 <li><b>Intersección (I)</b>: toca dos elementos (línea, arco, círculo o spline) para crear su punto de intersección con las relaciones correspondientes.</li>
 <li><b>Recortar (X)</b>: mantén presionado y arrastra sobre los tramos que quieres quitar (entre los cruces con otros elementos). Un toque recorta un tramo. Solo se quita ese tramo: el resto del elemento no se divide en los demás cruces. Sin cruces, borra el elemento completo. No recorta splines ni elipses.</li>
-<li><b>Extender (E)</b>: toca un segmento o arco cerca del extremo que quieres alargar; llega hasta el primer elemento que encuentre.</li>
+<li><b>Extender (E)</b>: toca un segmento o arco cerca del extremo que quieres alargar; llega hasta el primer elemento que encuentre. Al extender de nuevo, el mismo extremo se desplaza al siguiente cruce (no deja puntos en los anteriores).</li>
 <li>Deshacer, rehacer, borrar selección y ajustar vista están a la derecha de la barra.</li>
 </ul></details>
 
@@ -91,7 +99,7 @@ export const HELP_HTML = `
 
 <details><summary>Texto, estilo y rellenos</summary>
 <ul>
-<li><b>Texto</b>: el punto de inserción es un punto real (se puede acotar, fijar o relacionar). Elige el punto de inserción en la caja, el ángulo, la altura, alinea con una línea y <i>Legible</i> (gira 180° el texto que quedaría boca abajo).</li>
+<li><b>Texto</b>: la <b>fuente</b> se elige al crearlo o en el panel (sistema, Helvetica/Arial, Times/Georgia, Courier/Menlo, Verdana, Palatino, Optima, Futura, American Typewriter y tres manuscritas; si el dispositivo no tiene una, se usa una genérica parecida). El punto de inserción es un punto real (se puede acotar, fijar o relacionar). Elige el punto de inserción en la caja, el ángulo, la altura, alinea con una línea y <i>Legible</i> (gira 180° el texto que quedaría boca abajo).</li>
 <li><b>Estilo</b>: color, tipo de línea (continua, oculta, eje, fantasma, discontinua, punteada, traza y punto, o uno nuevo con su patrón) y grosor (fino, normal, grueso). Aplica a la selección y a lo nuevo.</li>
 <li><b>Relleno / achurado</b>: sobre un contorno cerrado (líneas, arcos o círculo): líneas, cruzado o sólido, con ángulo, separación y opacidad.</li>
 </ul></details>
@@ -110,9 +118,10 @@ export const HELP_HTML = `
 </ul></details>
 
 <details><summary>Atajos de teclado</summary>
-<p>V seleccionar, P punto, L línea, C círculo, R arco por centro, A arco por 3 puntos, S spline, T texto, I intersección, X recortar, E extender. Ctrl/Cmd+Z deshacer, Ctrl/Cmd+Y (o Ctrl/Cmd+Mayús+Z) rehacer, Supr o Retroceso borra, Esc cancela o termina.</p></details>
+<p>V seleccionar, P punto, L línea, K línea constructiva, C círculo, B rectángulo, G polígono, O elipse, Ctrl/Cmd+C copiar, Ctrl/Cmd+V pegar, R arco por centro, A arco por 3 puntos, S spline, T texto, I intersección, X recortar, E extender. Ctrl/Cmd+Z deshacer, Ctrl/Cmd+Y (o Ctrl/Cmd+Mayús+Z) rehacer, Supr o Retroceso borra, Esc cancela o termina.</p></details>
 
 <details><summary>Historial de versiones</summary>
+<p><b>v1.0.4</b>: botones desplegables (Seleccionar con Filtrar, Línea con constructiva, Círculo con perimetral, Arco, Rectángulo), Copiar y Pegar, rectángulos, polígono regular, fuentes de texto y extensión sucesiva que desplaza el extremo.</p>
 <p><b>v1.0.3</b>: restricciones numeradas y navegables desde el árbol, «Punto sobre» unificado en Coincidente, copias vinculadas con cotas opcionales (matrices y espejo), herramienta de elipse y recorte que no divide el resto del elemento.</p>
 <p><b>v1.0.2</b>: el bloqueo suave vuelve a horizontal, vertical y 45° por defecto (el paso es configurable).</p>
 <p><b>v1.0.1</b>: bloqueo suave que se mantiene cerca de otras líneas, con perpendicular, paralela y tangente al acercarse a elementos, y el imán a intersecciones.</p>

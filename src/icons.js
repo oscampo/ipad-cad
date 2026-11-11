@@ -23,6 +23,8 @@ import unlock from 'lucide-static/icons/lock-open.svg?raw';
 import menu from 'lucide-static/icons/menu.svg?raw';
 import listTree from 'lucide-static/icons/list-tree.svg?raw';
 import help from 'lucide-static/icons/circle-help.svg?raw';
+import copy from 'lucide-static/icons/copy.svg?raw';
+import paste from 'lucide-static/icons/clipboard-paste.svg?raw';
 
 const S = (inner) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
 
@@ -54,6 +56,13 @@ const custom = {
   'array-circ': S('<circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="4.5" r="2.2"/><circle cx="18.9" cy="15.5" r="2.2" opacity=".65"/><circle cx="5.1" cy="15.5" r="2.2" opacity=".35"/><path d="M12 12V6.7" opacity=".4" stroke-dasharray="1.5 2.5"/>'),
   // copia espejo: eje discontinuo con un triangulo y su reflejo
   mirror: S('<path d="M12 2v20" stroke-dasharray="2 3"/><path d="M9 7 3 18h6z"/><path d="M15 7l6 11h-6z" opacity=".5"/>'),
+  filter: S('<path d="M3 4h18l-7 8.5V19l-4 2v-8.5z"/>'),
+  // linea constructiva: punto, hueco, trazo, hueco, punto
+  cline: S('<circle cx="3.5" cy="12" r="1.7" fill="currentColor"/><path d="M8 12h8" opacity=".6"/><circle cx="20.5" cy="12" r="1.7" fill="currentColor"/>'),
+  circle3: S('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="3" r="1.9" fill="currentColor"/><circle cx="19.8" cy="16.5" r="1.9" fill="currentColor"/><circle cx="4.2" cy="16.5" r="1.9" fill="currentColor"/>'),
+  rect: S('<rect x="3" y="6" width="18" height="12" rx="1"/><circle cx="3" cy="6" r="1.9" fill="currentColor"/><circle cx="21" cy="18" r="1.9" fill="currentColor"/>'),
+  'rect-c': S('<rect x="3" y="6" width="18" height="12" rx="1"/><circle cx="12" cy="12" r="1.9" fill="currentColor"/><circle cx="21" cy="18" r="1.9" fill="currentColor"/><path d="M12 12l9 6" opacity=".45" stroke-dasharray="1.5 2.5"/>'),
+  polygon: S('<path d="M12 3l8.5 6.2-3.2 10H6.7l-3.2-10z"/><circle cx="12" cy="12.5" r="1.6" fill="currentColor"/>'),
   // elipse inclinada con su centro
   ellipse: S('<ellipse cx="12" cy="12" rx="10" ry="5.5" transform="rotate(-30 12 12)"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/>'),
   // spline: una "S" girada 90 grados (onda) con puntos en los extremos y en cada seno
@@ -76,7 +85,7 @@ const custom = {
   labels: S('<path d="M4 7h16M4 12h10M4 17h16"/>'),
 };
 
-const generic = { undo, redo, trash, fit, grid, magnet, eye, hand, save, 'folder-open': folderOpen, 'file-plus': filePlus, image, download, lock, equal, select: pointer, circle, ruler, 'pencil-ruler': pencilRuler, menu, unlock, 'list-tree': listTree, help };
+const generic = { undo, redo, trash, fit, grid, magnet, eye, hand, save, 'folder-open': folderOpen, 'file-plus': filePlus, image, download, lock, equal, select: pointer, circle, ruler, 'pencil-ruler': pencilRuler, menu, unlock, 'list-tree': listTree, help, copy, paste };
 
 function clean(raw) {
   // quita comentarios de licencia y atributos de tamano; el CSS fija el tamano

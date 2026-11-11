@@ -9,6 +9,8 @@ export const BUILTIN_LTYPES = {
   discontinua: { label: 'Discontinua', pattern: [8, -4] },
   punteada: { label: 'Punteada', pattern: [0, -3] },
   trazopunto: { label: 'Traza y punto', pattern: [10, -2.5, 0, -2.5] },
+  // constructiva: . ___ . (punto, hueco, trazo continuo, hueco, punto); se dibuja aparte, no es un patron repetido
+  constructiva: { label: 'Constructiva (. ___ .)', pattern: [] },
 };
 
 export const PALETTE = [
@@ -111,7 +113,7 @@ export function splinePolyline(doc, sp, per = 16) {
 // anchor: 'tl','tc','tr','ml','mc','mr','bl','bc','br' (vertical + horizontal); ang en grados.
 export function addText(doc, pt, text, opts = {}) {
   const id = nextId(doc, 't');
-  doc.texts[id] = { pt, text, h: opts.h ?? 4, ang: opts.ang ?? 0, anchor: opts.anchor ?? 'bl', color: opts.color ?? 'auto', readable: opts.readable ?? true };
+  doc.texts[id] = { pt, text, h: opts.h ?? 4, ang: opts.ang ?? 0, anchor: opts.anchor ?? 'bl', color: opts.color ?? 'auto', readable: opts.readable ?? true, ...(opts.font ? { font: opts.font } : {}) };
   return id;
 }
 

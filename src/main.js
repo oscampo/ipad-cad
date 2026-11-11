@@ -12,9 +12,10 @@ import { startTrace, recordTraces, traceToSpline, offsetPolyline } from './curve
 import { splitElement } from './split.js';
 import { boxSelect } from './boxsel.js';
 import { crossPoints } from './snapx.js';
-import { trimAt, extendEnd, linearArray, mirrorCopy, circularArray } from './edit.js';
+import { trimAt, extendEnd, linearArray, mirrorCopy, circularArray, clipOf, pasteClip } from './edit.js';
+import { CLINE_STYLE, circleThrough3, addRectangle, polygonVertices, addPolygon } from './shapes.js';
 import { layoutDim, dragDim, dimValue, angSector, angTrue, DIAM } from './dims.js';
-import { textFrame, textHit, textPose, rawAngle, ANCHORS, ANCHOR_NAMES, LINE_SPACING } from './text.js';
+import { textFrame, textHit, textPose, rawAngle, ANCHORS, ANCHOR_NAMES, LINE_SPACING, FONTS, fontCss } from './text.js';
 import { exportSVG, exportSVGLaser, exportDXF, extraExtents, laserClasses } from './export.js';
 import { iconSvg } from './icons.js';
 import { buildTree, kindOf } from './tree.js';
@@ -23,7 +24,7 @@ import { parseValue, isPlainNumber } from './expr.js';
 import { HELP_HTML } from './help.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from './lock.js';
 
-const VERSION = '1.0.3';
+const VERSION = '1.0.4';
 const STORE = 'ipad-cad-v1';
 const $ = (id) => document.getElementById(id);
 const cv = $('cv');
@@ -35,9 +36,10 @@ let view = { ox: 200, oy: 300, s: 3 }; // px por unidad; y del modelo hacia arri
 let tool = 'select';
 let sel = []; // [{k:'pt'|'ln'|'ci'|'ha', id}]
 let cur = { color: 'auto', ltype: 'continua', w: 2, ls: 1, tx: { h: null, ang: 0, anchor: 'bl', readable: true } };
-const opts = { grid: true, snap: false, cons: true, pts: true, dims: true, texts: true, touch: false, ltScale: 1, labels: true, lock: true, lockDeg: 45, intMs: 80, arrLink: true, arrDims: false, sections: {} };
+const opts = { grid: true, snap: false, cons: true, pts: true, dims: true, texts: true, touch: false, ltScale: 1, labels: true, lock: true, lockDeg: 45, intMs: 80, arrLink: true, arrDims: false, filtKinds: [], filtLt: [], grp: {}, polyN: 6, polyCirc: false, sections: {} };
 let undoStack = [], redoStack = [];
 let pending = null; // estado de la herramienta en curso
+let clip = null; // lo copiado (Copiar / Pegar)
 let hover = null; // posicion del puntero en pantalla
 let drag = null;
 let labelHits = [];
@@ -112,6 +114,8 @@ function updateEnabled() {
     RAD: crv >= 1,
   };
   document.querySelectorAll('[data-con]').forEach((b) => { b.disabled = !rules[b.dataset.con]; });
+  $('tCopy').disabled = !sel.some((x) => ['pt', 'ln', 'ci', 'ar', 'sp', 'tx', 'el'].includes(x.k));
+  $('tPaste').disabled = !clip;
   $('mkint').disabled = ln + crv + n.sp !== 2;
   $('mksplit').disabled = !(ln + crv === 1 && !n.sp); // con puntos: divide en ellos; sin puntos: en n partes iguales
   $('mkhatch').disabled = ln + crv + n.sp < 1;
@@ -265,7 +269,7 @@ function wireLongPressHints() {
   const bar = $('bar');
   bar.addEventListener('pointerdown', (e) => {
     const b = e.target.closest('button');
-    if (!b || e.pointerType === 'mouse') return;
+    if (!b || e.pointerType === 'mouse' || b.classList.contains('grp')) return;
     shown = false;
     timer = setTimeout(() => { shown = true; toast(b.title || b.getAttribute('aria-label')); }, 450);
   });
@@ -320,7 +324,7 @@ function shownPoints() {
 
 // ---- iman a intersecciones: la interseccion de dos elementos cercanos al cursor se toma como punto, una vez
 // que el cursor se queda ahi opts.intMs milisegundos (un toque o el inicio de un arrastre la toman al instante).
-const DRAW_TOOLS = new Set(['point', 'line', 'circle', 'ellipse', 'arcc', 'arc3', 'spline', 'text']);
+const DRAW_TOOLS = new Set(['point', 'line', 'cline', 'circle', 'circle3', 'rect', 'rectc', 'polygon', 'paste', 'ellipse', 'arcc', 'arc3', 'spline', 'text']);
 const intSeen = new Map();
 let intTimer = 0;
 function curvesNear(sx, sy, px) {
@@ -408,56 +412,64 @@ function snapAt(sx, sy, o = {}) {
   return { type: 'free', x: m.x, y: m.y };
 }
 
+// Filtro de seleccion (boton Filtrar): entidades y tipos de linea que no se pueden seleccionar.
+const fkOn = (k) => !(opts.filtKinds || []).includes(k);
+const fltOk = (o) => !(opts.filtLt || []).includes(o.ltype ?? 'continua');
+const selOk = (x) => {
+  if (!fkOn(x.k)) return false;
+  const o = x.k === 'ln' ? doc.lines[x.id] : x.k === 'ci' ? doc.circles[x.id] : x.k === 'ar' ? doc.arcs[x.id] : x.k === 'sp' ? doc.splines[x.id] : x.k === 'el' ? doc.ellipses[x.id] : null;
+  return !o || fltOk(o);
+};
 function hitTest(sx, sy) {
-  for (const h of labelHits) if (sx >= h.x && sx <= h.x + h.w && sy >= h.y && sy <= h.y + h.h) return { k: 'co', id: h.id };
+  for (const h of labelHits) if (fkOn('co') && sx >= h.x && sx <= h.x + h.w && sy >= h.y && sy <= h.y + h.h) return { k: 'co', id: h.id };
   const m = toModel(sx, sy);
   let best = null, bd = 14;
   const shown = shownPoints();
   for (const [id, p] of Object.entries(doc.pts)) {
-    if (!shown.has(id)) continue;
+    if (!shown.has(id) || !fkOn('pt')) continue;
     const d = dist(toScreen(p), { x: sx, y: sy });
     if (d < bd) { bd = d; best = { k: 'pt', id }; }
   }
   if (best) return best;
   // un texto se toma por su caja (antes que las lineas que pasen por debajo)
   for (const [id, t] of Object.entries(doc.texts)) {
-    if (opts.texts && doc.pts[t.pt] && textHit(doc, t, m, measureRel, 2 / view.s)) return { k: 'tx', id };
+    if (opts.texts && fkOn('tx') && doc.pts[t.pt] && textHit(doc, t, m, measureRel, 2 / view.s)) return { k: 'tx', id };
   }
-  best = hitCurves(sx, sy);
+  best = hitCurves(sx, sy, true);
   if (best) return best;
   for (const [id, h] of Object.entries(doc.hatches)) {
     const path = hatchPath(h);
-    if (path && ctx.isPointInPath(path, sx * dpr, sy * dpr, 'evenodd')) return { k: 'ha', id };
+    if (fkOn('ha') && path && ctx.isPointInPath(path, sx * dpr, sy * dpr, 'evenodd')) return { k: 'ha', id };
   }
   return null;
 }
 
 // Solo lineas, circulos, arcos y splines (sin puntos): para recortar, extender y elegir direcciones.
-function hitCurves(sx, sy) {
+function hitCurves(sx, sy, filt = false) {
   const m = toModel(sx, sy);
   let best = null, bd = 11;
   for (const [id, l] of Object.entries(doc.lines)) {
     const c = closestOnSeg(m, doc.pts[l.a], doc.pts[l.b]);
     const d = dist(toScreen(c), { x: sx, y: sy });
-    if (d < bd) { bd = d; best = { k: 'ln', id }; }
+    if (d < bd && (!filt || (fkOn('ln') && fltOk(l)))) { bd = d; best = { k: 'ln', id }; }
   }
   for (const [id, ci] of Object.entries(doc.circles)) {
     const d = Math.abs(dist(doc.pts[ci.c], m) - ci.r) * view.s;
-    if (d < bd) { bd = d; best = { k: 'ci', id }; }
+    if (d < bd && (!filt || (fkOn('ci') && fltOk(ci)))) { bd = d; best = { k: 'ci', id }; }
   }
   for (const [id, ar] of Object.entries(doc.arcs)) {
     const cp = doc.pts[ar.c];
     const d = Math.abs(dist(cp, m) - ar.r) * view.s;
     const g = arcOf(doc, ar);
-    if (d < bd && inSweep(cp, g.a0, g.sweep, m, 8 / Math.max(ar.r * view.s, 1))) { bd = d; best = { k: 'ar', id }; }
+    if (d < bd && (!filt || (fkOn('ar') && fltOk(ar))) && inSweep(cp, g.a0, g.sweep, m, 8 / Math.max(ar.r * view.s, 1))) { bd = d; best = { k: 'ar', id }; }
   }
   for (const [id, sp] of Object.entries(doc.splines)) {
     const d = distToPolyline(splinePolyline(doc, sp, 12).map(toScreen), sx, sy);
-    if (d < bd) { bd = d; best = { k: 'sp', id }; }
+    if (d < bd && (!filt || (fkOn('sp') && fltOk(sp)))) { bd = d; best = { k: 'sp', id }; }
   }
   for (const [id, e] of Object.entries(doc.ellipses)) {
     const d = distToPolyline(ellipsePolyline(doc, e, 72).map(toScreen), sx, sy);
-    if (d < bd) { bd = d; best = { k: 'el', id }; }
+    if (d < bd && (!filt || (fkOn('el') && fltOk(e)))) { bd = d; best = { k: 'el', id }; }
   }
   return best;
 }
@@ -543,6 +555,20 @@ function distToPolyline(P, sx, sy) {
   return best;
 }
 
+// Linea constructiva: punto, hueco, trazo continuo, hueco, punto (px de dispositivo). El hueco es el de las
+// lineas de extension de las cotas (unos 3 px).
+function strokeConstruction(c, x1, y1, x2, y2, w) {
+  c.setLineDash([]);
+  const L = Math.hypot(x2 - x1, y2 - y1);
+  if (!(L > 0)) return;
+  const ux = (x2 - x1) / L, uy = (y2 - y1) / L, r = (w * 1.1 + 0.6) * dpr, e = r + 3.5 * dpr;
+  c.save();
+  c.fillStyle = c.strokeStyle;
+  for (const [x, y] of [[x1, y1], [x2, y2]]) { c.beginPath(); c.arc(x, y, r, 0, 7); c.fill(); }
+  if (L > 2 * e + 2 * dpr) { c.beginPath(); c.moveTo(x1 + ux * e, y1 + uy * e); c.lineTo(x2 - ux * e, y2 - uy * e); c.stroke(); }
+  c.restore();
+}
+
 // Segmento con patron dibujado tramo a tramo (px de dispositivo).
 function strokeLine(c, x1, y1, x2, y2, dash) {
   c.setLineDash([]);
@@ -622,7 +648,8 @@ export function render(c, W, H, v, o) {
     const a = toScreen(doc.pts[l.a]), b = toScreen(doc.pts[l.b]);
     if (o.ui && isSel('ln', id)) { c.setLineDash([]); c.strokeStyle = theme.sel + '88'; c.lineWidth = (l.w + 6) * dpr; c.beginPath(); c.moveTo(a.x * dpr, a.y * dpr); c.lineTo(b.x * dpr, b.y * dpr); c.stroke(); }
     const dsh = applyStroke(c, l.color, l.w, l.ltype, o, l.ls);
-    strokeLine(c, a.x * dpr, a.y * dpr, b.x * dpr, b.y * dpr, dsh);
+    if (l.ltype === 'constructiva') strokeConstruction(c, a.x * dpr, a.y * dpr, b.x * dpr, b.y * dpr, l.w);
+    else strokeLine(c, a.x * dpr, a.y * dpr, b.x * dpr, b.y * dpr, dsh);
   }
   for (const [id, sp] of Object.entries(doc.splines)) {
     const P = splinePolyline(doc, sp, 16).map((q) => { const s = toScreen(q); return { x: s.x * dpr, y: s.y * dpr }; });
@@ -770,9 +797,9 @@ function conAnchors(k) {
 const FONT = '-apple-system, system-ui, "Segoe UI", sans-serif';
 let mctx = null;
 // ancho de una linea de texto para altura 1 (se escala por la altura real del texto)
-function measureRel(line) {
+function measureRel(line, font) {
   if (!mctx) mctx = document.createElement('canvas').getContext('2d');
-  mctx.font = `100px ${FONT}`;
+  mctx.font = `100px ${fontCss(font)}`;
   return mctx.measureText(line).width / 100;
 }
 
@@ -785,7 +812,7 @@ function drawTexts(c, o) {
     c.save();
     c.translate(S.x * dpr, S.y * dpr);
     c.rotate(-(pose.ang * Math.PI) / 180);
-    c.font = `${t.h * sc * dpr}px ${FONT}`;
+    c.font = `${t.h * sc * dpr}px ${fontCss(t.font)}`;
     c.fillStyle = colorOf(t.color, o); c.textBaseline = 'top'; c.textAlign = 'left';
     f.lines.forEach((ln, i) => c.fillText(ln, f.xmin * sc * dpr, (-f.ymax * sc + (i * LINE_SPACING + 0.1) * t.h * sc) * dpr));
     if (o.ui && isSel('tx', id)) {
@@ -875,7 +902,7 @@ function drawPreview(c) {
   if (hover) {
     let s = snapAt(hover.x, hover.y);
     // bloqueo suave de la linea que se esta dibujando (pendiente o arrastrando)
-    const lref = tool === 'line' ? lineStartRef() : null;
+    const lref = tool === 'line' || tool === 'cline' || tool === 'polygon' ? lineStartRef() : null;
     const lk = lref ? lockFor(lref, hover) : null;
     if (lk) s = { type: lk.end ? lk.end.type : 'free', x: lk.x, y: lk.y };
     const sp = toScreen(s);
@@ -895,6 +922,35 @@ function drawPreview(c) {
       c.beginPath(); c.moveTo(a.x * dpr, a.y * dpr); c.lineTo(sp.x * dpr, sp.y * dpr); c.stroke();
       label(c, fmt(dist(S0, s)), (a.x + sp.x) / 2, (a.y + sp.y) / 2 - 14, null, theme.accent);
       if (lk) label(c, lk.label, sp.x + 16, sp.y - 16, null, theme.accent);
+    }
+    if (tool === 'paste' && clip) { // cuadro de lo copiado, centrado en el cursor
+      const b = clip.bbox, w = b.x1 - b.x0, h = b.y1 - b.y0, tl = toScreen({ x: s.x - w / 2, y: s.y + h / 2 });
+      c.setLineDash([6 * dpr, 4 * dpr]); c.strokeStyle = theme.accent; c.strokeRect(tl.x * dpr, tl.y * dpr, w * view.s * dpr, h * view.s * dpr);
+    }
+    if (tool === 'circle3' && pending?.ids) {
+      const A = doc.pts[pending.ids[0]];
+      c.setLineDash([6 * dpr, 4 * dpr]); c.strokeStyle = theme.accent; c.beginPath();
+      if (pending.ids.length === 1) { const a = toScreen(A); c.moveTo(a.x * dpr, a.y * dpr); c.lineTo(sp.x * dpr, sp.y * dpr); c.stroke(); }
+      else {
+        const g = circleThrough3(A, doc.pts[pending.ids[1]], s);
+        if (g) { const cc = toScreen(g.c); c.arc(cc.x * dpr, cc.y * dpr, g.r * view.s * dpr, 0, 7); c.stroke(); label(c, 'R' + fmt(g.r), cc.x, cc.y - g.r * view.s - 14, null, theme.accent); }
+      }
+    }
+    if (tool === 'rect' || tool === 'rectc') {
+      const P0 = pending?.s ? doc.pts[pending.s] : (!pending && drag?.moved ? snapAt(drag.p0.x, drag.p0.y, { press: true }) : null);
+      if (P0) {
+        const A = tool === 'rectc' ? { x: 2 * P0.x - s.x, y: 2 * P0.y - s.y } : P0, a = toScreen(A), b = toScreen(s);
+        c.setLineDash([6 * dpr, 4 * dpr]); c.strokeStyle = theme.accent; c.strokeRect(a.x * dpr, a.y * dpr, (b.x - a.x) * dpr, (b.y - a.y) * dpr);
+        label(c, `${fmt(Math.abs(s.x - A.x))} × ${fmt(Math.abs(s.y - A.y))}`, (a.x + b.x) / 2, Math.min(a.y, b.y) - 14, null, theme.accent);
+      }
+    }
+    if (tool === 'polygon') {
+      const C0 = pending?.c ? doc.pts[pending.c] : (!pending && drag?.moved ? snapAt(drag.p0.x, drag.p0.y, { press: true }) : null);
+      if (C0 && dist(C0, s) > 1e-9) {
+        const V = polygonVertices(C0, s, opts.polyN, opts.polyCirc).map(toScreen);
+        c.setLineDash([6 * dpr, 4 * dpr]); c.strokeStyle = theme.accent; c.beginPath();
+        V.forEach((q, i) => (i ? c.lineTo(q.x * dpr, q.y * dpr) : c.moveTo(q.x * dpr, q.y * dpr))); c.closePath(); c.stroke();
+      }
     }
     if (tool === 'ellipse' && pending?.c) {
       const C = doc.pts[pending.c], cs = toScreen(C);
@@ -970,12 +1026,14 @@ function drawPreview(c) {
 
 // ---------------------------------------------------------------- entrada
 function pos(e) { const r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
-const style = () => ({ color: cur.color, ltype: cur.ltype, w: cur.w, ls: cur.ls });
+const style = () => ({ color: cur.color, ltype: cur.ltype === 'constructiva' ? 'continua' : cur.ltype, w: cur.w, ls: cur.ls });
+const lineStyle = () => (tool === 'cline' ? { ...CLINE_STYLE } : style());
 
 // ---- bloqueo suave de lineas ----
 // Inicio de la linea en curso: un punto ya creado (clic-clic) o lo que se toco al empezar a arrastrar.
 function lineStartRef() {
-  if (pending?.start && doc.pts[pending.start]) return { id: pending.start };
+  const st = pending?.start ?? (tool === 'polygon' ? pending?.c : null);
+  if (st && doc.pts[st]) return { id: st };
   if (!pending && drag?.moved && !drag.hit) return { snap: snapAt(drag.p0.x, drag.p0.y, { press: true }) };
   return null;
 }
@@ -1142,7 +1200,7 @@ function toolDown(p) {
 // izquierda, lo que queda dentro o lo toca. Con Mayus se suma a la seleccion.
 function finishBox(d, p) {
   const a = toModel(d.p0.x, d.p0.y), b = toModel(p.x, p.y);
-  const found = boxSelect(doc, { x0: a.x, y0: a.y, x1: b.x, y1: b.y }, { cross: p.x < d.p0.x, shown: shownPoints() });
+  const found = boxSelect(doc, { x0: a.x, y0: a.y, x1: b.x, y1: b.y }, { cross: p.x < d.p0.x, shown: shownPoints() }).filter(selOk);
   const keep = shiftDown ? sel.filter((x) => !found.some((f) => same(f, x))) : [];
   sel = [...keep, ...found];
   toast(found.length ? `${found.length} elemento${found.length === 1 ? '' : 's'} seleccionado${found.length === 1 ? '' : 's'}` : 'No hay elementos en el cuadro');
@@ -1230,13 +1288,13 @@ function toolUp(p, q) {
     if (sUp.type === 'pt') { toast('Ya hay un punto aquí'); return; }
     pushUndo(); const id = pointFrom(sUp); doc.pts[id].auto = false; afterChange(); return;
   }
-  if (tool === 'line') {
+  if (tool === 'line' || tool === 'cline') {
     if (moved && !pending) {
       pushUndo();
       const lk = lockFor({ snap: sDown }, p);
       const a = pointFrom(sDown), b = pointFrom(lk ? lockEnd(lk) : sUp);
       if (a === b) { rollback(); return; }
-      const lid = addLine(doc, a, b, style());
+      const lid = addLine(doc, a, b, lineStyle());
       if (lk) applyLock(lid, lk);
       finishEdit();
       return;
@@ -1246,7 +1304,7 @@ function toolUp(p, q) {
     pushUndo();
     const lk = lockFor({ id: pending.start }, p, !moved);
     const b = pointFrom(lk ? lockEnd(lk) : sUp);
-    const lid = addLine(doc, pending.start, b, style());
+    const lid = addLine(doc, pending.start, b, lineStyle());
     if (lk) applyLock(lid, lk);
     pending = { start: b };
     finishEdit(true);
@@ -1261,6 +1319,40 @@ function toolUp(p, q) {
     const id = addCircle(doc, pending.center, r, style());
     if (sUp.type === 'pt') addCon(doc, { t: 'PONC', refs: [sUp.id, id], hidden: true });
     pending = null; finishEdit();
+    return;
+  }
+  if (tool === 'paste') { pasteAt(sUp); return; }
+  if (tool === 'circle3') { // 3 puntos de la circunferencia
+    if (!pending) { pushUndo(); pending = { ids: [pointFrom(sUp)] }; draw(); return; }
+    if (sUp.type === 'pt' && pending.ids.includes(sUp.id)) { toast('Elige un punto distinto'); return; }
+    if (pending.ids.length === 1) { pending.ids.push(pointFrom(sUp)); draw(); return; }
+    const g = circleThrough3(doc.pts[pending.ids[0]], doc.pts[pending.ids[1]], sUp);
+    if (!g) { toast('Los 3 puntos no deben ser colineales'); return; }
+    pushUndo();
+    const third = pointFrom(sUp);
+    const cid = addPoint(doc, g.c.x, g.c.y, false);
+    const id = addCircle(doc, cid, g.r, style());
+    for (const pid of [...pending.ids, third]) addCon(doc, { t: 'PONC', refs: [pid, id], hidden: true });
+    pending = null; finishEdit();
+    return;
+  }
+  if (tool === 'rect' || tool === 'rectc') { // dos esquinas de la diagonal, o centro y una esquina
+    if (!pending) {
+      if (moved) { makeRect(sDown, sUp, tool === 'rectc'); return; }
+      pushUndo(); pending = { s: pointFrom(sUp) }; draw(); return;
+    }
+    const P0 = doc.pts[pending.s];
+    makeRect({ type: 'pt', id: pending.s, x: P0.x, y: P0.y }, sUp, tool === 'rectc');
+    return;
+  }
+  if (tool === 'polygon') { // centro y radio (con bloqueo suave para la orientacion); luego lados y tipo
+    if (!pending) {
+      if (moved) { const lk = lockFor({ snap: sDown }, p); makePolygon(sDown, lk ? lockEnd(lk) : sUp); return; }
+      pushUndo(); pending = { c: pointFrom(sUp) }; draw(); return;
+    }
+    if (sUp.type === 'pt' && sUp.id === pending.c) return;
+    const lk = lockFor({ id: pending.c }, p, !moved), C0 = doc.pts[pending.c];
+    makePolygon({ type: 'pt', id: pending.c, x: C0.x, y: C0.y }, lk ? lockEnd(lk) : sUp);
     return;
   }
   if (tool === 'ellipse') { // centro, extremo del 1.er eje y punto del 2.o eje (toques o arrastres)
@@ -1346,6 +1438,69 @@ function toolUp(p, q) {
   }
 }
 
+function makeRect(sA, sB, centered) {
+  const ax = centered ? 2 * sA.x - sB.x : sA.x, ay = centered ? 2 * sA.y - sB.y : sA.y;
+  if (Math.abs(sB.x - ax) < 1e-6 || Math.abs(sB.y - ay) < 1e-6) { toast('El rectángulo no puede tener ancho o alto nulo'); return; }
+  pushUndo();
+  const cId = centered ? pointFrom(sA) : null;
+  const p1 = centered ? addPoint(doc, ax, ay, true) : pointFrom(sA);
+  const p3 = pointFrom(sB);
+  const P1 = doc.pts[p1], P3 = doc.pts[p3];
+  const p2 = addPoint(doc, P3.x, P1.y, true), p4 = addPoint(doc, P1.x, P3.y, true);
+  addRectangle(doc, [p1, p2, p3, p4], style());
+  if (centered) addCon(doc, { t: 'MID', refs: [p1, p3, cId], hidden: true }); // el centro sigue en medio de la diagonal
+  pending = null; finishEdit();
+}
+
+function askPolygon() {
+  return new Promise((resolve) => {
+    const dlg = $('dlgP');
+    $('polN').value = String(opts.polyN); $('polK').value = opts.polyCirc ? 'ci' : 'in';
+    let done = false;
+    const finish = (ok) => {
+      if (done) return;
+      if (ok) {
+        const n = Math.round(Number($('polN').value));
+        if (!(n >= 3 && n <= 64)) { toast('Número de lados: entero de 3 a 64'); return; }
+        opts.polyN = n; opts.polyCirc = $('polK').value === 'ci'; persist();
+      }
+      done = true; dlg.close(); resolve(ok);
+    };
+    $('polOk').onclick = (ev) => { ev.preventDefault(); finish(true); };
+    $('polCancel').onclick = () => finish(false);
+    dlg.oncancel = () => finish(false);
+    dlg.showModal(); $('polN').focus(); $('polN').select();
+  });
+}
+async function makePolygon(sC, sEnd) {
+  if (dist(sC, sEnd) < 1e-6) { toast('Radio nulo'); return; }
+  if (!(await askPolygon())) return; // cancelado: si ya habia centro, se puede tocar otro radio
+  pushUndo();
+  const cId = pointFrom(sC);
+  const V = polygonVertices(doc.pts[cId], sEnd, opts.polyN, opts.polyCirc);
+  const ids = V.map((q, i) => (i === 0 && !opts.polyCirc && sEnd.type === 'pt' && sEnd.id !== cId ? sEnd.id : addPoint(doc, q.x, q.y, true)));
+  addPolygon(doc, cId, ids, style());
+  pending = null; finishEdit();
+}
+
+function copySel() {
+  const c = clipOf(doc, sel);
+  if (!c) { toast('Selecciona lo que quieres copiar (puntos, líneas, círculos, arcos, splines, elipses o textos)'); return; }
+  clip = c; updateEnabled();
+  toast(`Copiado: ${c.items.length} elemento${c.items.length === 1 ? '' : 's'}. Pulsa Pegar y toca el punto donde va su centro`);
+}
+function pasteAt(s) {
+  if (!clip) { toast('No hay nada copiado'); return; }
+  pushUndo();
+  const r = pasteClip(doc, clip, { x: s.x, y: s.y });
+  if (!r.ok) { rollback(); toast(r.msg); return; }
+  if (!solve(doc, []).ok) { rollback(); toast('Conflicto con las restricciones: se deshizo el pegado'); afterChange(); return; }
+  sel = r.made;
+  afterChange();
+}
+$('tCopy').onclick = copySel;
+$('tPaste').onclick = () => { if (!clip) { toast('Primero copia algo (selecciona y pulsa Copiar)'); return; } setTool('paste'); };
+
 // Extender: toca un segmento o arco cerca del extremo que se alarga; llega hasta el primer elemento que encuentre.
 function extendAt(p) {
   const h = hitCurves(p.x, p.y);
@@ -1402,9 +1557,11 @@ async function placeText(sUp) {
   const reuse = sUp.type === 'pt';
   const pid = pointFrom(sUp); // el punto de insercion es un punto real: admite restricciones
   if (!reuse) doc.pts[pid].txOnly = true; // punto propio del texto: solo se ve al seleccionarlo
+  $('dlgTFont').value = cur.tx.font || '';
   const val = await askText('Texto (Enter = nueva línea)', '');
+  if (val !== null) cur.tx.font = $('dlgTFont').value;
   if (val === null || !val.trim()) { rollback(); afterChange(); return; }
-  const id = addText(doc, pid, val, { h: cur.tx.h ?? niceHeight(), ang: cur.tx.ang, anchor: cur.tx.anchor, color: cur.color, readable: cur.tx.readable });
+  const id = addText(doc, pid, val, { h: cur.tx.h ?? niceHeight(), ang: cur.tx.ang, anchor: cur.tx.anchor, color: cur.color, readable: cur.tx.readable, font: $('dlgTFont').value || cur.tx.font });
   sel = [{ k: 'tx', id }];
   finishEdit();
 }
@@ -1762,12 +1919,12 @@ function buildSwatches() {
   }
 }
 
-function fillLtypes() {
+function fillLtypes(cl = cur.ltype) {
   const s = $('ltype');
   const lt = allLtypes(doc);
   s.innerHTML = '';
   for (const [k, v] of Object.entries(lt)) { const o = document.createElement('option'); o.value = k; o.textContent = v.label; s.appendChild(o); }
-  s.value = cur.ltype in lt ? cur.ltype : 'continua';
+  s.value = cl in lt ? cl : 'continua';
 }
 
 function drawSample(canvas, pattern, color) {
@@ -1781,7 +1938,8 @@ function drawSample(canvas, pattern, color) {
 }
 
 function syncTextPanel(txt) {
-  const src = txt || { text: '', h: cur.tx.h ?? '', ang: cur.tx.ang, anchor: cur.tx.anchor, readable: cur.tx.readable };
+  const src = txt || { text: '', h: cur.tx.h ?? '', ang: cur.tx.ang, anchor: cur.tx.anchor, readable: cur.tx.readable, font: cur.tx.font };
+  $('txFont').value = src.font || '';
   $('txAngleLabel').textContent = txt?.ref ? 'Desfase °' : 'Ángulo °';
   $('txRead').setAttribute('aria-pressed', String(src.readable !== false));
   if (document.activeElement !== $('txContent')) $('txContent').value = src.text;
@@ -1793,7 +1951,7 @@ function syncTextPanel(txt) {
 
 function applyText(prop, value) {
   const ts = sel.filter((x) => x.k === 'tx').map((x) => doc.texts[x.id]);
-  if (['h', 'ang', 'anchor', 'readable'].includes(prop) && !(prop === 'ang' && ts.some((t) => t.ref))) cur.tx[prop] = value;
+  if (['h', 'ang', 'anchor', 'readable', 'font'].includes(prop) && !(prop === 'ang' && ts.some((t) => t.ref))) cur.tx[prop] = value;
   if (ts.length) { pushUndo(); ts.forEach((t) => { t[prop] = value; }); }
   afterChange();
 }
@@ -1815,18 +1973,21 @@ function syncPanel() {
   const first = sel.map((s) => (s.k === 'ln' ? doc.lines[s.id] : s.k === 'ci' ? doc.circles[s.id] : s.k === 'ar' ? doc.arcs[s.id] : s.k === 'sp' ? doc.splines[s.id] : s.k === 'el' ? doc.ellipses[s.id] : null)).find(Boolean);
   const hat = sel.map((s) => (s.k === 'ha' ? doc.hatches[s.id] : null)).find(Boolean);
   const txt = sel.map((s) => (s.k === 'tx' ? doc.texts[s.id] : null)).find(Boolean);
-  if (first) { cur.color = first.color; cur.ltype = first.ltype; cur.w = first.w; cur.ls = first.ls ?? 1; }
+  // una linea constructiva se muestra en el panel sin cambiar el estilo de lo que se dibuje despues
+  const csel = first && first.ltype === 'constructiva' ? { color: first.color, ltype: first.ltype, w: first.w, ls: first.ls ?? 1 } : null;
+  if (first && !csel) { cur.color = first.color; cur.ltype = first.ltype; cur.w = first.w; cur.ls = first.ls ?? 1; }
   else if (hat) cur.color = hat.color;
   else if (txt) cur.color = txt.color;
   else if (sel.some((s) => s.k === 'pt' && doc.traces[s.id])) { const tr = doc.traces[sel.find((s) => s.k === 'pt' && doc.traces[s.id]).id]; cur.color = tr.color; cur.ltype = tr.ltype; cur.w = tr.w; cur.ls = tr.ls ?? 1; }
-  $('ltEl').value = String(cur.ls ?? 1);
+  const sv = csel || cur;
+  $('ltEl').value = String(sv.ls ?? 1);
   syncTextPanel(txt);
-  fillLtypes();
-  $('weight').value = String(cur.w);
-  [...$('swatches').children].forEach((b) => b.classList.toggle('on', b.dataset.val === cur.color));
-  if (/^#/.test(cur.color)) $('colorPick').value = cur.color;
+  fillLtypes(sv.ltype);
+  $('weight').value = String(sv.w);
+  [...$('swatches').children].forEach((b) => b.classList.toggle('on', b.dataset.val === sv.color));
+  if (/^#/.test(sv.color)) $('colorPick').value = sv.color;
   if (hat) { $('hKind').value = hat.kind; $('hAngle').value = hat.angle; $('hSpace').value = hat.spacing; $('hAlpha').value = hat.alpha; }
-  drawSample($('ltprev'), (allLtypes(doc)[cur.ltype] || allLtypes(doc).continua).pattern, theme.fg);
+  drawSample($('ltprev'), (allLtypes(doc)[sv.ltype] || allLtypes(doc).continua).pattern, theme.fg);
   const hasDimOrCon = sel.some((s) => s.k === 'co');
   $('del').title = hasDimOrCon ? 'Borrar cota o restricción (Supr)' : 'Borrar selección (Supr)';
 }
@@ -1857,6 +2018,12 @@ const HINTS = {
   point: 'Toca para colocar un punto (sobre una línea o círculo queda restringido a él).',
   line: 'Toca inicio y fin (encadena); o arrastra un segmento. Esc/Seleccionar termina.',
   circle: 'Toca el centro y luego un punto del borde.',
+  cline: 'Línea constructiva (gris, fina, . ___ .): toca inicio y fin, o arrastra. No sale en el SVG de corte láser salvo que lo elijas.',
+  circle3: 'Círculo perimetral: toca 3 puntos no colineales por donde pasa la circunferencia.',
+  rect: 'Rectángulo: toca (o arrastra entre) dos esquinas opuestas de la diagonal.',
+  rectc: 'Rectángulo de centro: toca el centro y luego una esquina (o arrastra del centro a la esquina).',
+  polygon: 'Polígono: toca el centro y el radio (el ángulo del radio da la orientación; hay bloqueo suave); luego eliges el número de lados.',
+  paste: 'Pegar: toca el punto donde va el centro del cuadro de lo copiado. Esc o Seleccionar termina.',
   intersect: 'Toca dos elementos (línea, arco o círculo) para crear su punto de intersección.',
   text: 'Toca donde va el punto de insercion del texto (puede ser un punto existente).',
   spline: 'Spline por puntos: toca los puntos por donde pasa la curva. Tocar de nuevo el último (o Esc) termina; tocar el primero la cierra.',
@@ -1980,10 +2147,98 @@ function setTool(t) {
   if (pending) { if (tool === 'spline' && pending.ids?.length >= 2) finishSpline(false); else { pending = null; cleanup(doc); } }
   tool = t;
   document.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === t));
+  $('tPaste').classList.toggle('on', t === 'paste');
+  closeFly(); syncGroups(t);
   if (t !== 'intersect') pending = null;
   updateStatus(); draw();
 }
 document.querySelectorAll('[data-tool]').forEach((b) => { b.onclick = () => setTool(b.dataset.tool); });
+
+// ---- botones desplegables: cada grupo muestra la ultima herramienta usada; toca de nuevo (con el grupo activo),
+// toca la esquina marcada o mantén presionado para ver las demás.
+const GROUPS = {
+  sel: [['select', 'select', 'Seleccionar y arrastrar (V)'], ['filter', 'filter', 'Filtrar la selección…']],
+  line: [['line', 'line', 'Línea (L)'], ['cline', 'cline', 'Línea constructiva (K)']],
+  circle: [['circle', 'circle', 'Círculo (C)'], ['circle3', 'circle3', 'Círculo perimetral (3 puntos)']],
+  arc: [['arcc', 'arc-c', 'Arco por centro y extremos (R)'], ['arc3', 'arc-3', 'Arco por 3 puntos (A)']],
+  rect: [['rect', 'rect', 'Rectángulo por diagonal (B)'], ['rectc', 'rect-c', 'Rectángulo de centro']],
+};
+const grpTool = (g) => { const c = (opts.grp || {})[g]; return GROUPS[g].some((x) => x[0] === c && x[0] !== 'filter') ? c : GROUPS[g][0][0]; };
+function refreshGroups() {
+  const filtered = (opts.filtKinds || []).length > 0 || (opts.filtLt || []).length > 0;
+  document.querySelectorAll('.grp').forEach((b) => {
+    const g = b.dataset.group, id = grpTool(g), it = GROUPS[g].find((x) => x[0] === id);
+    b.querySelector(':scope > i').innerHTML = iconSvg(it[1]);
+    b.title = it[2] + ' · toca de nuevo o mantén presionado para ver más herramientas' + (g === 'sel' && filtered ? ' (filtro activo)' : '');
+    b.setAttribute('aria-label', it[2]);
+    b.classList.toggle('on', tool === id);
+    b.classList.toggle('filtered', g === 'sel' && filtered);
+  });
+}
+function syncGroups(t) {
+  opts.grp = opts.grp || {};
+  for (const g of Object.keys(GROUPS)) if (GROUPS[g].some((x) => x[0] === t && x[0] !== 'filter')) opts.grp[g] = t;
+  refreshGroups(); persist();
+}
+let fly = null;
+function closeFly() { if (fly) { fly.el.remove(); fly = null; } }
+function openFly(b) {
+  closeFly();
+  const g = b.dataset.group, el = document.createElement('div');
+  el.id = 'fly';
+  for (const [id, icon, label] of GROUPS[g]) {
+    const x = document.createElement('button');
+    x.innerHTML = `<i>${iconSvg(icon)}</i><span>${label}</span>`;
+    if (id === grpTool(g) && id !== 'filter') x.classList.add('on');
+    x.onclick = () => { closeFly(); if (id === 'filter') openFilter(); else setTool(id); };
+    el.appendChild(x);
+  }
+  document.body.appendChild(el);
+  const r = b.getBoundingClientRect();
+  el.style.top = r.bottom + 4 + 'px';
+  el.style.left = Math.max(4, Math.min(r.left, innerWidth - el.offsetWidth - 4)) + 'px';
+  fly = { el, btn: b };
+}
+function wireGroups() {
+  document.querySelectorAll('.grp').forEach((b) => {
+    let lp = 0, long = false;
+    b.addEventListener('pointerdown', () => { long = false; clearTimeout(lp); lp = setTimeout(() => { long = true; openFly(b); }, 420); });
+    for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, () => clearTimeout(lp));
+    b.addEventListener('click', (e) => {
+      if (long) { long = false; return; }
+      if (fly?.btn === b) { closeFly(); return; }
+      if (e.target.closest('.chev') || b.classList.contains('on')) { openFly(b); return; }
+      setTool(grpTool(b.dataset.group));
+    });
+  });
+  document.addEventListener('pointerdown', (e) => { if (fly && !e.target.closest('#fly') && !e.target.closest('.grp')) closeFly(); }, true);
+}
+
+// ---- filtro de seleccion ----
+const FKINDS = [['pt', 'Puntos'], ['ln', 'Líneas'], ['ci', 'Círculos'], ['ar', 'Arcos'], ['el', 'Elipses'], ['sp', 'Splines'], ['tx', 'Textos'], ['ha', 'Rellenos'], ['co', 'Cotas y restricciones']];
+function openFilter() {
+  const kb = $('flKinds'), lb = $('flLt');
+  kb.textContent = ''; lb.textContent = '';
+  const mk = (parent, key, label, on) => {
+    const l = document.createElement('label'), i = document.createElement('input');
+    l.style.cssText = 'display:flex;gap:8px;align-items:center;min-height:36px;font-size:14px';
+    i.type = 'checkbox'; i.checked = on; i.dataset.key = key; i.style.cssText = 'width:22px;height:22px;min-height:22px;margin:0;flex:none';
+    l.append(i, document.createTextNode(label)); parent.appendChild(l);
+  };
+  for (const [k, n] of FKINDS) mk(kb, k, n, fkOn(k));
+  for (const [k, v] of Object.entries(allLtypes(doc))) mk(lb, k, v.label, !(opts.filtLt || []).includes(k));
+  $('dlgF').showModal();
+}
+$('flAll').onclick = () => $('dlgF').querySelectorAll('input[type=checkbox]').forEach((i) => { i.checked = true; });
+$('flNone').onclick = () => $('dlgF').querySelectorAll('input[type=checkbox]').forEach((i) => { i.checked = false; });
+$('flCancel').onclick = () => $('dlgF').close();
+$('flOk').onclick = (ev) => {
+  ev.preventDefault();
+  opts.filtKinds = [...$('flKinds').querySelectorAll('input')].filter((i) => !i.checked).map((i) => i.dataset.key);
+  opts.filtLt = [...$('flLt').querySelectorAll('input')].filter((i) => !i.checked).map((i) => i.dataset.key);
+  $('dlgF').close(); refreshGroups(); persist();
+  toast(opts.filtKinds.length || opts.filtLt.length ? 'Filtro de selección activo' : 'Sin filtro: se puede seleccionar todo');
+};
 document.querySelectorAll('[data-con]').forEach((b) => { b.onclick = () => applyCon(b.dataset.con); });
 $('mksplit').onclick = splitSelected;
 
@@ -2285,6 +2540,7 @@ $('txRead').onclick = () => {
   const ts = sel.filter((x) => x.k === 'tx').map((x) => doc.texts[x.id]);
   applyText('readable', !(ts.length ? ts[0].readable !== false : cur.tx.readable !== false));
 };
+$('txFont').onchange = (e) => applyText('font', e.target.value);
 $('txAngle').onchange = (e) => applyText('ang', Number(e.target.value) || 0);
 $('txSize').onchange = (e) => { const v = Number(e.target.value); if (v > 0) applyText('h', v); };
 
@@ -2354,9 +2610,11 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Shift') shiftDown = true;
   if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
   else if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); }
+  else if ((e.ctrlKey || e.metaKey) && k === 'c') { e.preventDefault(); copySel(); }
+  else if ((e.ctrlKey || e.metaKey) && k === 'v') { e.preventDefault(); $('tPaste').click(); }
   else if (k === 'escape') { if (pickResolve) { const r = pickResolve; pickResolve = null; r(null); } else if (pending) { if (tool === 'spline' && pending.ids?.length >= 2) finishSpline(false); else cancelPending(); } else { sel = []; afterChange(); } }
   else if (k === 'delete' || k === 'backspace') $('del').click();
-  else if (!e.ctrlKey && !e.metaKey) { const m = { v: 'select', p: 'point', l: 'line', c: 'circle', i: 'intersect', a: 'arc3', r: 'arcc', t: 'text', s: 'spline', x: 'trim', e: 'extend', o: 'ellipse' }[k]; if (m) setTool(m); }
+  else if (!e.ctrlKey && !e.metaKey) { const m = { v: 'select', p: 'point', l: 'line', c: 'circle', i: 'intersect', a: 'arc3', r: 'arcc', t: 'text', s: 'spline', x: 'trim', e: 'extend', o: 'ellipse', b: 'rect', g: 'polygon', k: 'cline' }[k]; if (m) setTool(m); }
 });
 window.addEventListener('keyup', (e) => { if (e.code === 'Space') spaceDown = false; if (e.key === 'Shift') shiftDown = false; });
 // Area visible real (con teclado en pantalla): los dialogos se acomodan arriba de ella
@@ -2377,6 +2635,7 @@ async function boot() {
   readTheme();
   buildSwatches();
   buildAnchors();
+  for (const id of ['txFont', 'dlgTFont']) for (const [k, n] of FONTS) { const o = document.createElement('option'); o.value = k; o.textContent = n; o.style.fontFamily = fontCss(k); $(id).appendChild(o); }
   try {
     const s = JSON.parse(localStorage.getItem(STORE) || 'null');
     if (s?.doc) { loadDoc(s.doc); if (s.view) view = s.view; if (s.cur) cur = { ...cur, ...s.cur }; if (s.opts) Object.assign(opts, s.opts); }
@@ -2384,7 +2643,7 @@ async function boot() {
   $('intMs').value = String(opts.intMs); $('lockDeg').value = String(opts.lockDeg);
   for (const [id, key] of [['tGrid', 'grid'], ['tSnap', 'snap'], ['tCons', 'cons'], ['tTouch', 'touch'], ['tPts', 'pts'], ['tDims', 'dims'], ['tTexts', 'texts'], ['tLock', 'lock']]) $(id).setAttribute('aria-pressed', String(opts[key]));
   $('ltScale').value = String(opts.ltScale);
-  hydrateIcons(); wireLongPressHints(); wireSections(); applyLabels(); applyChrome(); updateEnabled();
+  hydrateIcons(); wireGroups(); wireLongPressHints(); wireSections(); applyLabels(); applyChrome(); updateEnabled();
   setTool('select');
   try { await initSolver(wasmUrl); } catch (err) { toast('No cargó el solver: ' + err.message); }
   syncPanel(); updateButtons(); resize();

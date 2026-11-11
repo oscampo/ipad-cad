@@ -1,6 +1,6 @@
 import { hatchLoops, allLtypes, arcOf, arcSamples, splinePolyline, ellipsePolyline } from './model.js';
 import { dashFromPattern, norm, splineBezier } from './geom.js';
-import { textFrame, textCorners, textPose, LINE_SPACING } from './text.js';
+import { textFrame, textCorners, textPose, LINE_SPACING, fontCss } from './text.js';
 import { layoutDim } from './dims.js';
 
 const DIM_KINDS = new Set(['DIST', 'DISTPL', 'ANG', 'ANG4', 'RAD']);
@@ -148,7 +148,7 @@ export function exportSVG(doc, ltScale = 1, vis = {}) {
     const f = textFrame(t, approx, pose.anchor);
     const anchor = { l: 'start', c: 'middle', r: 'end' }[pose.anchor[1]];
     const lines = f.lines.map((ln, i) => `<tspan x="${n((anchor === 'start' ? f.xmin : anchor === 'middle' ? f.xmin + f.w / 2 : f.xmin + f.w) * K)}" y="${n((-f.ymax + (i * LINE_SPACING + 0.95) * t.h) * K)}">${esc(ln)}</tspan>`).join('');
-    out.push(`<text transform="translate(${X(P.x)} ${Y(P.y)}) rotate(${n(-pose.ang)})" font-family="sans-serif" font-size="${n(t.h * K)}" text-anchor="${anchor}" fill="${col(t.color)}">${lines}</text>`);
+    out.push(`<text transform="translate(${X(P.x)} ${Y(P.y)}) rotate(${n(-pose.ang)})" font-family="${t.font ? fontCss(t.font).replace(/"/g, "'") : 'sans-serif'}" font-size="${n(t.h * K)}" text-anchor="${anchor}" fill="${col(t.color)}">${lines}</text>`);
   }
   // cotas
   if (vis.dims !== false) for (const L of dimLayouts(doc, view)) out.push(...dimSvg(L, '#000000'));

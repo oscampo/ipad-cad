@@ -8,7 +8,9 @@ import { splitElement } from '../src/split.js';
 import { buildTree, conLabel } from '../src/tree.js';
 import { cleanFileBase } from '../src/files.js';
 import { parseValue, evalExpr, isPlainNumber } from '../src/expr.js';
-import { trimAt, extendEnd, cutsOf, linearArray, mirrorCopy, circularArray } from '../src/edit.js';
+import { trimAt, extendEnd, cutsOf, linearArray, mirrorCopy, circularArray, clipOf, pasteClip, bboxOf } from '../src/edit.js';
+import { CLINE_STYLE, circleThrough3, addRectangle, polygonVertices, addPolygon } from '../src/shapes.js';
+import { FONTS, fontCss } from '../src/text.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from '../src/lock.js';
 import { initSolver, solve, reparamSplines } from '../src/solver.js';
 import { bsplineThrough, bsplinePoint } from '../src/bspline.js';
@@ -1522,6 +1524,118 @@ t('elipse: semiejes desde el centro y dos puntos, cierra, se copia, se exporta y
   assert.equal(boxSelect(d, { x0: 0, y0: -5, x1: 30, y1: 25 }, {}).filter((x) => x.k === 'el').length, 1, 'cuadro: solo la elipse que cae dentro');
   deleteItems(d, [{ k: 'pt', id: a }]);
   assert.equal(Object.keys(d.ellipses).length, 1, 'al borrar un punto de la elipse, se borra la elipse');
+});
+
+
+t('extension sucesiva: el extremo se desplaza, sin dejar puntos nuevos', () => {
+  const d = newDoc();
+  const a = addPoint(d, 0, 0), b = addPoint(d, 10, 0);
+  const h = addLine(d, a, b, { color: 'auto', ltype: 'continua', w: 2, ls: 1 });
+  const cross = [30, 60, 90].map((x) => { const p = addPoint(d, x, -10), q = addPoint(d, x, 10); return addLine(d, p, q, { color: 'auto', ltype: 'continua', w: 2, ls: 1 }); });
+  const n0 = Object.keys(d.pts).length;
+  for (let i = 0; i < 3; i++) {
+    const r = extendEnd(d, 'ln', h, { x: d.pts[d.lines[h].b].x, y: 0 });
+    assert.ok(r.ok, r.msg);
+    assert.ok(solve(d, []).ok);
+  }
+  near(d.pts[d.lines[h].b].x, 90, 1e-6, 'llega al 3.er cruce');
+  assert.equal(Object.keys(d.pts).length, n0, 'no se crearon puntos');
+  assert.equal(d.lines[h].b, b, 'sigue siendo el mismo extremo');
+  const on = Object.values(d.cons).filter((k) => k.t === 'PONL' && k.refs[0] === b);
+  assert.equal(on.length, 1, 'solo queda la restriccion con la ultima linea');
+  assert.equal(on[0].refs[1], cross[2]);
+});
+
+t('rectangulo: 4 lineas H/V, se mantiene al mover una esquina; de centro con punto medio', () => {
+  const d = newDoc();
+  const p1 = addPoint(d, 0, 0), p3 = addPoint(d, 8, 5), p2 = addPoint(d, 8, 0), p4 = addPoint(d, 0, 5);
+  addRectangle(d, [p1, p2, p3, p4], { color: 'auto', ltype: 'continua', w: 2, ls: 1 });
+  assert.equal(Object.keys(d.lines).length, 4);
+  assert.ok(solve(d, [{ id: p3, x: 12, y: 9 }]).ok);
+  near(d.pts[p2].x, 12, 1e-5); near(d.pts[p2].y, 0, 1e-5); near(d.pts[p4].x, 0, 1e-5); near(d.pts[p4].y, 9, 1e-5);
+  // de centro
+  const e = newDoc();
+  const c = addPoint(e, 5, 5), q1 = addPoint(e, 1, 2), q3 = addPoint(e, 9, 8), q2 = addPoint(e, 9, 2), q4 = addPoint(e, 1, 8);
+  addRectangle(e, [q1, q2, q3, q4], { color: 'auto', ltype: 'continua', w: 2, ls: 1 });
+  addCon(e, { t: 'MID', refs: [q1, q3, c], hidden: true });
+  assert.ok(solve(e, [{ id: q3, x: 13, y: 10 }]).ok);
+  near(e.pts[c].x, (e.pts[q1].x + e.pts[q3].x) / 2, 1e-5); near(e.pts[c].y, (e.pts[q1].y + e.pts[q3].y) / 2, 1e-5);
+});
+
+t('circulo por 3 puntos: centro y radio; colineales se rechazan', () => {
+  const g = circleThrough3({ x: 5, y: 0 }, { x: 0, y: 5 }, { x: -5, y: 0 });
+  near(g.c.x, 0); near(g.c.y, 0); near(g.r, 5);
+  assert.equal(circleThrough3({ x: 0, y: 0 }, { x: 1, y: 1 }, { x: 2, y: 2 }), null);
+});
+
+t('poligono regular: inscrito y circunscrito, orientacion por el radio, se mantiene regular al arrastrar', () => {
+  const C = { x: 0, y: 0 };
+  const vi = polygonVertices(C, { x: 10, y: 0 }, 6, false);
+  near(vi[0].x, 10); near(vi[1].x, 5, 1e-9); near(vi[1].y, 8.660254037844386, 1e-9);
+  const vc = polygonVertices(C, { x: 10, y: 0 }, 4, true); // apotema 10: cuadrado de lado 20
+  near(Math.hypot(vc[0].x - vc[3].x, vc[0].y - vc[3].y), 20, 1e-9);
+  near((vc[0].x + vc[3].x) / 2, 10, 1e-9, 'el radio llega al medio de un lado');
+  const vo = polygonVertices(C, { x: 0, y: 10 }, 3, false);
+  near(vo[0].x, 0, 1e-9); near(vo[0].y, 10, 1e-9);
+  const d = newDoc();
+  const c = addPoint(d, 0, 0), ids = vi.map((q) => addPoint(d, q.x, q.y));
+  addPolygon(d, c, ids, { color: 'auto', ltype: 'continua', w: 2, ls: 1 });
+  assert.equal(Object.keys(d.lines).length, 6);
+  assert.ok(solve(d, [{ id: ids[0], x: 14, y: 6 }]).ok);
+  const r = ids.map((i) => Math.hypot(d.pts[i].x - d.pts[c].x, d.pts[i].y - d.pts[c].y));
+  r.forEach((v) => near(v, r[0], 1e-4, 'vertices equidistantes'));
+  const side = (i) => Math.hypot(d.pts[ids[(i + 1) % 6]].x - d.pts[ids[i]].x, d.pts[ids[(i + 1) % 6]].y - d.pts[ids[i]].y);
+  for (let i = 1; i < 6; i++) near(side(i), side(0), 1e-4, 'lados iguales');
+});
+
+t('copiar y pegar: el centro del cuadro va al destino, lleva sus restricciones y sobrevive a borrar el original', () => {
+  const d = newDoc();
+  const a = addPoint(d, 0, 0), b = addPoint(d, 10, 0);
+  const l = addLine(d, a, b, { color: '#dc2626', ltype: 'eje', w: 2, ls: 1 });
+  addCon(d, { t: 'H', refs: [l] });
+  const cc = addPoint(d, 5, 10), ci = addCircle(d, cc, 4, { color: 'auto', ltype: 'continua', w: 2, ls: 1 });
+  const items = [{ k: 'ln', id: l }, { k: 'ci', id: ci }];
+  const bb = bboxOf(d, items);
+  near(bb.x0, 0); near(bb.x1, 10); near(bb.y0, 0); near(bb.y1, 14);
+  const clip = clipOf(d, items);
+  deleteItems(d, items);
+  const r = pasteClip(d, clip, { x: 100, y: 50 });
+  assert.ok(r.ok && r.made.length === 2);
+  const nl = r.made.find((m) => m.k === 'ln').id, nc = r.made.find((m) => m.k === 'ci').id;
+  assert.equal(d.lines[nl].ltype, 'eje');
+  assert.ok(Object.values(d.cons).some((k) => k.t === 'H' && k.refs[0] === nl), 'la H se copia');
+  const A = d.pts[d.lines[nl].a], B = d.pts[d.lines[nl].b];
+  near((Math.min(A.x, B.x) + Math.max(A.x, B.x)) / 2 - 5 + 5, 100 - 0, 1e-9, 'la linea queda centrada en x=100 (cuadro 0..10 en x)');
+  near(d.pts[d.circles[nc].c].y, 50 + 3, 1e-9, 'el circulo queda a 10-7=3 sobre el centro');
+  assert.ok(solve(d, []).ok);
+  const r2 = pasteClip(d, clip, { x: 0, y: 0 });
+  assert.ok(r2.ok, 'se puede pegar varias veces');
+});
+
+t('linea constructiva: estilo propio y no sale en el SVG de corte por defecto', () => {
+  const d = newDoc();
+  const a = addPoint(d, 0, 0), b = addPoint(d, 10, 0), c = addPoint(d, 0, 5);
+  addLine(d, a, b, { color: 'auto', ltype: 'continua', w: 2, ls: 1 });
+  addLine(d, a, c, { ...CLINE_STYLE });
+  assert.equal(CLINE_STYLE.color, '#C3C3C3'); assert.equal(CLINE_STYLE.w, 1);
+  const cls = laserClasses(d);
+  assert.equal(cls.length, 2);
+  const r = exportSVGLaser(d, { onlyContinuous: true });
+  assert.equal(r.cut, 1, 'solo la continua se corta');
+});
+
+t('fuentes de texto: lista con generica y se mide por fuente', () => {
+  assert.ok(FONTS.length >= 8);
+  assert.match(fontCss('mono'), /monospace/);
+  assert.equal(fontCss(undefined), FONTS[0][2]);
+  const d = newDoc(); const p = addPoint(d, 0, 0);
+  const id = addText(d, p, 'Hola', { h: 2, font: 'serif' });
+  assert.equal(d.texts[id].font, 'serif');
+  const seen = [];
+  textFrame(d.texts[id], (ln, f) => { seen.push(f); return ln.length * 0.6; }, 'bl');
+  assert.deepEqual(seen, ['serif']);
+  const e = exportSVG(d, 1, {});
+  assert.ok(e.includes('Times'), 'el SVG lleva la fuente');
 });
 
 console.log(`\n${passed} pruebas pasaron`);
