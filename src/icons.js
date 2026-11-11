@@ -57,8 +57,8 @@ const custom = {
   // copia espejo: eje discontinuo con un triangulo y su reflejo
   mirror: S('<path d="M12 2v20" stroke-dasharray="2 3"/><path d="M9 7 3 18h6z"/><path d="M15 7l6 11h-6z" opacity=".5"/>'),
   filter: S('<path d="M3 4h18l-7 8.5V19l-4 2v-8.5z"/>'),
-  // linea constructiva: punto, hueco, trazo, hueco, punto
-  cline: S('<circle cx="3.5" cy="12" r="1.7" fill="currentColor"/><path d="M8 12h8" opacity=".6"/><circle cx="20.5" cy="12" r="1.7" fill="currentColor"/>'),
+  // linea constructiva: punto (trazo corto), hueco, trazo, hueco, punto
+  cline: S('<path d="M2.5 12h1.6M8 12h8M19.9 12h1.6"/>'),
   circle3: S('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="3" r="1.9" fill="currentColor"/><circle cx="19.8" cy="16.5" r="1.9" fill="currentColor"/><circle cx="4.2" cy="16.5" r="1.9" fill="currentColor"/>'),
   rect: S('<rect x="3" y="6" width="18" height="12" rx="1"/><circle cx="3" cy="6" r="1.9" fill="currentColor"/><circle cx="21" cy="18" r="1.9" fill="currentColor"/>'),
   'rect-c': S('<rect x="3" y="6" width="18" height="12" rx="1"/><circle cx="12" cy="12" r="1.9" fill="currentColor"/><circle cx="21" cy="18" r="1.9" fill="currentColor"/><path d="M12 12l9 6" opacity=".45" stroke-dasharray="1.5 2.5"/>'),

@@ -5,7 +5,7 @@
 - **Botones desplegables** (esquina marcada, tocar de nuevo o mantener presionado): Seleccionar (con **Filtrar**), Línea (con **línea constructiva**), Círculo (con **círculo perimetral** por 3 puntos), Arco (por centro y por 3 puntos) y Rectángulo (por diagonal y de centro). Cada grupo recuerda la última herramienta usada.
 - **Filtrar** la selección por entidades y por tipo de línea (tocar y cuadro de selección), con indicador en el botón.
 - **Copiar y Pegar**: el centro del cuadro de lo copiado queda en el punto elegido; conserva restricciones y rellenos internos y sobrevive a borrar el original.
-- **Línea constructiva**: #C3C3C3, grosor fino, tipo . ___ . (no repetido); por defecto no sale en el SVG de corte láser.
+- **Línea constructiva**: #C3C3C3, grosor fino, con un punto (el de «traza y punto») en cada extremo y trazo continuo en medio; por defecto no sale en el SVG de corte láser.
 - **Rectángulos** (diagonal y de centro) con restricciones H/V, y **polígono regular** inscrito/circunscrito con número de lados y orientación por el radio (con bloqueo suave).
 - **Fuentes de texto**: selector al crear y en el panel; se aplican en el lienzo y en el SVG.
 - **Extensión sucesiva corregida**: el extremo se desplaza al siguiente cruce en vez de dejar puntos nuevos en los anteriores.

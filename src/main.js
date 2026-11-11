@@ -557,16 +557,17 @@ function distToPolyline(P, sx, sy) {
 
 // Linea constructiva: punto, hueco, trazo continuo, hueco, punto (px de dispositivo). El hueco es el de las
 // lineas de extension de las cotas (unos 3 px).
-function strokeConstruction(c, x1, y1, x2, y2, w) {
+function strokeConstruction(c, x1, y1, x2, y2, w, ls = 1) {
   c.setLineDash([]);
   const L = Math.hypot(x2 - x1, y2 - y1);
   if (!(L > 0)) return;
-  const ux = (x2 - x1) / L, uy = (y2 - y1) / L, r = (w * 1.1 + 0.6) * dpr, e = r + 3.5 * dpr;
-  c.save();
-  c.fillStyle = c.strokeStyle;
-  for (const [x, y] of [[x1, y1], [x2, y2]]) { c.beginPath(); c.arc(x, y, r, 0, 7); c.fill(); }
-  if (L > 2 * e + 2 * dpr) { c.beginPath(); c.moveTo(x1 + ux * e, y1 + uy * e); c.lineTo(x2 - ux * e, y2 - uy * e); c.stroke(); }
-  c.restore();
+  // el punto es el mismo trazo corto del tipo "traza y punto" (mismo largo y mismo grosor)
+  const dot = Math.max(dashFromPattern(allLtypes(doc).trazopunto.pattern, 0.6)[2], 0.01) * 3 * (Number(opts.ltScale) || 1) * (Number(ls) || 1) * dpr;
+  const ux = (x2 - x1) / L, uy = (y2 - y1) / L, e = dot + 3.5 * dpr;
+  const seg = (a, b) => { c.beginPath(); c.moveTo(x1 + ux * a, y1 + uy * a); c.lineTo(x1 + ux * Math.min(b, L), y1 + uy * Math.min(b, L)); c.stroke(); };
+  if (L <= 2 * dot + 2 * dpr) { seg(0, L); return; }
+  seg(0, dot); seg(L - dot, L);
+  if (L > 2 * e + 2 * dpr) seg(e, L - e);
 }
 
 // Segmento con patron dibujado tramo a tramo (px de dispositivo).
@@ -648,7 +649,7 @@ export function render(c, W, H, v, o) {
     const a = toScreen(doc.pts[l.a]), b = toScreen(doc.pts[l.b]);
     if (o.ui && isSel('ln', id)) { c.setLineDash([]); c.strokeStyle = theme.sel + '88'; c.lineWidth = (l.w + 6) * dpr; c.beginPath(); c.moveTo(a.x * dpr, a.y * dpr); c.lineTo(b.x * dpr, b.y * dpr); c.stroke(); }
     const dsh = applyStroke(c, l.color, l.w, l.ltype, o, l.ls);
-    if (l.ltype === 'constructiva') strokeConstruction(c, a.x * dpr, a.y * dpr, b.x * dpr, b.y * dpr, l.w);
+    if (l.ltype === 'constructiva') strokeConstruction(c, a.x * dpr, a.y * dpr, b.x * dpr, b.y * dpr, l.w, l.ls);
     else strokeLine(c, a.x * dpr, a.y * dpr, b.x * dpr, b.y * dpr, dsh);
   }
   for (const [id, sp] of Object.entries(doc.splines)) {
@@ -2018,7 +2019,7 @@ const HINTS = {
   point: 'Toca para colocar un punto (sobre una línea o círculo queda restringido a él).',
   line: 'Toca inicio y fin (encadena); o arrastra un segmento. Esc/Seleccionar termina.',
   circle: 'Toca el centro y luego un punto del borde.',
-  cline: 'Línea constructiva (gris, fina, . ___ .): toca inicio y fin, o arrastra. No sale en el SVG de corte láser salvo que lo elijas.',
+  cline: 'Línea constructiva (gris, fina, con un punto en cada extremo): toca inicio y fin, o arrastra. No sale en el SVG de corte láser salvo que lo elijas.',
   circle3: 'Círculo perimetral: toca 3 puntos no colineales por donde pasa la circunferencia.',
   rect: 'Rectángulo: toca (o arrastra entre) dos esquinas opuestas de la diagonal.',
   rectc: 'Rectángulo de centro: toca el centro y luego una esquina (o arrastra del centro a la esquina).',

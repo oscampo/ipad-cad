@@ -9,8 +9,8 @@ export const BUILTIN_LTYPES = {
   discontinua: { label: 'Discontinua', pattern: [8, -4] },
   punteada: { label: 'Punteada', pattern: [0, -3] },
   trazopunto: { label: 'Traza y punto', pattern: [10, -2.5, 0, -2.5] },
-  // constructiva: . ___ . (punto, hueco, trazo continuo, hueco, punto); se dibuja aparte, no es un patron repetido
-  constructiva: { label: 'Constructiva (. ___ .)', pattern: [] },
+  // constructiva: punto (como el de "traza y punto"), hueco, trazo continuo, hueco, punto; se dibuja aparte, no es un patron repetido
+  constructiva: { label: 'Constructiva', pattern: [] },
 };
 
 export const PALETTE = [

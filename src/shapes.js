@@ -3,7 +3,7 @@
 import { addLine, addCon } from './model.js';
 import { circumcircle } from './geom.js';
 
-// Estilo de la linea constructiva: gris, fina, tipo "constructiva" (. ___ .). No sale en el SVG de corte laser.
+// Estilo de la linea constructiva: gris, fina, tipo "constructiva". No sale en el SVG de corte laser.
 export const CLINE_STYLE = { color: '#C3C3C3', ltype: 'constructiva', w: 1, ls: 1 };
 
 // Circunferencia por 3 puntos; null si son colineales (con tolerancia relativa).
