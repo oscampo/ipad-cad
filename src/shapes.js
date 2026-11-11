@@ -47,3 +47,18 @@ export function addPolygon(doc, cId, verts, style) {
   for (let i = 1; i < n; i++) addCon(doc, { t: 'EQL', refs: [ls[0], ls[i]], hidden: true });
   return ls;
 }
+
+// Sentido de un arco por centro y extremos. acc: angulo (rad, + antihorario) que recorrio el cursor alrededor
+// del centro desde el inicio del arco (el movimiento del usuario). Si casi no se movio (un toque en el extremo),
+// se toma el arco corto: el sentido que lleva del inicio al extremo por el camino mas corto.
+export function arcIsClockwise(acc, C, S, E) {
+  if (Math.abs(acc) > 0.05) return acc < 0;
+  return (S.x - C.x) * (E.y - C.y) - (S.y - C.y) * (E.x - C.x) < 0;
+}
+
+// Patron de un arco constructivo: punto, hueco, trazo continuo, hueco, punto (largo L, en las mismas unidades).
+// Si el arco es demasiado corto para eso, es continuo.
+export function constructionArcDash(L, dot, gap) {
+  const solid = L - 2 * (dot + gap);
+  return solid > dot ? [dot, gap, solid, gap, dot] : [];
+}

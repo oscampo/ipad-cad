@@ -13,7 +13,7 @@ import { splitElement } from './split.js';
 import { boxSelect } from './boxsel.js';
 import { crossPoints } from './snapx.js';
 import { trimAt, extendEnd, linearArray, mirrorCopy, circularArray, clipOf, pasteClip } from './edit.js';
-import { CLINE_STYLE, circleThrough3, addRectangle, polygonVertices, addPolygon } from './shapes.js';
+import { CLINE_STYLE, circleThrough3, addRectangle, polygonVertices, addPolygon, arcIsClockwise, constructionArcDash } from './shapes.js';
 import { layoutDim, dragDim, dimValue, angSector, angTrue, DIAM } from './dims.js';
 import { textFrame, textHit, textPose, rawAngle, ANCHORS, ANCHOR_NAMES, LINE_SPACING, FONTS, fontCss } from './text.js';
 import { exportSVG, exportSVGLaser, exportDXF, extraExtents, laserClasses } from './export.js';
@@ -24,7 +24,7 @@ import { parseValue, isPlainNumber } from './expr.js';
 import { HELP_HTML } from './help.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from './lock.js';
 
-const VERSION = '1.0.5';
+const VERSION = '1.0.6';
 const STORE = 'ipad-cad-v1';
 const $ = (id) => document.getElementById(id);
 const cv = $('cv');
@@ -34,6 +34,9 @@ const ctx = cv.getContext('2d');
 let doc = newDoc();
 let view = { ox: 200, oy: 300, s: 3 }; // px por unidad; y del modelo hacia arriba
 let tool = 'select';
+let toolName = 'select'; // nombre en la interfaz (incluye los constructivos, que usan la herramienta base)
+let consMode = false; // se dibuja con el estilo de linea constructiva
+const CONS_TOOLS = { ccircle: 'circle', carcc: 'arcc', carc3: 'arc3' };
 let sel = []; // [{k:'pt'|'ln'|'ci'|'ha', id}]
 let cur = { color: 'auto', ltype: 'continua', w: 2, ls: 1, tx: { h: null, ang: 0, anchor: 'bl', readable: true } };
 const opts = { grid: true, snap: false, cons: true, pts: true, dims: true, texts: true, touch: false, ltScale: 1, labels: true, lock: true, lockDeg: 45, intMs: 80, arrLink: true, arrDims: false, filtKinds: [], filtLt: [], grp: {}, polyN: 6, polyCirc: false, sections: {} };
@@ -511,7 +514,8 @@ function hatchPath(h, v = view) {
 }
 
 function applyStroke(c, color, w, ltype, o, ls = 1) {
-  const lt = allLtypes(doc)[ltype] || allLtypes(doc).continua;
+  // constructiva: circulos, elipses y splines se ven en "traza y punto"; las lineas y los arcos se dibujan aparte
+  const lt = ltype === 'constructiva' ? allLtypes(doc).trazopunto : (allLtypes(doc)[ltype] || allLtypes(doc).continua);
   c.strokeStyle = colorOf(color, o);
   c.lineWidth = w * dpr;
   c.lineCap = 'butt';
@@ -558,12 +562,13 @@ function distToPolyline(P, sx, sy) {
 
 // Linea constructiva: punto, hueco, trazo continuo, hueco, punto (px de dispositivo). El hueco es el de las
 // lineas de extension de las cotas (unos 3 px).
+// el punto es el mismo trazo corto del tipo "traza y punto" (mismo largo y mismo grosor); px de dispositivo
+const consDot = (ls = 1) => Math.max(dashFromPattern(allLtypes(doc).trazopunto.pattern, 0.6)[2], 0.01) * 3 * (Number(opts.ltScale) || 1) * (Number(ls) || 1) * dpr;
 function strokeConstruction(c, x1, y1, x2, y2, w, ls = 1) {
   c.setLineDash([]);
   const L = Math.hypot(x2 - x1, y2 - y1);
   if (!(L > 0)) return;
-  // el punto es el mismo trazo corto del tipo "traza y punto" (mismo largo y mismo grosor)
-  const dot = Math.max(dashFromPattern(allLtypes(doc).trazopunto.pattern, 0.6)[2], 0.01) * 3 * (Number(opts.ltScale) || 1) * (Number(ls) || 1) * dpr;
+  const dot = consDot(ls);
   const ux = (x2 - x1) / L, uy = (y2 - y1) / L, e = dot + 3.5 * dpr;
   const seg = (a, b) => { c.beginPath(); c.moveTo(x1 + ux * a, y1 + uy * a); c.lineTo(x1 + ux * Math.min(b, L), y1 + uy * Math.min(b, L)); c.stroke(); };
   if (L <= 2 * dot + 2 * dpr) { seg(0, L); return; }
@@ -644,7 +649,7 @@ export function render(c, W, H, v, o) {
     const trace = () => { c.beginPath(); c.arc(sc.x * dpr, sc.y * dpr, ar.r * v.s * dpr, -a0, -(a0 + sweep), true); };
     if (o.ui && isSel('ar', id)) { c.setLineDash([]); c.strokeStyle = theme.sel + '88'; c.lineWidth = (ar.w + 6) * dpr; trace(); c.stroke(); }
     const dsh = applyStroke(c, ar.color, ar.w, ar.ltype, o, ar.ls);
-    strokeArc(c, sc.x * dpr, sc.y * dpr, ar.r * v.s * dpr, a0, sweep, dsh);
+    strokeArc(c, sc.x * dpr, sc.y * dpr, ar.r * v.s * dpr, a0, sweep, ar.ltype === 'constructiva' ? constructionArcDash(ar.r * v.s * dpr * sweep, consDot(ar.ls), 3.5 * dpr) : dsh);
   }
   for (const [id, l] of Object.entries(doc.lines)) {
     const a = toScreen(doc.pts[l.a]), b = toScreen(doc.pts[l.b]);
@@ -990,11 +995,12 @@ function drawPreview(c) {
         const C = doc.pts[pending.center], S = doc.pts[pending.start];
         const a0 = Math.atan2(S.y - C.y, S.x - C.x);
         const aE = Math.atan2(s.y - C.y, s.x - C.x);
-        let sw = (((aE - a0) % TAU) + TAU) % TAU;
+        const cw = arcCW(s);
+        let sw = (((cw ? a0 - aE : aE - a0) % TAU) + TAU) % TAU;
         if (sw < 1e-4) sw = TAU;
         c.setLineDash([6 * dpr, 4 * dpr]); c.beginPath();
-        c.arc(cc.x * dpr, cc.y * dpr, dist(C, S) * view.s * dpr, -a0, -(a0 + sw), true); c.stroke();
-        label(c, fmt((sw * 180) / Math.PI) + '°', cc.x, cc.y - dist(C, S) * view.s - 14, null, theme.accent);
+        c.arc(cc.x * dpr, cc.y * dpr, dist(C, S) * view.s * dpr, -a0, -(cw ? a0 - sw : a0 + sw), !cw); c.stroke();
+        label(c, (cw ? '↻ ' : '↺ ') + fmt((sw * 180) / Math.PI) + '°', cc.x, cc.y - dist(C, S) * view.s - 14, null, theme.accent);
       }
     }
     if (tool === 'arc3' && pending?.a) {
@@ -1037,7 +1043,7 @@ function drawPreview(c) {
 
 // ---------------------------------------------------------------- entrada
 function pos(e) { const r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
-const style = () => ({ color: cur.color, ltype: cur.ltype === 'constructiva' ? 'continua' : cur.ltype, w: cur.w, ls: cur.ls });
+const style = () => consMode ? { ...CLINE_STYLE } : ({ color: cur.color, ltype: cur.ltype === 'constructiva' ? 'continua' : cur.ltype, w: cur.w, ls: cur.ls });
 const lineStyle = () => (tool === 'cline' ? { ...CLINE_STYLE } : style());
 
 // ---- bloqueo suave de lineas ----
@@ -1072,6 +1078,18 @@ function pointFrom(s) {
   return id;
 }
 
+// Sentido del arco por centro y extremos: sigue el movimiento del cursor alrededor del centro desde el inicio.
+function trackArc(p) {
+  if (tool !== 'arcc' || !pending?.start || !pending.center) return;
+  const C = doc.pts[pending.center], S = doc.pts[pending.start], m = toModel(p.x, p.y);
+  if (dist(m, C) < 1e-9) return;
+  if (!pending.dir) pending.dir = { last: Math.atan2(S.y - C.y, S.x - C.x), acc: 0 };
+  const a = Math.atan2(m.y - C.y, m.x - C.x);
+  const d = ((((a - pending.dir.last) + Math.PI) % TAU) + TAU) % TAU - Math.PI;
+  pending.dir.acc += d; pending.dir.last = a;
+}
+const arcCW = (E) => { const C = doc.pts[pending.center], S = doc.pts[pending.start]; return arcIsClockwise(pending.dir?.acc ?? 0, C, S, E); };
+
 function cancelPending() {
   if (pending) { pending = null; cleanup(doc); }
   hover = hover; draw();
@@ -1096,6 +1114,7 @@ cv.addEventListener('pointermove', (e) => {
   if (gesture) { gestureMove(); return; }
   hover = p;
   trackIntersections(p);
+  trackArc(p);
   if (q) toolMove(p);
   updateStatus(p);
   draw();
@@ -1417,6 +1436,7 @@ function toolUp(p, q) {
       if (dist(doc.pts[pending.center], sUp) < 1e-6) { toast('Radio nulo'); return; }
       pending.start = pointFrom(sUp); draw(); return;
     }
+    trackArc(p);
     const C = doc.pts[pending.center], S = doc.pts[pending.start];
     const r = dist(C, S);
     let tap = sUp;
@@ -1428,7 +1448,9 @@ function toolUp(p, q) {
     pushUndo();
     const endId = pointFrom(tap);
     if (endId === pending.start) { rollback(); toast('El extremo no puede ser el inicio'); return; }
-    addArc(doc, pending.center, pending.start, endId, r, style());
+    // sentido horario: el arco antihorario va del extremo al inicio
+    if (arcCW(tap)) addArc(doc, pending.center, endId, pending.start, r, style());
+    else addArc(doc, pending.center, pending.start, endId, r, style());
     pending = null; finishEdit();
     return;
   }
@@ -1940,7 +1962,7 @@ function applyStyle(prop, value) {
   if (sel.length) pushUndo();
   for (const s of sel) {
     const o = s.k === 'ln' ? doc.lines[s.id] : s.k === 'ci' ? doc.circles[s.id] : s.k === 'ar' ? doc.arcs[s.id] : s.k === 'sp' ? doc.splines[s.id] : s.k === 'el' ? doc.ellipses[s.id] : (s.k === 'ha' || s.k === 'tx') && prop === 'color' ? (s.k === 'ha' ? doc.hatches[s.id] : doc.texts[s.id]) : null;
-    if (o) { o[prop] = value; touched = true; }
+    if (o) { o[prop] = value; touched = true; if (prop === 'ltype' && value === 'constructiva') { o.color = CLINE_STYLE.color; o.w = CLINE_STYLE.w; } } // convertir a constructiva toma su color y grosor
     else if (s.k === 'pt' && doc.traces[s.id]) { doc.traces[s.id][prop] = value; touched = true; } // el estilo de un punto con trazado es el de su trayectoria
   }
   if (sel.length && !touched) undoStack.pop();
@@ -2068,7 +2090,7 @@ const HINTS = {
   intersect: 'Toca dos elementos (línea, arco o círculo) para crear su punto de intersección.',
   text: 'Toca donde va el punto de insercion del texto (puede ser un punto existente).',
   spline: 'Spline por puntos: toca los puntos por donde pasa la curva. Tocar de nuevo el último (o Esc) termina; tocar el primero la cierra.',
-  arcc: 'Arco por centro y extremos: toca el centro, el inicio y el fin (sentido antihorario).',
+  arcc: 'Arco por centro y extremos: toca el centro, el inicio y el fin. El sentido (horario o antihorario) sale de hacia dónde mueves el cursor o arrastras; con un toque directo, el arco corto.',
   arc3: 'Arco por 3 puntos: toca el inicio, un punto intermedio y el fin.',
   ellipse: 'Elipse: toca el centro; luego toca (o arrastra hasta) el extremo del primer eje y, por último, un punto del segundo eje. Se puede arrastrar desde el centro.',
   trim: 'Recortar: mantén presionado y arrastra sobre los tramos que quieres quitar (entre cruces con otros elementos). Un toque recorta un solo tramo.',
@@ -2186,7 +2208,7 @@ async function exportPNG() {
 // ---------------------------------------------------------------- cableado de la interfaz
 function setTool(t) {
   if (pending) { if (tool === 'spline' && pending.ids?.length >= 2) finishSpline(false); else { pending = null; cleanup(doc); } }
-  tool = t;
+  toolName = t; consMode = t in CONS_TOOLS; tool = CONS_TOOLS[t] || t;
   document.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === t));
   $('tPaste').classList.toggle('on', t === 'paste');
   closeFly(); syncGroups(t);
@@ -2200,8 +2222,8 @@ document.querySelectorAll('[data-tool]').forEach((b) => { b.onclick = () => setT
 const GROUPS = {
   sel: [['select', 'select', 'Seleccionar y arrastrar (V)'], ['filter', 'filter', 'Filtrar la selección…']],
   line: [['line', 'line', 'Línea (L)'], ['mline', 'mline', 'Línea de punto medio (M)'], ['cline', 'cline', 'Línea constructiva (K)']],
-  circle: [['circle', 'circle', 'Círculo (C)'], ['circle3', 'circle3', 'Círculo perimetral (3 puntos)']],
-  arc: [['arcc', 'arc-c', 'Arco por centro y extremos (R)'], ['arc3', 'arc-3', 'Arco por 3 puntos (A)']],
+  circle: [['circle', 'circle', 'Círculo (C)'], ['circle3', 'circle3', 'Círculo perimetral (3 puntos)'], ['ccircle', 'ccircle', 'Círculo constructivo']],
+  arc: [['arcc', 'arc-c', 'Arco por centro y extremos (R)'], ['arc3', 'arc-3', 'Arco por 3 puntos (A)'], ['carcc', 'carcc', 'Arco constructivo por centro y extremos'], ['carc3', 'carc3', 'Arco constructivo por 3 puntos']],
   rect: [['rect', 'rect', 'Rectángulo por diagonal (B)'], ['rectc', 'rect-c', 'Rectángulo de centro']],
 };
 const grpTool = (g) => { const c = (opts.grp || {})[g]; return GROUPS[g].some((x) => x[0] === c && x[0] !== 'filter') ? c : GROUPS[g][0][0]; };
@@ -2212,7 +2234,7 @@ function refreshGroups() {
     b.querySelector(':scope > i').innerHTML = iconSvg(it[1]);
     b.title = it[2] + ' · toca de nuevo o mantén presionado para ver más herramientas' + (g === 'sel' && filtered ? ' (filtro activo)' : '');
     b.setAttribute('aria-label', it[2]);
-    b.classList.toggle('on', tool === id);
+    b.classList.toggle('on', toolName === id);
     b.classList.toggle('filtered', g === 'sel' && filtered);
   });
 }

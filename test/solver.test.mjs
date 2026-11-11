@@ -9,7 +9,7 @@ import { buildTree, conLabel } from '../src/tree.js';
 import { cleanFileBase } from '../src/files.js';
 import { parseValue, evalExpr, isPlainNumber } from '../src/expr.js';
 import { trimAt, extendEnd, cutsOf, linearArray, mirrorCopy, circularArray, clipOf, pasteClip, bboxOf } from '../src/edit.js';
-import { CLINE_STYLE, circleThrough3, addRectangle, polygonVertices, addPolygon } from '../src/shapes.js';
+import { CLINE_STYLE, circleThrough3, addRectangle, polygonVertices, addPolygon, arcIsClockwise, constructionArcDash } from '../src/shapes.js';
 import { FONTS, fontCss } from '../src/text.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from '../src/lock.js';
 import { initSolver, solve, reparamSplines } from '../src/solver.js';
@@ -1664,6 +1664,28 @@ t('linea de punto medio: crece simetrica y sigue siendolo al mover el extremo', 
   d.pts[m].fixed = true;
   assert.ok(solve(d, [{ id: b, x: 20, y: 10 }]).ok);
   near(d.pts[a].x, 0, 1e-5); near(d.pts[a].y, 10, 1e-5);
+});
+
+
+t('sentido del arco: sigue el movimiento; con un toque, el arco corto', () => {
+  const C = { x: 0, y: 0 }, S = { x: 10, y: 0 };
+  assert.equal(arcIsClockwise(1.2, C, S, { x: 0, y: 10 }), false, 'se movio antihorario');
+  assert.equal(arcIsClockwise(-1.2, C, S, { x: 0, y: 10 }), true, 'se movio horario aunque el extremo este arriba: arco largo horario');
+  assert.equal(arcIsClockwise(0, C, S, { x: 0, y: 10 }), false, 'toque: corto, antihorario');
+  assert.equal(arcIsClockwise(0, C, S, { x: 0, y: -10 }), true, 'toque: corto, horario');
+});
+
+t('arco constructivo: punto, hueco, trazo, hueco, punto; continuo si es muy corto', () => {
+  const d = constructionArcDash(100, 2, 3.5);
+  assert.equal(d.length, 5); near(d.reduce((a, b) => a + b, 0), 100);
+  assert.deepEqual(constructionArcDash(8, 2, 3.5), []);
+});
+
+t('arco horario: el arco antihorario va del extremo al inicio y barre lo mismo', () => {
+  const d = newDoc();
+  const c = addPoint(d, 0, 0), s0 = addPoint(d, 10, 0), e0 = addPoint(d, 0, 10);
+  const id = addArc(d, c, e0, s0, 10, { color: 'auto', ltype: 'continua', w: 2, ls: 1 }); // horario de s0 a e0
+  near(arcOf(d, d.arcs[id]).sweep, (3 * Math.PI) / 2, 1e-9);
 });
 
 console.log(`\n${passed} pruebas pasaron`);

@@ -1,5 +1,10 @@
 # Historial de cambios
 
+## v1.0.6 (2026-11-11)
+
+- **Círculos y arcos constructivos**: herramientas nuevas en los desplegables de Círculo y Arco (círculo constructivo; arco constructivo por centro y extremos y por 3 puntos) y conversión de cualquier elemento con el tipo «Constructiva» del panel de Estilo. Color y grosor de la línea constructiva; el círculo se ve en «traza y punto» y los arcos llevan un punto en cada extremo.
+- **Arcos en sentido horario o antihorario** según el movimiento del cursor (o del arrastre) alrededor del centro; con un toque directo se crea el arco corto. La vista previa indica el sentido.
+
 ## v1.0.5 (2026-11-11)
 
 - **Línea de punto medio** (desplegable de Línea, tecla M): el punto inicial es el punto medio y la línea crece igual hacia ambos lados al elegir un extremo (toques o arrastre). Con bloqueo suave y restricción de punto medio.

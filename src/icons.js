@@ -63,6 +63,10 @@ const custom = {
   rect: S('<rect x="3" y="6" width="18" height="12" rx="1"/><circle cx="3" cy="6" r="1.9" fill="currentColor"/><circle cx="21" cy="18" r="1.9" fill="currentColor"/>'),
   'rect-c': S('<rect x="3" y="6" width="18" height="12" rx="1"/><circle cx="12" cy="12" r="1.9" fill="currentColor"/><circle cx="21" cy="18" r="1.9" fill="currentColor"/><path d="M12 12l9 6" opacity=".45" stroke-dasharray="1.5 2.5"/>'),
   polygon: S('<path d="M12 3l8.5 6.2-3.2 10H6.7l-3.2-10z"/><circle cx="12" cy="12.5" r="1.6" fill="currentColor"/>'),
+  // constructivos: circulo en traza y punto, arcos con punto en cada extremo, en gris
+  ccircle: S('<circle cx="12" cy="12" r="9" stroke-dasharray="6 3 .1 3" opacity=".6"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/>'),
+  carcc: S('<path d="M5 19V5M5 19h14" opacity=".25"/><path d="M5.6 5.2A14 14 0 0 1 18.6 18.4" opacity=".6"/><path d="M4 5h1.6M18.4 19H20" /><circle cx="5" cy="19" r="1.6" fill="currentColor"/>'),
+  carc3: S('<path d="M3 7A13 13 0 0 1 16 20" opacity=".6" /><path d="M2.2 7h1.6M15.2 20h1.6"/><circle cx="12.2" cy="10.8" r="1.6" fill="currentColor"/>'),
   // elipse inclinada con su centro
   ellipse: S('<ellipse cx="12" cy="12" rx="10" ry="5.5" transform="rotate(-30 12 12)"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/>'),
   // spline: una "S" girada 90 grados (onda) con puntos en los extremos y en cada seno

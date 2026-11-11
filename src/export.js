@@ -86,7 +86,7 @@ export function exportSVG(doc, ltScale = 1, vis = {}) {
   const view = { s: K, ox: pad - b.x0 * K, oy: pad + b.y1 * K }; // x*K+ox = X(x), oy-y*K = Y(y)
   const lt = allLtypes(doc);
   const dash = (t, ls = 1) => {
-    const d = dashFromPattern((lt[t] || lt.continua).pattern, 0.6).map((v) => n(Math.max(v, 0.01) * 3 * ltScale * (ls || 1)));
+    const d = dashFromPattern((t === 'constructiva' ? lt.trazopunto : (lt[t] || lt.continua)).pattern, 0.6).map((v) => n(Math.max(v, 0.01) * 3 * ltScale * (ls || 1)));
     return d.length ? ` stroke-dasharray="${d.join(' ')}"` : '';
   };
   const out = [];
@@ -126,7 +126,7 @@ export function exportSVG(doc, ltScale = 1, vis = {}) {
   }
   for (const l of Object.values(doc.lines)) {
     const a = doc.pts[l.a], q = doc.pts[l.b];
-    out.push(`<line x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(q.x)}" y2="${Y(q.y)}" stroke="${col(l.color)}" stroke-width="${l.w}"${dash(l.ltype, l.ls)}/>`);
+    out.push(`<line x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(q.x)}" y2="${Y(q.y)}" stroke="${col(l.color)}" stroke-width="${l.w}"${dash(l.ltype === 'constructiva' ? 'continua' : l.ltype, l.ls)}/>`);
   }
   // splines y trazados: poligonal muestreada
   const polyPath = (pts, closed) => 'M' + pts.map((q) => `${X(q.x)} ${Y(q.y)}`).join(' L') + (closed ? ' Z' : '');

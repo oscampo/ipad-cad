@@ -26,7 +26,8 @@ export const HELP_HTML = `
 <li><b>Círculo (C)</b>: centro y un punto del borde.</li>
 <li><b>Círculo perimetral</b> (desplegable de Círculo): toca 3 puntos no colineales; los puntos quedan sobre la circunferencia.</li>
 <li><b>Elipse (O)</b>: toca el centro; luego toca (o arrastra hasta) el extremo del primer eje y, por último, un punto del segundo eje (la elipse pasa por la proyección de ese punto sobre la perpendicular al primer eje). También puedes arrastrar desde el centro hasta el extremo del primer eje. Es un elemento propio: se selecciona, se copia, se exporta, aparece en el árbol y sus tres puntos (centro, eje 1 y eje 2) se pueden acotar y restringir. No se recorta, no se extiende y no admite intersecciones.</li>
-<li><b>Arco por centro y extremos (R)</b>: centro, inicio y fin (sentido antihorario).</li>
+<li><b>Arco por centro y extremos (R)</b>: centro, inicio y fin. El sentido sale de <i>hacia dónde mueves</i>: tras tocar el inicio, lleva el cursor (o arrastra con el dedo o el lápiz) hacia el lado que quieres y suelta en el fin; la vista previa muestra ↻ (horario) o ↺ (antihorario). Con un toque directo en el fin, se crea el arco corto.</li>
+<li><b>Círculo y arcos constructivos</b> (en los desplegables de Círculo y Arco): usan el color y el grosor de la línea constructiva. El círculo se ve en «traza y punto»; los arcos llevan un punto en cada extremo. También puedes <i>convertir</i> cualquier elemento elegido el tipo «Constructiva» en el panel de Estilo (toma su color y grosor).</li>
 <li><b>Arco por 3 puntos (A)</b> (desplegable de Arco): inicio, punto intermedio y fin.</li>
 <li><b>Spline (S)</b>: toca los puntos por donde pasa la curva; tocar de nuevo el último (o Esc) termina, tocar el primero la cierra.</li>
 <li><b>Rectángulo (B)</b>: toca (o arrastra entre) dos esquinas opuestas. Queda con restricciones horizontal y vertical, así que sigue siendo rectángulo al mover una esquina.</li>
@@ -123,6 +124,7 @@ export const HELP_HTML = `
 <p>V seleccionar, P punto, L línea, K línea constructiva, C círculo, B rectángulo, G polígono, O elipse, Ctrl/Cmd+C copiar, Ctrl/Cmd+V pegar, R arco por centro, A arco por 3 puntos, S spline, T texto, I intersección, X recortar, E extender. Ctrl/Cmd+Z deshacer, Ctrl/Cmd+Y (o Ctrl/Cmd+Mayús+Z) rehacer, Supr o Retroceso borra, Esc cancela o termina.</p></details>
 
 <details><summary>Historial de versiones</summary>
+<p><b>v1.0.6</b>: círculos y arcos constructivos, y arcos por centro y extremos en sentido horario o antihorario según el movimiento.</p>
 <p><b>v1.0.5</b>: línea de punto medio y restricción concéntrica entre círculos y arcos.</p>
 <p><b>v1.0.4</b>: botones desplegables (Seleccionar con Filtrar, Línea con constructiva, Círculo con perimetral, Arco, Rectángulo), Copiar y Pegar, rectángulos, polígono regular, fuentes de texto y extensión sucesiva que desplaza el extremo.</p>
 <p><b>v1.0.3</b>: restricciones numeradas y navegables desde el árbol, «Punto sobre» unificado en Coincidente, copias vinculadas con cotas opcionales (matrices y espejo), herramienta de elipse y recorte que no divide el resto del elemento.</p>
