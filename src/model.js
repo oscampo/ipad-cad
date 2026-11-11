@@ -120,8 +120,8 @@ export function addText(doc, pt, text, opts = {}) {
 // Numeracion de restricciones: cada tipo cuenta aparte (V1, V2, ⟂1, ∥1...). Las que involucran varios
 // elementos comparten un solo numero. "Punto sobre" y "coincidente" son la misma familia (●). Las ocultas
 // y las cotas no se numeran. El numero no se reutiliza al borrar.
-export const CON_GROUP = { H: 'H', V: 'V', PAR: 'PAR', PERP: 'PERP', EQL: 'EQ', EQR: 'EQ', COI: 'COI', PONL: 'COI', PONC: 'COI', PONS: 'COI', COL: 'COL', MID: 'MID', TANLC: 'TAN', TANCC: 'TAN', TANLS: 'TAN', TANCS: 'TAN' };
-export const CON_GLYPH = { H: 'H', V: 'V', PAR: '∥', PERP: '⟂', EQ: '=', COI: '●', COL: 'Col', MID: 'M', TAN: 'T' };
+export const CON_GROUP = { H: 'H', V: 'V', PAR: 'PAR', PERP: 'PERP', EQL: 'EQ', EQR: 'EQ', COI: 'COI', PONL: 'COI', PONC: 'COI', PONS: 'COI', COL: 'COL', MID: 'MID', CONC: 'CONC', TANLC: 'TAN', TANCC: 'TAN', TANLS: 'TAN', TANCS: 'TAN' };
+export const CON_GLYPH = { H: 'H', V: 'V', PAR: '∥', PERP: '⟂', EQ: '=', COI: '●', COL: 'Col', MID: 'M', CONC: '◎', TAN: 'T' };
 export const conTag = (k) => (CON_GROUP[k.t] ? CON_GLYPH[CON_GROUP[k.t]] + (k.n ?? '') : '');
 export function addCon(doc, con) {
   const id = nextId(doc, 'k');

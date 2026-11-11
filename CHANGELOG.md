@@ -1,5 +1,11 @@
 # Historial de cambios
 
+## v1.0.5 (2026-11-11)
+
+- **Línea de punto medio** (desplegable de Línea, tecla M): el punto inicial es el punto medio y la línea crece igual hacia ambos lados al elegir un extremo (toques o arrastre). Con bloqueo suave y restricción de punto medio.
+- **Restricción concéntrica** entre círculos y arcos (los centros coinciden), numerada (◎1...) y en el árbol de elementos.
+- Los puntos de la línea constructiva se dibujan como los del tipo «traza y punto».
+
 ## v1.0.4 (2026-11-11)
 
 - **Botones desplegables** (esquina marcada, tocar de nuevo o mantener presionado): Seleccionar (con **Filtrar**), Línea (con **línea constructiva**), Círculo (con **círculo perimetral** por 3 puntos), Arco (por centro y por 3 puntos) y Rectángulo (por diagonal y de centro). Cada grupo recuerda la última herramienta usada.

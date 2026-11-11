@@ -24,7 +24,7 @@ import { parseValue, isPlainNumber } from './expr.js';
 import { HELP_HTML } from './help.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from './lock.js';
 
-const VERSION = '1.0.4';
+const VERSION = '1.0.5';
 const STORE = 'ipad-cad-v1';
 const $ = (id) => document.getElementById(id);
 const cv = $('cv');
@@ -107,6 +107,7 @@ function updateEnabled() {
     COI: (pt >= 2 && ln + crv + n.sp === 0) || (pt >= 1 && ln + crv + n.sp === 1), // 2 puntos coincidentes, o puntos sobre un elemento
     MID: pt === 1 && ln === 1,
     EQ: (ln >= 2 && !crv) || (crv >= 2 && !ln),
+    CONC: crv >= 2 && !ln && !n.sp,
     TAN: (ln === 1 && crv === 1 && !n.sp) || (crv === 2 && !ln && !n.sp) || (n.sp === 1 && ln + crv === 1),
     FIX: pt + ln + crv > 0,
     DIM: (pt === 2 && !ln) || (ln === 1 && !pt) || (pt === 1 && ln === 1),
@@ -324,7 +325,7 @@ function shownPoints() {
 
 // ---- iman a intersecciones: la interseccion de dos elementos cercanos al cursor se toma como punto, una vez
 // que el cursor se queda ahi opts.intMs milisegundos (un toque o el inicio de un arrastre la toman al instante).
-const DRAW_TOOLS = new Set(['point', 'line', 'cline', 'circle', 'circle3', 'rect', 'rectc', 'polygon', 'paste', 'ellipse', 'arcc', 'arc3', 'spline', 'text']);
+const DRAW_TOOLS = new Set(['point', 'line', 'cline', 'mline', 'circle', 'circle3', 'rect', 'rectc', 'polygon', 'paste', 'ellipse', 'arcc', 'arc3', 'spline', 'text']);
 const intSeen = new Map();
 let intTimer = 0;
 function curvesNear(sx, sy, px) {
@@ -903,7 +904,7 @@ function drawPreview(c) {
   if (hover) {
     let s = snapAt(hover.x, hover.y);
     // bloqueo suave de la linea que se esta dibujando (pendiente o arrastrando)
-    const lref = tool === 'line' || tool === 'cline' || tool === 'polygon' ? lineStartRef() : null;
+    const lref = tool === 'line' || tool === 'cline' || tool === 'mline' || tool === 'polygon' ? lineStartRef() : null;
     const lk = lref ? lockFor(lref, hover) : null;
     if (lk) s = { type: lk.end ? lk.end.type : 'free', x: lk.x, y: lk.y };
     const sp = toScreen(s);
@@ -923,6 +924,15 @@ function drawPreview(c) {
       c.beginPath(); c.moveTo(a.x * dpr, a.y * dpr); c.lineTo(sp.x * dpr, sp.y * dpr); c.stroke();
       label(c, fmt(dist(S0, s)), (a.x + sp.x) / 2, (a.y + sp.y) / 2 - 14, null, theme.accent);
       if (lk) label(c, lk.label, sp.x + 16, sp.y - 16, null, theme.accent);
+    }
+    if (tool === 'mline') { // la mitad que se ve crecer del otro lado
+      const M0 = pending?.m ? doc.pts[pending.m] : (!pending && drag?.moved ? snapAt(drag.p0.x, drag.p0.y, { press: true }) : null);
+      if (M0) {
+        const a = toScreen({ x: 2 * M0.x - s.x, y: 2 * M0.y - s.y }), m = toScreen(M0);
+        c.setLineDash([6 * dpr, 4 * dpr]); c.strokeStyle = theme.accent; c.beginPath(); c.moveTo(a.x * dpr, a.y * dpr); c.lineTo(m.x * dpr, m.y * dpr); c.stroke();
+        c.setLineDash([]); c.beginPath(); c.arc(m.x * dpr, m.y * dpr, 4 * dpr, 0, 7); c.stroke();
+        label(c, 'L = ' + fmt(2 * dist(M0, s)), (a.x + sp.x) / 2, (a.y + sp.y) / 2 + 16, null, theme.accent);
+      }
     }
     if (tool === 'paste' && clip) { // cuadro de lo copiado, centrado en el cursor
       const b = clip.bbox, w = b.x1 - b.x0, h = b.y1 - b.y0, tl = toScreen({ x: s.x - w / 2, y: s.y + h / 2 });
@@ -1033,7 +1043,7 @@ const lineStyle = () => (tool === 'cline' ? { ...CLINE_STYLE } : style());
 // ---- bloqueo suave de lineas ----
 // Inicio de la linea en curso: un punto ya creado (clic-clic) o lo que se toco al empezar a arrastrar.
 function lineStartRef() {
-  const st = pending?.start ?? (tool === 'polygon' ? pending?.c : null);
+  const st = pending?.start ?? (tool === 'polygon' ? pending?.c : tool === 'mline' ? pending?.m : null);
   if (st && doc.pts[st]) return { id: st };
   if (!pending && drag?.moved && !drag.hit) return { snap: snapAt(drag.p0.x, drag.p0.y, { press: true }) };
   return null;
@@ -1323,6 +1333,16 @@ function toolUp(p, q) {
     return;
   }
   if (tool === 'paste') { pasteAt(sUp); return; }
+  if (tool === 'mline') { // punto medio y un extremo: la linea crece igual hacia el otro lado
+    if (!pending) {
+      if (moved) { const lk = lockFor({ snap: sDown }, p); makeMline(sDown, lk ? lockEnd(lk) : sUp, lk); return; }
+      pushUndo(); pending = { m: pointFrom(sUp) }; draw(); return;
+    }
+    if (sUp.type === 'pt' && sUp.id === pending.m) { cancelPending(); return; }
+    const lk = lockFor({ id: pending.m }, p, !moved), M0 = doc.pts[pending.m];
+    makeMline({ type: 'pt', id: pending.m, x: M0.x, y: M0.y }, lk ? lockEnd(lk) : sUp, lk);
+    return;
+  }
   if (tool === 'circle3') { // 3 puntos de la circunferencia
     if (!pending) { pushUndo(); pending = { ids: [pointFrom(sUp)] }; draw(); return; }
     if (sUp.type === 'pt' && pending.ids.includes(sUp.id)) { toast('Elige un punto distinto'); return; }
@@ -1437,6 +1457,17 @@ function toolUp(p, q) {
     if (pending.items.length === 2) { const it = pending.items; pending = null; sel = []; makeIntersections(it); }
     else { toast('Toca el segundo elemento'); afterChange(); }
   }
+}
+
+function makeMline(sM, sEnd, lk) {
+  if (dist(sM, sEnd) < 1e-6) { toast('Longitud nula'); return; }
+  pushUndo();
+  const m = pointFrom(sM), b = pointFrom(sEnd), M = doc.pts[m], B = doc.pts[b];
+  const a = addPoint(doc, 2 * M.x - B.x, 2 * M.y - B.y, true);
+  const lid = addLine(doc, a, b, style());
+  addCon(doc, { t: 'MID', refs: [a, b, m] }); // el punto inicial queda en medio de la linea
+  if (lk) applyLock(lid, lk);
+  pending = null; finishEdit();
 }
 
 function makeRect(sA, sB, centered) {
@@ -1707,6 +1738,14 @@ async function applyCon(kind) {
       if (lns.length >= 2 && !crv.length) for (let i = 1; i < lns.length; i++) list.push({ t: 'EQL', refs: [lns[0], lns[i]] });
       else if (crv.length >= 2 && !lns.length) for (let i = 1; i < crv.length; i++) list.push({ t: 'EQR', refs: [crv[0], crv[i]] });
       else return bad('Selecciona 2 líneas, o 2 círculos/arcos');
+      break;
+    case 'CONC':
+      if (crv.length < 2 || lns.length) return bad('Selecciona 2 o más círculos o arcos');
+      for (let i = 1; i < crv.length; i++) {
+        const c0 = (doc.circles[crv[0]] || doc.arcs[crv[0]]).c, ci = (doc.circles[crv[i]] || doc.arcs[crv[i]]).c;
+        if (c0 !== ci) list.push({ t: 'CONC', refs: [crv[0], crv[i]] });
+      }
+      if (!list.length) return bad('Ya son concéntricos (comparten el centro)');
       break;
     case 'COI':
       // 1 linea, arco, circulo o spline + puntos: los puntos quedan sobre el elemento; 2 o mas puntos: coincidentes
@@ -2019,6 +2058,7 @@ const HINTS = {
   point: 'Toca para colocar un punto (sobre una línea o círculo queda restringido a él).',
   line: 'Toca inicio y fin (encadena); o arrastra un segmento. Esc/Seleccionar termina.',
   circle: 'Toca el centro y luego un punto del borde.',
+  mline: 'Línea de punto medio: toca el punto medio y luego un extremo (o arrastra); la línea crece igual hacia el otro lado. Hay bloqueo suave.',
   cline: 'Línea constructiva (gris, fina, con un punto en cada extremo): toca inicio y fin, o arrastra. No sale en el SVG de corte láser salvo que lo elijas.',
   circle3: 'Círculo perimetral: toca 3 puntos no colineales por donde pasa la circunferencia.',
   rect: 'Rectángulo: toca (o arrastra entre) dos esquinas opuestas de la diagonal.',
@@ -2159,7 +2199,7 @@ document.querySelectorAll('[data-tool]').forEach((b) => { b.onclick = () => setT
 // toca la esquina marcada o mantén presionado para ver las demás.
 const GROUPS = {
   sel: [['select', 'select', 'Seleccionar y arrastrar (V)'], ['filter', 'filter', 'Filtrar la selección…']],
-  line: [['line', 'line', 'Línea (L)'], ['cline', 'cline', 'Línea constructiva (K)']],
+  line: [['line', 'line', 'Línea (L)'], ['mline', 'mline', 'Línea de punto medio (M)'], ['cline', 'cline', 'Línea constructiva (K)']],
   circle: [['circle', 'circle', 'Círculo (C)'], ['circle3', 'circle3', 'Círculo perimetral (3 puntos)']],
   arc: [['arcc', 'arc-c', 'Arco por centro y extremos (R)'], ['arc3', 'arc-3', 'Arco por 3 puntos (A)']],
   rect: [['rect', 'rect', 'Rectángulo por diagonal (B)'], ['rectc', 'rect-c', 'Rectángulo de centro']],
@@ -2615,7 +2655,7 @@ window.addEventListener('keydown', (e) => {
   else if ((e.ctrlKey || e.metaKey) && k === 'v') { e.preventDefault(); $('tPaste').click(); }
   else if (k === 'escape') { if (pickResolve) { const r = pickResolve; pickResolve = null; r(null); } else if (pending) { if (tool === 'spline' && pending.ids?.length >= 2) finishSpline(false); else cancelPending(); } else { sel = []; afterChange(); } }
   else if (k === 'delete' || k === 'backspace') $('del').click();
-  else if (!e.ctrlKey && !e.metaKey) { const m = { v: 'select', p: 'point', l: 'line', c: 'circle', i: 'intersect', a: 'arc3', r: 'arcc', t: 'text', s: 'spline', x: 'trim', e: 'extend', o: 'ellipse', b: 'rect', g: 'polygon', k: 'cline' }[k]; if (m) setTool(m); }
+  else if (!e.ctrlKey && !e.metaKey) { const m = { v: 'select', p: 'point', l: 'line', c: 'circle', i: 'intersect', a: 'arc3', r: 'arcc', t: 'text', s: 'spline', x: 'trim', e: 'extend', o: 'ellipse', b: 'rect', g: 'polygon', k: 'cline', m: 'mline' }[k]; if (m) setTool(m); }
 });
 window.addEventListener('keyup', (e) => { if (e.code === 'Space') spaceDown = false; if (e.key === 'Shift') shiftDown = false; });
 // Area visible real (con teclado en pantalla): los dialogos se acomodan arriba de ella

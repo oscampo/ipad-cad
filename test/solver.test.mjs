@@ -1638,4 +1638,32 @@ t('fuentes de texto: lista con generica y se mide por fuente', () => {
   assert.ok(e.includes('Times'), 'el SVG lleva la fuente');
 });
 
+
+t('concentrica: los centros coinciden, se numera y no hace nada si ya comparten centro', () => {
+  const d = newDoc();
+  const c1 = addPoint(d, 0, 0), c2 = addPoint(d, 7, 3), c3 = addPoint(d, -4, 2);
+  const a = addCircle(d, c1, 5, { color: 'auto', ltype: 'continua', w: 2, ls: 1 });
+  const b = addCircle(d, c2, 2, { color: 'auto', ltype: 'continua', w: 2, ls: 1 });
+  const e = addArc(d, c3, addPoint(d, -1, 2), addPoint(d, -4, 5), 3, { color: 'auto', ltype: 'continua', w: 2, ls: 1 });
+  d.pts[c1].fixed = true;
+  const k1 = addCon(d, { t: 'CONC', refs: [a, b] }), k2 = addCon(d, { t: 'CONC', refs: [a, e] });
+  assert.ok(solve(d, []).ok);
+  near(d.pts[c2].x, 0, 1e-5); near(d.pts[c2].y, 0, 1e-5); near(d.pts[c3].x, 0, 1e-5); near(d.pts[c3].y, 0, 1e-5);
+  assert.equal(conTag(d.cons[k1]), '◎1'); assert.equal(conTag(d.cons[k2]), '◎2');
+  const d2 = newDoc(); const p = addPoint(d2, 0, 0);
+  const x = addCircle(d2, p, 1, {}), y = addCircle(d2, p, 2, {});
+  addCon(d2, { t: 'CONC', refs: [x, y] });
+  assert.ok(solve(d2, []).ok, 'mismo centro: restriccion vacia, no falla');
+});
+
+t('linea de punto medio: crece simetrica y sigue siendolo al mover el extremo', () => {
+  const d = newDoc();
+  const m = addPoint(d, 10, 10), b = addPoint(d, 16, 12), a = addPoint(d, 4, 8);
+  addLine(d, a, b, { color: 'auto', ltype: 'continua', w: 2, ls: 1 });
+  addCon(d, { t: 'MID', refs: [a, b, m] });
+  d.pts[m].fixed = true;
+  assert.ok(solve(d, [{ id: b, x: 20, y: 10 }]).ok);
+  near(d.pts[a].x, 0, 1e-5); near(d.pts[a].y, 10, 1e-5);
+});
+
 console.log(`\n${passed} pruebas pasaron`);

@@ -72,6 +72,10 @@ const custom = {
   trace: S('<path d="M3 19C6 19 8 12 12 11s5-4 6-5" stroke-dasharray="1.5 3"/><circle cx="19.5" cy="5" r="2.4" fill="currentColor"/>'),
   text: S('<path d="M5 7V5h14v2M12 5v14M9 19h6"/>'),
   'con-mid': S('<path d="M3 12h18"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/><path d="M3 8v8M21 8v8M8 9.5v5M16 9.5v5" opacity=".45"/>'),
+  // concentricos: dos circunferencias con el mismo centro
+  'con-conc': S('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1" fill="currentColor"/>'),
+  // linea de punto medio: crece igual a ambos lados del punto inicial
+  mline: S('<path d="M3 19 21 5"/><circle cx="12" cy="12" r="2.6" fill="currentColor"/><path d="M3 15v8M21 1v8" opacity=".45"/>'),
   'con-tan': S('<circle cx="12" cy="14" r="6"/><path d="M3 8h18"/>'),
   'con-onc': S('<path d="M3 19 21 5"/><circle cx="12" cy="12" r="2.8" fill="var(--btn, #fff)"/><circle cx="12" cy="12" r="1" fill="currentColor"/>'),
   'dim-dist': S('<path d="M3 12h18M3 8v8M21 8v8M3 12l4-2.5M3 12l4 2.5M21 12l-4-2.5M21 12l-4 2.5"/>'),

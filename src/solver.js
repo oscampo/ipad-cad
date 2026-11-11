@@ -48,6 +48,10 @@ function conPrims(doc, id, k) {
       });
       return out;
     }
+    case 'CONC': { // concentricos: los centros de los dos circulos/arcos coinciden
+      const ctr = (x) => (doc.circles[x] || doc.arcs[x]).c;
+      return ctr(r[0]) === ctr(r[1]) ? [] : [{ ...base, type: 'p2p_coincident', p1_id: ctr(r[0]), p2_id: ctr(r[1]) }];
+    }
     case 'MID': return [{ ...base, type: 'p2p_symmetric_ppp', p1_id: r[0], p2_id: r[1], p_id: r[2] }];
     case 'TANLC': return kd[1] === 'a'
       ? [{ ...base, type: 'tangent_la', l_id: r[0], a_id: r[1] }]

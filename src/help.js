@@ -21,6 +21,7 @@ export const HELP_HTML = `
 <li><b>Copiar</b> (Ctrl+C) y <b>Pegar</b> (Ctrl+V): Copiar guarda la selección con sus restricciones internas; Pegar pide un punto y deja el centro del cuadro que encierra lo copiado en ese punto (se ve el cuadro mientras mueves). Se puede pegar varias veces; Esc o Seleccionar termina. Lo copiado se conserva aunque borres el original, pero se pierde al cerrar la app.</li>
 <li><b>Punto (P)</b>: sobre una línea o círculo queda restringido a él.</li>
 <li><b>Línea (L)</b>: toca inicio y fin (encadena) o arrastra un segmento. Esc o Seleccionar termina.</li>
+<li><b>Línea de punto medio (M)</b> (desplegable de Línea): toca el punto inicial, que será el <i>punto medio</i>, y luego un extremo (o arrastra); la línea crece igual hacia el otro lado. Queda con una restricción de punto medio (M) y el bloqueo suave funciona como en las líneas.</li>
 <li><b>Línea constructiva (K)</b> (desplegable de Línea): gris (#C3C3C3), del grosor «fino» y con un trazo continuo en el medio y un punto en cada extremo, separados por un hueco; los puntos se ven como los del tipo «traza y punto». Se dibuja como una línea normal, con bloqueo suave. No sale en el SVG de corte láser salvo que cambies su clase a Corte o Marcado.</li>
 <li><b>Círculo (C)</b>: centro y un punto del borde.</li>
 <li><b>Círculo perimetral</b> (desplegable de Círculo): toca 3 puntos no colineales; los puntos quedan sobre la circunferencia.</li>
@@ -58,6 +59,7 @@ export const HELP_HTML = `
 <li><b>Paralela / Perpendicular</b>: 2 o más líneas.</li>
 <li><b>Coincidente</b>: 2 o más puntos (quedan en el mismo lugar), o punto(s) y 1 línea, arco, círculo o spline (los puntos quedan sobre el elemento). <b>Colineal</b>: 2 o más líneas.</li>
 <li><b>Punto medio</b>: 1 punto + 1 línea.</li>
+<li><b>Concéntrica (◎)</b>: 2 o más círculos o arcos; el centro del primero manda y los demás centros coinciden con él. Si ya comparten el centro, avisa y no agrega nada.</li>
 <li><b>Igual</b>: 2 líneas (igual longitud) o 2 círculos/arcos (igual radio).</li>
 <li><b>Tangente</b>: línea + círculo/arco, 2 círculos/arcos, o un spline con una línea, círculo o arco.</li>
 <li><b>Fijar / soltar</b>: puntos, líneas o círculos. Un punto fijo no se mueve al arrastrar.</li>
@@ -121,6 +123,7 @@ export const HELP_HTML = `
 <p>V seleccionar, P punto, L línea, K línea constructiva, C círculo, B rectángulo, G polígono, O elipse, Ctrl/Cmd+C copiar, Ctrl/Cmd+V pegar, R arco por centro, A arco por 3 puntos, S spline, T texto, I intersección, X recortar, E extender. Ctrl/Cmd+Z deshacer, Ctrl/Cmd+Y (o Ctrl/Cmd+Mayús+Z) rehacer, Supr o Retroceso borra, Esc cancela o termina.</p></details>
 
 <details><summary>Historial de versiones</summary>
+<p><b>v1.0.5</b>: línea de punto medio y restricción concéntrica entre círculos y arcos.</p>
 <p><b>v1.0.4</b>: botones desplegables (Seleccionar con Filtrar, Línea con constructiva, Círculo con perimetral, Arco, Rectángulo), Copiar y Pegar, rectángulos, polígono regular, fuentes de texto y extensión sucesiva que desplaza el extremo.</p>
 <p><b>v1.0.3</b>: restricciones numeradas y navegables desde el árbol, «Punto sobre» unificado en Coincidente, copias vinculadas con cotas opcionales (matrices y espejo), herramienta de elipse y recorte que no divide el resto del elemento.</p>
 <p><b>v1.0.2</b>: el bloqueo suave vuelve a horizontal, vertical y 45° por defecto (el paso es configurable).</p>
