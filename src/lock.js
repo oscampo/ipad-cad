@@ -1,6 +1,6 @@
 // Bloqueo "suave" al crear lineas: si el cursor queda cerca de una direccion notable, la linea se ajusta a ella
 // (y la herramienta puede agregar la restriccion correspondiente). Sin DOM; coordenadas del modelo.
-//  - Siempre: direcciones cada `step` grados (15 por defecto), que incluyen horizontal y vertical.
+//  - Siempre: direcciones cada `step` grados (45 por defecto: horizontal, vertical y 45 grados).
 //  - Cerca de una linea existente (o si se empezo en ella): paralela y perpendicular a ella.
 //  - Cerca de un arco o circulo (o si se empezo en uno): tangente.
 //  - Si la direccion bloqueada cruza un elemento cerca del cursor, la linea termina en ese cruce
@@ -63,10 +63,10 @@ function rayCrossings(doc, S, u, skip) {
 }
 
 // S: inicio, P: cursor (sin ajustar), endSnap: lo que hay bajo el cursor (snapAt), s: px por unidad.
-// opt: { step (grados entre bloqueos), angTol (grados de tolerancia angular) }
+// opt: { step (grados entre bloqueos, 45 por defecto), angTol (grados de tolerancia angular) }
 // Devuelve null o { x, y, kind, label, u, ref?, end?, deg? } (end: elemento sobre el que termina la linea).
 export function lineLock(doc, S, origins, endSnap, P, s, tol = 9, opt = {}) {
-  const step = opt.step > 0 ? opt.step : 15, angTol = ((opt.angTol ?? 4) * Math.PI) / 180;
+  const step = opt.step > 0 ? opt.step : 45, angTol = ((opt.angTol ?? 4) * Math.PI) / 180;
   const dx = P.x - S.x, dy = P.y - S.y;
   if (Math.hypot(dx, dy) * s < 24) return null; // muy cerca del inicio: no se bloquea
   const et = endSnap?.type;

@@ -1319,14 +1319,16 @@ t('seleccion por cuadro: ventana (dentro) y cruce (toca)', () => {
 });
 
 
-t('bloqueo suave: cada 15 grados, con etiqueta, y paso configurable', () => {
+t('bloqueo suave: por defecto H, V y 45; con paso 15 cada 15 grados', () => {
   const d = newDoc(), S = { x: 0, y: 0 }, none = { lines: [], curves: [] }, free = { type: 'free' };
   for (const deg of [15, 30, 60, 75, 105, 120, 135, 165]) {
-    const r = (deg * Math.PI) / 180, k = lineLock(d, S, none, free, { x: 12 * Math.cos(r) + 0.05, y: 12 * Math.sin(r) - 0.04 }, 10);
+    const r = (deg * Math.PI) / 180, k = lineLock(d, S, none, free, { x: 12 * Math.cos(r) + 0.05, y: 12 * Math.sin(r) - 0.04 }, 10, 9, { step: 15 });
     assert.ok(k, deg + ' grados'); assert.equal(k.deg, deg); assert.equal(k.kind, 'ANG'); assert.equal(k.label, deg + '°');
     near(Math.atan2(k.y, k.x), r, 1e-9);
     assert.deepEqual(lockConstraints(k, 'n'), [], 'solo H y V llevan restriccion');
   }
+  assert.equal(lineLock(d, S, none, free, { x: 12 * Math.cos(0.5236) + 0.05, y: 12 * Math.sin(0.5236) - 0.04 }, 10), null, 'por defecto 30 grados no bloquea');
+  assert.equal(lineLock(d, S, none, free, { x: 12 * Math.cos(0.7854) + 0.05, y: 12 * Math.sin(0.7854) - 0.04 }, 10).deg, 45);
   const k20 = lineLock(d, S, none, free, { x: 12 * Math.cos(0.35), y: 12 * Math.sin(0.35) }, 10, 9, { step: 10 });
   assert.equal(k20.deg, 20, 'con paso de 10 grados, 20 existe');
   assert.equal(lineLock(d, S, none, free, { x: 12 * Math.cos(0.35), y: 12 * Math.sin(0.35) }, 10), null, 'con 15 no');
@@ -1338,10 +1340,10 @@ t('bloqueo suave: no se pierde cerca de otra linea; da perpendicular, paralela y
   const a = addPoint(d, 20, -20), b = addPoint(d, 20, 40);
   const wall = addLine(d, a, b, {}); // pared vertical en x = 20
   const none = { lines: [], curves: [] }, S = { x: 0, y: 0 };
-  // el cursor cae sobre la pared (endSnap 'ln'): antes se perdia el bloqueo; ahora la linea a 30 grados sigue y termina en la pared
-  const r = (30 * Math.PI) / 180, X = 20, Y = X * Math.tan(r);
+  // el cursor cae sobre la pared (endSnap 'ln'): antes se perdia el bloqueo; ahora la linea a 45 grados sigue y termina en la pared
+  const r = (45 * Math.PI) / 180, X = 20, Y = X * Math.tan(r);
   const k = lineLock(d, S, none, { type: 'ln', id: wall }, { x: X + 0.1, y: Y + 0.15 }, 10);
-  assert.ok(k && k.kind === 'ANG' && k.deg === 30);
+  assert.ok(k && k.kind === 'ANG' && k.deg === 45);
   assert.deepEqual(k.end, { type: 'ln', id: wall }); near(k.x, X, 1e-9); near(k.y, Y, 1e-9);
   // perpendicular a la pared (horizontal): el final cae en el pie, sobre la pared
   const p = lineLock(d, S, none, { type: 'ln', id: wall }, { x: 19.9, y: 0.2 }, 10);

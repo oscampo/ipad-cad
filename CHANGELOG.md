@@ -1,9 +1,14 @@
 # Historial de cambios
 
+## v1.0.2 (2026-11-10)
+
+- El bloqueo suave vuelve a horizontal, vertical y 45° por defecto (cada 45°). El paso sigue siendo configurable en Vista ("Bloqueo suave cada (°)"), por ejemplo 15.
+- Se conservan las mejoras de v1.0.1: el bloqueo se mantiene cerca de otros elementos, paralela, perpendicular y tangente, final en el cruce e imán a intersecciones.
+
 ## v1.0.1 (2026-11-10)
 
 **Bloqueo suave rehecho al dibujar líneas**
-- Bloqueos cada 15° (incluye horizontal y vertical), con la etiqueta del ángulo. El paso se cambia en Vista.
+- Bloqueos con paso configurable (15° en esta versión), con la etiqueta del ángulo.
 - Corrección: el bloqueo ya no se pierde cuando el final de la línea se acerca a otra línea, un arco o un círculo.
 - Cerca de una línea existente: paralela o perpendicular a ella; la perpendicular termina en el pie sobre esa línea.
 - Cerca de un arco o círculo: tangente, con el extremo sobre la curva.

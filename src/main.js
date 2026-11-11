@@ -23,7 +23,7 @@ import { parseValue, isPlainNumber } from './expr.js';
 import { HELP_HTML } from './help.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from './lock.js';
 
-const VERSION = '1.0.1';
+const VERSION = '1.0.2';
 const STORE = 'ipad-cad-v1';
 const $ = (id) => document.getElementById(id);
 const cv = $('cv');
@@ -35,7 +35,7 @@ let view = { ox: 200, oy: 300, s: 3 }; // px por unidad; y del modelo hacia arri
 let tool = 'select';
 let sel = []; // [{k:'pt'|'ln'|'ci'|'ha', id}]
 let cur = { color: 'auto', ltype: 'continua', w: 2, ls: 1, tx: { h: null, ang: 0, anchor: 'bl', readable: true } };
-const opts = { grid: true, snap: false, cons: true, pts: true, dims: true, texts: true, touch: false, ltScale: 1, labels: true, lock: true, lockStep: 15, intMs: 80, sections: {} };
+const opts = { grid: true, snap: false, cons: true, pts: true, dims: true, texts: true, touch: false, ltScale: 1, labels: true, lock: true, lockDeg: 45, intMs: 80, sections: {} };
 let undoStack = [], redoStack = [];
 let pending = null; // estado de la herramienta en curso
 let hover = null; // posicion del puntero en pantalla
@@ -930,7 +930,7 @@ function lockFor(ref, scr, press = false) {
   if (opts.lock === false || !ref) return null;
   const S = ref.id ? doc.pts[ref.id] : ref.snap;
   const origins = ref.id ? originsOfPoint(doc, ref.id) : originsOfSnap(doc, ref.snap);
-  return lineLock(doc, S, origins, snapAt(scr.x, scr.y, { press }), toModel(scr.x, scr.y), view.s, opts.touch ? 12 : 9, { step: opts.lockStep });
+  return lineLock(doc, S, origins, snapAt(scr.x, scr.y, { press }), toModel(scr.x, scr.y), view.s, opts.touch ? 12 : 9, { step: opts.lockDeg });
 }
 const lockEnd = (lk) => (lk.end ? { type: lk.end.type, id: lk.end.id, x: lk.x, y: lk.y } : { type: 'free', x: lk.x, y: lk.y });
 // Agrega las restricciones del bloqueo; si chocan con las existentes se quitan y la linea queda como esta.
@@ -2210,7 +2210,7 @@ function toggle(id, key) {
 }
 toggle('tGrid', 'grid'); toggle('tSnap', 'snap'); toggle('tCons', 'cons'); toggle('tTouch', 'touch');
 toggle('tLock', 'lock');
-for (const [id, key, min, max, def] of [['intMs', 'intMs', 0, 2000, 80], ['lockStep', 'lockStep', 1, 90, 15]]) {
+for (const [id, key, min, max, def] of [['intMs', 'intMs', 0, 2000, 80], ['lockDeg', 'lockDeg', 1, 90, 45]]) {
   $(id).onchange = (e) => { const v = Number(String(e.target.value).replace(',', '.')); opts[key] = Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : def; e.target.value = String(opts[key]); persist(); draw(); };
 } toggle('tPts', 'pts'); toggle('tDims', 'dims'); toggle('tTexts', 'texts');
 $('tLabels').onclick = () => { opts.labels = !opts.labels; applyLabels(); persist(); };
@@ -2296,7 +2296,7 @@ async function boot() {
     const s = JSON.parse(localStorage.getItem(STORE) || 'null');
     if (s?.doc) { loadDoc(s.doc); if (s.view) view = s.view; if (s.cur) cur = { ...cur, ...s.cur }; if (s.opts) Object.assign(opts, s.opts); }
   } catch { /* sin estado previo */ }
-  $('intMs').value = String(opts.intMs); $('lockStep').value = String(opts.lockStep);
+  $('intMs').value = String(opts.intMs); $('lockDeg').value = String(opts.lockDeg);
   for (const [id, key] of [['tGrid', 'grid'], ['tSnap', 'snap'], ['tCons', 'cons'], ['tTouch', 'touch'], ['tPts', 'pts'], ['tDims', 'dims'], ['tTexts', 'texts'], ['tLock', 'lock']]) $(id).setAttribute('aria-pressed', String(opts[key]));
   $('ltScale').value = String(opts.ltScale);
   hydrateIcons(); wireLongPressHints(); wireSections(); applyLabels(); applyChrome(); updateEnabled();

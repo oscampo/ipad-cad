@@ -217,7 +217,7 @@ body.nopanel #panel { display: none; }
     <div class="grid2">
       <button id="tGrid" data-icon="grid" aria-pressed="true"><i></i><span>Cuadrícula</span></button>
       <button id="tSnap" data-icon="magnet" aria-pressed="false"><i></i><span>Imán</span></button>
-      <button id="tLock" data-icon="soft-lock" aria-pressed="true" title="Al dibujar líneas, se ajustan cada 15° (incluye horizontal y vertical) y a paralela, perpendicular o tangente"><i></i><span>Bloqueo suave</span></button>
+      <button id="tLock" data-icon="soft-lock" aria-pressed="true" title="Al dibujar líneas, se ajustan a horizontal, vertical y 45° (cada 45°, configurable) y a paralela, perpendicular o tangente"><i></i><span>Bloqueo suave</span></button>
       <button id="tCons" data-icon="eye" aria-pressed="true"><i></i><span>Restricciones</span></button>
       <button id="tPts" data-icon="point" aria-pressed="true"><i></i><span>Puntos</span></button>
       <button id="tDims" data-icon="dim-dist" aria-pressed="true"><i></i><span>Cotas</span></button>
@@ -226,7 +226,7 @@ body.nopanel #panel { display: none; }
       <button id="tLabels" data-icon="labels" aria-pressed="true"><i></i><span>Etiquetas del panel</span></button>
     </div>
     <div class="row"><label for="ltScale">Escala de trazos</label><input type="range" id="ltScale" min="0.5" max="3" step="0.1" value="1"></div>
-    <div class="row"><label for="lockStep">Bloqueo suave cada (°)</label><input type="number" id="lockStep" min="1" max="90" step="1"></div>
+    <div class="row"><label for="lockDeg">Bloqueo suave cada (°)</label><input type="number" id="lockDeg" min="1" max="90" step="1"></div>
     <div class="row"><label for="intMs">Imán a intersecciones (ms)</label><input type="number" id="intMs" min="0" max="2000" step="10" title="Tiempo que el cursor debe quedarse cerca de una intersección para tomarla (0 = al instante)"></div>
 </details>
 <details class="sec" data-sec="file"><summary data-icon="save"><i></i>Archivo</summary>
