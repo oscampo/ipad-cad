@@ -134,7 +134,7 @@ export function exportSVG(doc, ltScale = 1, vis = {}) {
     out.push(`<path d="${polyPath(splinePolyline(doc, sp, 16), sp.closed)}" fill="none" stroke="${col(sp.color)}" stroke-width="${sp.w}" stroke-linejoin="round"${dash(sp.ltype, sp.ls)}/>`);
   }
   for (const e of Object.values(doc.ellipses || {})) {
-    out.push(`<path d="${polyPath(ellipsePolyline(doc, e, 120), true)}" fill="none" stroke="${col(e.color)}" stroke-width="${e.w}" stroke-linejoin="round"${dash(e.ltype, e.ls)}/>`);
+    out.push(`<path d="${polyPath(e.p1 && e.p2 ? ellipsePolyline(doc, e, 120) : ellipsePolyline(doc, e, 120).slice(0, -1), !(e.p1 && e.p2))}" fill="none" stroke="${col(e.color)}" stroke-width="${e.w}" stroke-linejoin="round"${dash(e.ltype, e.ls)}/>`);
   }
   for (const tr of Object.values(doc.traces || {})) {
     if (tr.pts.length < 2) continue;
@@ -196,7 +196,7 @@ export function exportDXF(doc, viewScale = 5, vis = {}) {
     g(0, 'SEQEND'); g(8, '0');
   };
   for (const sp of Object.values(doc.splines || {})) poly(splinePolyline(doc, sp, 16), sp.closed);
-  for (const e of Object.values(doc.ellipses || {})) poly(ellipsePolyline(doc, e, 120).slice(0, -1), true);
+  for (const e of Object.values(doc.ellipses || {})) { const part = !!(e.p1 && e.p2), P = ellipsePolyline(doc, e, 120); poly(part ? P : P.slice(0, -1), !part); }
   for (const tr of Object.values(doc.traces || {})) if (tr.pts.length >= 2) poly(tr.pts, false);
   // textos: una entidad TEXT por linea, alineada segun el punto de insercion (ancho aproximado)
   for (const t of vis.texts === false ? [] : Object.values(doc.texts || {})) {
@@ -300,7 +300,10 @@ export function exportSVGLaser(doc, o = {}) {
     const q = (pt) => `${X(pt.x)} ${Y(pt.y)}`;
     out[mode].push(`<path d="M${q(segs[0].p0)} ${segs.map((b) => `C${q(b.c1)} ${q(b.c2)} ${q(b.p1)}`).join(' ')}${sp.closed ? ' Z' : ''}"/>`);
   }
-  for (const { e, mode } of ellipses) out[mode].push(`<path d="M${ellipsePolyline(doc, e, 180).slice(0, -1).map((q) => `${X(q.x)} ${Y(q.y)}`).join(' L')} Z"/>`);
+  for (const { e, mode } of ellipses) {
+    const part = !!(e.p1 && e.p2), P = ellipsePolyline(doc, e, 180);
+    out[mode].push(`<path d="M${(part ? P : P.slice(0, -1)).map((q) => `${X(q.x)} ${Y(q.y)}`).join(' L')}${part ? '' : ' Z'}"/>`);
+  }
   const grp = (id, color, items) => (items.length ? [`<g id="${id}" fill="none" stroke="${color}" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round">`, ...items, '</g>'] : []);
   const svg = [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}mm" height="${H}mm" viewBox="0 0 ${W} ${H}">`,

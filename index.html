@@ -126,7 +126,7 @@ body.nopanel #panel { display: none; }
   <button data-tool="point" data-icon="point" title="Punto (P)" aria-label="Punto"><i></i></button>
   <button class="grp" data-group="line" data-icon="line"><i></i><b class="chev"></b></button>
   <button class="grp" data-group="circle" data-icon="circle"><i></i><b class="chev"></b></button>
-  <button data-tool="ellipse" data-icon="ellipse" title="Elipse: centro y dos ejes (O)" aria-label="Elipse"><i></i></button>
+  <button class="grp" data-group="ellipse" data-icon="ellipse"><i></i><b class="chev"></b></button>
   <button class="grp" data-group="arc" data-icon="arc-c"><i></i><b class="chev"></b></button>
   <button data-tool="spline" data-icon="spline" title="Spline por puntos (S)" aria-label="Spline por puntos"><i></i></button>
   <button class="grp" data-group="rect" data-icon="rect"><i></i><b class="chev"></b></button>
@@ -155,12 +155,12 @@ body.nopanel #panel { display: none; }
 <button data-con="V" data-icon="con-v" data-hint="líneas, o 2 puntos" title="Vertical: líneas, o 2 puntos"><i></i><span>Vertical</span></button>
 <button data-con="PAR" data-icon="con-par" data-hint="2 o más líneas" title="Paralela: 2 o más líneas"><i></i><span>Paralela</span></button>
 <button data-con="PERP" data-icon="con-perp" data-hint="2 o más líneas" title="Perpendic.: 2 o más líneas"><i></i><span>Perpendic.</span></button>
-<button data-con="COI" data-icon="con-coi" data-hint="2 o más puntos, o punto(s) + 1 línea, arco, círculo o spline" title="Coincidente: 2 o más puntos, o punto(s) sobre 1 línea, arco, círculo o spline"><i></i><span>Coincidente</span></button>
+<button data-con="COI" data-icon="con-coi" data-hint="2 o más puntos; punto(s) + 1 línea, arco, círculo, elipse o spline; o líneas/arcos + 1 elipse o spline" title="Coincidente: 2 o más puntos; punto(s) sobre 1 línea, arco, círculo, elipse o spline; o el extremo más cercano de líneas/arcos sobre 1 elipse o spline"><i></i><span>Coincidente</span></button>
 <button data-con="COL" data-icon="con-col" data-hint="2 o más líneas" title="Colineal: 2 o más líneas"><i></i><span>Colineal</span></button>
 <button data-con="MID" data-icon="con-mid" data-hint="1 punto + 1 línea" title="Punto medio: 1 punto + 1 línea"><i></i><span>Punto medio</span></button>
 <button data-con="EQ" data-icon="equal" data-hint="2 líneas, o 2 círculos/arcos" title="Igual: 2 líneas, o 2 círculos/arcos"><i></i><span>Igual</span></button>
 <button data-con="CONC" data-icon="con-conc" data-hint="2 o más círculos/arcos" title="Concéntrica: 2 o más círculos/arcos (mismo centro)"><i></i><span>Concéntrica</span></button>
-<button data-con="TAN" data-icon="con-tan" data-hint="línea, círculo o arco + otro, o un spline" title="Tangente: línea + círculo/arco, 2 círculos/arcos, o spline + línea/círculo/arco"><i></i><span>Tangente</span></button>
+<button data-con="TAN" data-icon="con-tan" data-hint="línea, círculo o arco + otro, una elipse o un spline; o 2 elipses" title="Tangente: línea + círculo/arco, 2 círculos/arcos, elipse o spline + línea/círculo/arco, o 2 elipses"><i></i><span>Tangente</span></button>
 <button data-con="FIX" data-icon="lock" data-hint="puntos, líneas o círculos" title="Fijar / soltar: puntos, líneas o círculos"><i></i><span>Fijar / soltar</span></button>
 </div></details>
 <details class="sec" data-sec="dims" open><summary data-icon="ruler"><i></i>Cotas, intersección, división y copias</summary>

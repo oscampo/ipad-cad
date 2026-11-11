@@ -7,8 +7,8 @@ const f = (v, d = 2) => String(Math.round(v * 10 ** d) / 10 ** d);
 
 const CON_NAMES = {
   H: 'Horizontal', V: 'Vertical', PAR: 'Paralelas', PERP: 'Perpendiculares', EQL: 'Igual longitud', EQR: 'Igual radio',
-  COI: 'Coincidentes', PONL: 'Coincidente (punto sobre línea)', PONC: 'Coincidente (punto sobre círculo/arco)', PONS: 'Coincidente (punto sobre spline)',
-  COL: 'Colineales', MID: 'Punto medio', CONC: 'Concéntricos', TANLC: 'Tangente', TANCC: 'Tangente', TANLS: 'Tangente a spline', TANCS: 'Tangente a spline',
+  COI: 'Coincidentes', PONL: 'Coincidente (punto sobre línea)', PONC: 'Coincidente (punto sobre círculo/arco)', PONS: 'Coincidente (punto sobre spline)', PONE: 'Coincidente (punto sobre elipse)',
+  COL: 'Colineales', MID: 'Punto medio', CONC: 'Concéntricos', TANLC: 'Tangente', TANCC: 'Tangente', TANLS: 'Tangente a spline', TANCS: 'Tangente a spline', TANLE: 'Tangente a elipse', TANCE: 'Tangente a elipse', TANEE: 'Tangente entre elipses',
   DIST: 'Distancia', DISTPL: 'Distancia a recta', ANG: 'Ángulo', ANG4: 'Ángulo', RAD: 'Radio',
   AZ: 'Dirección', EQD: 'Igual distancia', SYM: 'Simetría',
 };
@@ -56,8 +56,8 @@ export function buildTree(doc) {
     children: [...conNodes(id), group(`spp:${id}`, 'Puntos de control', compact(s.pts.map((p) => ptNode(p))))],
   }));
   const ellipses = Object.entries(doc.ellipses || {}).map(([id, e]) => ({
-    key: `el:${id}`, label: `Elipse ${id}`, sel: { k: 'el', id },
-    children: [...conNodes(id), ...compact([ptNode(e.c, 'Centro:'), ptNode(e.a, 'Eje 1:'), ptNode(e.b, 'Eje 2:')])],
+    key: `el:${id}`, label: `${e.p1 && e.p2 ? 'Arco elíptico' : 'Elipse'} ${id}`, sel: { k: 'el', id },
+    children: [...conNodes(id), ...compact([ptNode(e.c, 'Centro:'), ptNode(e.a, 'Eje 1:'), ptNode(e.b, 'Eje 2:'), ...(e.p1 && e.p2 ? [ptNode(e.p1, 'Inicio:'), ptNode(e.p2, 'Fin:')] : [])])],
   }));
   const texts = Object.entries(doc.texts || {}).map(([id, t]) => ({
     key: `tx:${id}`, label: `Texto «${String(t.text).split('\n')[0].slice(0, 24)}»`, sel: { k: 'tx', id },

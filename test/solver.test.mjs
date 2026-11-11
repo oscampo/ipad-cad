@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { newDoc, addPoint, addLine, addCircle, addArc, addCon, addText, addSpline, deleteItems, hatchLoops, arcOf, cleanup, splinePolyline, conTag, ensureNumbers, addEllipse, ellipseOf, ellipsePolyline } from '../src/model.js';
+import { newDoc, addPoint, addLine, addCircle, addArc, addCon, addText, addSpline, deleteItems, hatchLoops, arcOf, cleanup, splinePolyline, conTag, ensureNumbers, addEllipse, ellipseOf, ellipsePolyline, ellipsePoint, ellipseParam, ellipseRange, isPartial } from '../src/model.js';
 import { startTrace, recordTraces, traceToSpline, offsetPolyline, firstLap } from '../src/curves.js';
 import { layoutDim, dragDim, dimValue, dimText, angSector, angTrue } from '../src/dims.js';
 import { textFrame, textCorners, textHit, textPose, rawAngle } from '../src/text.js';
@@ -8,7 +8,7 @@ import { splitElement } from '../src/split.js';
 import { buildTree, conLabel } from '../src/tree.js';
 import { cleanFileBase } from '../src/files.js';
 import { parseValue, evalExpr, isPlainNumber } from '../src/expr.js';
-import { trimAt, extendEnd, cutsOf, linearArray, mirrorCopy, circularArray, clipOf, pasteClip, bboxOf } from '../src/edit.js';
+import { trimAt, extendEnd, cutsOf, curveCuts, linearArray, mirrorCopy, circularArray, clipOf, pasteClip, bboxOf } from '../src/edit.js';
 import { CLINE_STYLE, circleThrough3, addRectangle, polygonVertices, addPolygon, arcIsClockwise, constructionArcDash } from '../src/shapes.js';
 import { FONTS, fontCss } from '../src/text.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from '../src/lock.js';
@@ -1686,6 +1686,163 @@ t('arco horario: el arco antihorario va del extremo al inicio y barre lo mismo',
   const c = addPoint(d, 0, 0), s0 = addPoint(d, 10, 0), e0 = addPoint(d, 0, 10);
   const id = addArc(d, c, e0, s0, 10, { color: 'auto', ltype: 'continua', w: 2, ls: 1 }); // horario de s0 a e0
   near(arcOf(d, d.arcs[id]).sweep, (3 * Math.PI) / 2, 1e-9);
+});
+
+// ---------------------------------------------------------------- v1.1.0: elipses y splines
+const ST = { color: 'auto', ltype: 'continua', w: 2, ls: 1 };
+const mkEll = (d, cx = 0, cy = 0, ra = 10, rb = 5, p1 = null, p2 = null) => {
+  const c = addPoint(d, cx, cy), a = addPoint(d, cx + ra, cy), b = addPoint(d, cx, cy + rb);
+  const e = addEllipse(d, c, a, b, ST, p1, p2);
+  addCon(d, { t: 'ANG4', refs: [c, a, c, b], v: 90, hidden: true });
+  return { e, c, a, b };
+};
+const offEll = (d, e, pid) => { const g = ellipseOf(d, d.ellipses[e]), P = d.pts[pid], q = ellipsePoint(g, ellipseParam(g, P)); return Math.hypot(q.x - P.x, q.y - P.y); };
+
+t('arco eliptico: tramo antihorario de p1 a p2, sus extremos siguen a la elipse, se copia, se refleja y se exporta abierto', () => {
+  const d = newDoc();
+  const p1 = addPoint(d, 10 * Math.cos(0.3), 5 * Math.sin(0.3), true), p2 = addPoint(d, 10 * Math.cos(2), 5 * Math.sin(2), true);
+  const { e, c, a } = mkEll(d, 0, 0, 10, 5, p1, p2);
+  assert.ok(isPartial(d.ellipses[e]));
+  const r0 = ellipseRange(d, d.ellipses[e]);
+  near(r0.t0, 0.3, 1e-9); near(r0.sweep, 1.7, 1e-9);
+  const P = ellipsePolyline(d, d.ellipses[e], 96);
+  near(P[0].x, d.pts[p1].x, 1e-9); near(P[P.length - 1].x, d.pts[p2].x, 1e-9, 'la poligonal va de p1 a p2');
+  d.pts[c].fixed = true;
+  assert.ok(solve(d, [{ id: a, x: 14, y: 3 }]).ok);
+  near(offEll(d, e, p1), 0, 1e-6, 'p1 sobre la elipse'); near(offEll(d, e, p2), 0, 1e-6, 'p2 sobre la elipse');
+  assert.ok(solve(d, [{ id: p2, x: -20, y: 0 }]).ok, 'el extremo se desliza por la elipse');
+  near(offEll(d, e, p2), 0, 1e-6);
+  const m = mirrorCopy(d, [{ k: 'el', id: e }], { x: 30, y: -5 }, { x: 30, y: 5 });
+  assert.ok(m.ok);
+  const me = d.ellipses[m.made[0].id];
+  near(ellipseRange(d, me).sweep, ellipseRange(d, d.ellipses[e]).sweep, 1e-6, 'el reflejo ocupa el mismo tramo');
+  const svg = exportSVG(d, 1, {});
+  assert.ok(!/ Z"/.test(svg), 'los arcos elipticos no se cierran en el SVG');
+  assert.ok(JSON.stringify(buildTree(d)).includes('Arco elíptico'));
+  deleteItems(d, [{ k: 'pt', id: p1 }]);
+  assert.ok(!d.ellipses[e], 'borrar un extremo borra el arco eliptico');
+});
+
+t('coincidente con elipse (PONE): el punto queda sobre la elipse, tambien si el 2.o eje pasa a ser el mayor', () => {
+  const d = newDoc(); const { e, c, a, b } = mkEll(d);
+  const p = addPoint(d, 7, 7);
+  const k = addCon(d, { t: 'PONE', refs: [p, e] });
+  assert.equal(conTag(d.cons[k]), '●1');
+  assert.ok(solve(d, []).ok); near(offEll(d, e, p), 0, 1e-7);
+  assert.ok(solve(d, [{ id: a, x: 14, y: 3 }]).ok); near(offEll(d, e, p), 0, 1e-7);
+  d.pts[c].fixed = d.pts[a].fixed = true;
+  assert.ok(solve(d, [{ id: b, x: d.pts[b].x * 4, y: d.pts[b].y * 4 }]).ok);
+  const g = ellipseOf(d, d.ellipses[e]);
+  assert.ok(g.rb > g.ra, 'el segundo eje es ahora el mayor'); near(offEll(d, e, p), 0, 1e-7);
+});
+
+t('tangente con elipse: recta, circulo y otra elipse', () => {
+  const d = newDoc(); const { e, c, a, b } = mkEll(d);
+  d.pts[c].fixed = d.pts[a].fixed = d.pts[b].fixed = true;
+  const l1 = addPoint(d, -3, 8), l2 = addPoint(d, 12, 6), L = addLine(d, l1, l2, ST);
+  const T = addPoint(d, 3, 4.8, true);
+  const k = addCon(d, { t: 'TANLE', refs: [L, e, T] });
+  assert.equal(conTag(d.cons[k]), 'T1');
+  assert.ok(solve(d, []).ok);
+  near(offEll(d, e, T), 0, 1e-7);
+  // en coordenadas de la elipse (circulo unitario) la recta queda a distancia 1 del centro
+  const u = (P) => ({ x: P.x / 10, y: P.y / 5 }), A = u(d.pts[l1]), B = u(d.pts[l2]);
+  near(Math.abs((B.x - A.x) * A.y - (B.y - A.y) * A.x) / Math.hypot(B.x - A.x, B.y - A.y), 1, 1e-6, 'recta tangente');
+  const cc = addPoint(d, 15, 6), ci = addCircle(d, cc, 3, ST), T2 = addPoint(d, 9.5, 2, true);
+  addCon(d, { t: 'TANCE', refs: [ci, e, T2] });
+  assert.ok(solve(d, []).ok);
+  near(offEll(d, e, T2), 0, 1e-7); near(Math.hypot(d.pts[T2].x - d.pts[cc].x, d.pts[T2].y - d.pts[cc].y), d.circles[ci].r, 1e-7);
+  // la normal de la elipse en T2 pasa por el centro del circulo
+  const q = d.pts[T2], nrm = { x: q.x / 100, y: q.y / 25 }, v = { x: d.pts[cc].x - q.x, y: d.pts[cc].y - q.y };
+  near((nrm.x * v.y - nrm.y * v.x) / (Math.hypot(nrm.x, nrm.y) * Math.hypot(v.x, v.y)), 0, 1e-6, 'circulo tangente');
+  const o = mkEll(d, 18, -9, 6, 3), T3 = addPoint(d, 11, -6, true);
+  addCon(d, { t: 'TANEE', refs: [e, o.e, T3] });
+  assert.ok(solve(d, []).ok);
+  near(offEll(d, e, T3), 0, 1e-6); near(offEll(d, o.e, T3), 0, 1e-6);
+});
+
+t('recortar elipse: queda un arco eliptico, luego se parte y al final se borra', () => {
+  const d = newDoc(); const { e } = mkEll(d);
+  addLine(d, addPoint(d, 4, -8), addPoint(d, 4, 8), ST); addLine(d, addPoint(d, -4, -8), addPoint(d, -4, 8), ST);
+  assert.equal(curveCuts(d, 'el', e).cuts.length, 4);
+  assert.ok(trimAt(d, 'el', e, { x: 0, y: 5 }).ok && solve(d, []).ok);
+  const el = d.ellipses[e];
+  assert.ok(isPartial(el));
+  near(d.pts[el.p1].x, -4, 1e-6); near(d.pts[el.p1].y, 4.5826, 1e-3); near(d.pts[el.p2].x, 4, 1e-6);
+  near(ellipseRange(d, el).sweep, TAU - (Math.PI - 2 * Math.acos(0.4)), 1e-6);
+  const r = trimAt(d, 'el', e, { x: 0, y: -5 });
+  assert.ok(r.ok && solve(d, []).ok); assert.equal(r.pieces.length, 2);
+  const [x, y] = r.pieces.map((i) => d.ellipses[i]);
+  assert.ok(x.c === y.c && x.a === y.a && x.b === y.b, 'los trozos comparten centro y ejes');
+  near(ellipseRange(d, x).sweep, 2 * Math.acos(0.4), 1e-6);
+  const r3 = trimAt(d, 'el', e, { x: -10, y: 0 });
+  assert.ok(r3.ok && solve(d, []).ok);
+  assert.equal(Object.keys(d.ellipses).length, 1, 'un trozo sin mas cruces se quita entero');
+  // una elipse con un solo cruce se borra completa
+  const d2 = newDoc(); const o = mkEll(d2);
+  addLine(d2, addPoint(d2, 0, 0), addPoint(d2, 20, 0), ST);
+  assert.ok(trimAt(d2, 'el', o.e, { x: 0, y: 5 }).deleted);
+});
+
+t('recortar spline: los trozos conservan la forma y las relaciones pasan al trozo que corresponde', () => {
+  const d = newDoc();
+  const ids = [[0, 0], [10, 8], [20, 0], [30, -8], [40, 0], [50, 6]].map(([x, y]) => addPoint(d, x, y));
+  const s = addSpline(d, ids, ST, false);
+  const orig = splinePolyline(d, d.splines[s], 24).map((q) => ({ ...q }));
+  const l1 = addLine(d, addPoint(d, 14, -20), addPoint(d, 14, 20), ST); addLine(d, addPoint(d, 33, -20), addPoint(d, 33, 20), ST);
+  const on = closestOnPolyline(orig, { x: 45, y: 3 }), pp = addPoint(d, on.x, on.y);
+  addCon(d, { t: 'PONS', refs: [pp, s] });
+  const r = trimAt(d, 'sp', s, { x: 22, y: -1 });
+  assert.ok(r.ok && solve(d, []).ok); assert.equal(r.pieces.length, 2); assert.ok(!d.splines[s]);
+  const [A, B] = r.pieces.map((i) => d.splines[i]);
+  assert.equal(A.pts[0], ids[0]); assert.equal(B.pts[B.pts.length - 1], ids[5]);
+  near(d.pts[A.pts[A.pts.length - 1]].x, 14, 1e-6, 'el trozo termina en el corte'); near(d.pts[B.pts[0]].x, 33, 1e-6);
+  assert.ok(Object.values(d.cons).some((k) => k.t === 'PONL' && k.refs[0] === A.pts[A.pts.length - 1] && k.refs[1] === l1 && k.hidden));
+  assert.ok(Object.values(d.cons).some((k) => k.t === 'PONS' && k.refs[0] === pp && k.refs[1] === r.pieces[1]), 'el punto sobre el spline pasa al 2.o trozo');
+  let dev = 0;
+  for (const sp of [A, B]) for (const q of splinePolyline(d, sp, 24)) dev = Math.max(dev, closestOnPolyline(orig, q).d);
+  assert.ok(dev < 0.05, 'desviacion ' + dev);
+  // cerrado: con 2 cruces queda abierto; sin cruces se borra
+  const d2 = newDoc();
+  const c2 = [[10, 0], [7, 7], [0, 10], [-7, 7], [-10, 0], [-7, -7], [0, -10], [7, -7]].map(([x, y]) => addPoint(d2, x, y));
+  const s2 = addSpline(d2, c2, ST, true);
+  const d3 = JSON.parse(JSON.stringify(d2));
+  addLine(d2, addPoint(d2, -20, 3), addPoint(d2, 20, 3), ST);
+  const r2 = trimAt(d2, 'sp', s2, { x: 0, y: 10 });
+  assert.ok(r2.ok && solve(d2, []).ok);
+  const rest = d2.splines[r2.pieces[0]];
+  assert.ok(!rest.closed); near(Math.max(...splinePolyline(d2, rest, 24).map((q) => q.y)), 3, 1e-3, 'se quito la parte de arriba');
+  assert.ok(trimAt(d3, 'sp', s2, { x: 0, y: 10 }).deleted);
+});
+
+t('extender hasta elipses y splines: la linea y el arco llegan a la curva y quedan sobre ella', () => {
+  const d = newDoc(); const { e } = mkEll(d);
+  const l = addLine(d, addPoint(d, -30, 2), addPoint(d, -20, 2), ST);
+  assert.ok(extendEnd(d, 'ln', l, { x: -20, y: 2 }).ok && solve(d, []).ok);
+  near(d.pts[d.lines[l].b].x, -Math.sqrt(100 * (1 - 4 / 25)), 1e-6);
+  assert.ok(Object.values(d.cons).some((k) => k.t === 'PONE' && k.hidden && k.refs[0] === d.lines[l].b));
+  const n0 = Object.keys(d.pts).length;
+  assert.ok(extendEnd(d, 'ln', l, { x: -9, y: 2 }).ok && solve(d, []).ok);
+  near(d.pts[d.lines[l].b].x, Math.sqrt(100 * (1 - 4 / 25)), 1e-6, 'la extension sucesiva llega al otro lado');
+  assert.equal(Object.keys(d.pts).length, n0, 'sin puntos nuevos');
+  const cc = addPoint(d, 0, 12), ar = addArc(d, cc, addPoint(d, 8, 12), addPoint(d, 0, 20), 8, ST);
+  assert.ok(extendEnd(d, 'ar', ar, { x: 8, y: 12 }).ok && solve(d, []).ok);
+  near(offEll(d, e, d.arcs[ar].a), 0, 1e-6, 'el arco termina sobre la elipse');
+  near(Math.hypot(d.pts[d.arcs[ar].a].x, d.pts[d.arcs[ar].a].y - 12), 8, 1e-6);
+  // arco eliptico: solo cuenta el tramo que ocupa
+  const d2 = newDoc();
+  const p1 = addPoint(d2, 0, 5, true), p2 = addPoint(d2, -10, 0, true);
+  mkEll(d2, 0, 0, 10, 5, p1, p2);
+  const l2 = addLine(d2, addPoint(d2, 30, 2), addPoint(d2, 20, 2), ST);
+  assert.ok(extendEnd(d2, 'ln', l2, { x: 20, y: 2 }).ok);
+  assert.ok(d2.pts[d2.lines[l2].b].x < 0, 'pasa de largo por el lado que el arco no ocupa');
+  // spline
+  const d3 = newDoc();
+  const s = addSpline(d3, [[0, 0], [10, 8], [20, 0], [30, -8]].map(([x, y]) => addPoint(d3, x, y)), ST, false);
+  const l3 = addLine(d3, addPoint(d3, 25, 30), addPoint(d3, 25, 20), ST);
+  assert.ok(extendEnd(d3, 'ln', l3, { x: 25, y: 20 }).ok && solve(d3, []).ok);
+  const end = d3.pts[d3.lines[l3].b];
+  near(end.x, 25, 1e-6); near(closestOnPolyline(splinePolyline(d3, d3.splines[s], 48), end).d, 0, 1e-2);
 });
 
 console.log(`\n${passed} pruebas pasaron`);

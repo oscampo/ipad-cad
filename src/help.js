@@ -26,6 +26,7 @@ export const HELP_HTML = `
 <li><b>Círculo (C)</b>: centro y un punto del borde.</li>
 <li><b>Círculo perimetral</b> (desplegable de Círculo): toca 3 puntos no colineales; los puntos quedan sobre la circunferencia.</li>
 <li><b>Elipse (O)</b>: toca el centro; luego toca (o arrastra hasta) el extremo del primer eje y, por último, un punto del segundo eje (la elipse pasa por la proyección de ese punto sobre la perpendicular al primer eje). También puedes arrastrar desde el centro hasta el extremo del primer eje. Es un elemento propio: se selecciona, se copia, se exporta, aparece en el árbol y sus tres puntos (centro, eje 1 y eje 2) se pueden acotar y restringir. No se recorta, no se extiende y no admite intersecciones.</li>
+<li><b>Elipse parcial</b> (desplegable de Elipse): crea un arco elíptico. Los tres primeros pasos son los de la elipse (centro, extremo del primer eje y punto del segundo eje); queda una elipse punteada de referencia. Después <i>arrastra sobre ella</i> desde donde empieza el tramo hasta donde termina: el tramo sigue el sentido de tu movimiento (↻ o ↺). También puedes tocar el inicio y luego el fin (con dos toques se toma el tramo corto). Los extremos son puntos que se deslizan sobre la elipse.</li>
 <li><b>Arco por centro y extremos (R)</b>: centro, inicio y fin. El sentido sale de <i>hacia dónde mueves</i>: tras tocar el inicio, lleva el cursor (o arrastra con el dedo o el lápiz) hacia el lado que quieres y suelta en el fin; la vista previa muestra ↻ (horario) o ↺ (antihorario). Con un toque directo en el fin, se crea el arco corto.</li>
 <li><b>Círculo y arcos constructivos</b> (en los desplegables de Círculo y Arco): usan el color y el grosor de la línea constructiva. El círculo se ve en «traza y punto»; los arcos llevan un punto en cada extremo. También puedes <i>convertir</i> cualquier elemento elegido el tipo «Constructiva» en el panel de Estilo (toma su color y grosor).</li>
 <li><b>Arco por 3 puntos (A)</b> (desplegable de Arco): inicio, punto intermedio y fin.</li>
@@ -35,8 +36,8 @@ export const HELP_HTML = `
 <li><b>Polígono (G)</b>: toca el centro y el radio; luego eliges el número de lados (3 a 64) y si es <i>inscrito</i> (el radio llega a un vértice) o <i>circunscrito</i> (el radio llega al medio de un lado). El ángulo del radio con la horizontal da la orientación, con los mismos bloqueos suaves de las líneas. Queda regular al mover un vértice (vértices equidistantes del centro y lados iguales, restricciones ocultas).</li>
 <li><b>Texto (T)</b>: toca donde va el punto de inserción; en el cuadro eliges la fuente.</li>
 <li><b>Intersección (I)</b>: toca dos elementos (línea, arco, círculo o spline) para crear su punto de intersección con las relaciones correspondientes.</li>
-<li><b>Recortar (X)</b>: mantén presionado y arrastra sobre los tramos que quieres quitar (entre los cruces con otros elementos). Un toque recorta un tramo. Solo se quita ese tramo: el resto del elemento no se divide en los demás cruces. Sin cruces, borra el elemento completo. No recorta splines ni elipses.</li>
-<li><b>Extender (E)</b>: toca un segmento o arco cerca del extremo que quieres alargar; llega hasta el primer elemento que encuentre. Al extender de nuevo, el mismo extremo se desplaza al siguiente cruce (no deja puntos en los anteriores).</li>
+<li><b>Recortar (X)</b>: mantén presionado y arrastra sobre los tramos que quieres quitar (entre los cruces con otros elementos). Un toque recorta un tramo. Solo se quita ese tramo: el resto del elemento no se divide en los demás cruces. Sin cruces, borra el elemento completo. También recorta <b>elipses</b> (una elipse completa necesita 2 cruces y queda como arco elíptico; un arco elíptico se acorta o se parte en dos que comparten centro y ejes) y <b>splines</b> (cada trozo es un spline nuevo que pasa por el corte, por los puntos originales y por puntos extra tomados de la curva para conservar la forma; es una aproximación muy cercana, no exacta).</li>
+<li><b>Extender (E)</b>: toca un segmento o arco cerca del extremo que quieres alargar; llega hasta el primer elemento que encuentre, incluidas elipses, arcos elípticos y splines. Al extender de nuevo, el mismo extremo se desplaza al siguiente cruce (no deja puntos en los anteriores).</li>
 <li>Deshacer, rehacer, borrar selección y ajustar vista están a la derecha de la barra.</li>
 </ul></details>
 
@@ -58,11 +59,11 @@ export const HELP_HTML = `
 <ul>
 <li><b>Horizontal / Vertical</b>: líneas, o 2 puntos.</li>
 <li><b>Paralela / Perpendicular</b>: 2 o más líneas.</li>
-<li><b>Coincidente</b>: 2 o más puntos (quedan en el mismo lugar), o punto(s) y 1 línea, arco, círculo o spline (los puntos quedan sobre el elemento). <b>Colineal</b>: 2 o más líneas.</li>
+<li><b>Coincidente</b>: 2 o más puntos (quedan en el mismo lugar); punto(s) y 1 línea, arco, círculo, elipse o spline (los puntos quedan sobre el elemento); o líneas/arcos y 1 elipse o spline (el extremo más cercano de cada línea o arco queda sobre la curva). <b>Colineal</b>: 2 o más líneas.</li>
 <li><b>Punto medio</b>: 1 punto + 1 línea.</li>
 <li><b>Concéntrica (◎)</b>: 2 o más círculos o arcos; el centro del primero manda y los demás centros coinciden con él. Si ya comparten el centro, avisa y no agrega nada.</li>
 <li><b>Igual</b>: 2 líneas (igual longitud) o 2 círculos/arcos (igual radio).</li>
-<li><b>Tangente</b>: línea + círculo/arco, 2 círculos/arcos, o un spline con una línea, círculo o arco.</li>
+<li><b>Tangente</b>: línea + círculo/arco, 2 círculos/arcos, un spline con una línea, círculo o arco, una <b>elipse</b> (o arco elíptico) con una línea, círculo o arco, o 2 elipses. Con elipses y splines aparece el punto de contacto.</li>
 <li><b>Fijar / soltar</b>: puntos, líneas o círculos. Un punto fijo no se mueve al arrastrar.</li>
 </ul>
 <p><b>Numeración</b>: cada restricción lleva un número por tipo (H1, H2, ⟂1, ∥1, =1, ●1, T1...). Las que involucran varios elementos comparten un solo número y se rotulan junto a cada elemento (por ejemplo, dos líneas perpendiculares muestran ⟂1 cada una). El número no se reutiliza si borras la restricción. En el árbol de elementos cada restricción aparece con su número: tócala para seleccionarla junto con sus elementos y llevar el lienzo hasta ahí. Las restricciones automáticas que ponen un punto sobre un elemento al dibujar (●) no se rotulan.</p>
@@ -124,6 +125,7 @@ export const HELP_HTML = `
 <p>V seleccionar, P punto, L línea, K línea constructiva, C círculo, B rectángulo, G polígono, O elipse, Ctrl/Cmd+C copiar, Ctrl/Cmd+V pegar, R arco por centro, A arco por 3 puntos, S spline, T texto, I intersección, X recortar, E extender. Ctrl/Cmd+Z deshacer, Ctrl/Cmd+Y (o Ctrl/Cmd+Mayús+Z) rehacer, Supr o Retroceso borra, Esc cancela o termina.</p></details>
 
 <details><summary>Historial de versiones</summary>
+<p><b>v1.1.0</b>: elipse parcial (arco elíptico), recorte de elipses y splines, extensión hasta elipses y splines, y restricciones coincidente y tangente con elipses.</p>
 <p><b>v1.0.6</b>: círculos y arcos constructivos, y arcos por centro y extremos en sentido horario o antihorario según el movimiento.</p>
 <p><b>v1.0.5</b>: línea de punto medio y restricción concéntrica entre círculos y arcos.</p>
 <p><b>v1.0.4</b>: botones desplegables (Seleccionar con Filtrar, Línea con constructiva, Círculo con perimetral, Arco, Rectángulo), Copiar y Pegar, rectángulos, polígono regular, fuentes de texto y extensión sucesiva que desplaza el extremo.</p>

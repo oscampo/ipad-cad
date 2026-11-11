@@ -1,6 +1,6 @@
 // Puente entre el documento y el solver de restricciones (planegcs, de FreeCAD, en WASM).
 import { init_planegcs_module, GcsWrapper } from '@salusoft89/planegcs';
-import { conRefs } from './model.js';
+import { conRefs, ellipseOf, ellipseParam, isPartial } from './model.js';
 import { arcSweepOf, closestOnPolyline } from './geom.js';
 import { bsplineThrough, bsplineSamples, bsplinePoint, bsplineTangent, sampleParam, chordParams, validParams } from './bspline.js';
 
@@ -81,6 +81,97 @@ function conPrims(doc, id, k) {
       : [{ ...base, type: 'circle_radius', c_id: r[0], radius: k.v }];
     default: return [];
   }
+}
+
+// ---------------------------------------------------------------- elipses
+// Una elipse con relaciones (punto sobre ella, tangencias) o parcial (arco eliptico) entra al solver como elipse
+// nativa de planegcs: centro, un foco auxiliar y el semieje menor. Los puntos del dibujo que la definen quedan
+// atados a ella: el del eje mas largo es el vertice del eje mayor (esta sobre la elipse y el foco cae en la recta
+// centro-vertice) y la distancia del centro al otro es el semieje menor (la perpendicularidad entre ambos ejes la
+// da la restriccion oculta de 90 grados que lleva toda elipse). Cual es cual se decide con las posiciones
+// actuales en cada resolucion.
+//  - PONE (punto sobre elipse): point_on_ellipse.
+//  - TANLE / TANCE / TANEE (recta, circulo/arco u otra elipse tangente): el punto de contacto T va sobre las dos
+//    curvas y el angulo entre ambas en T es 0 o 180 grados (angle_via_point).
+const ELL = new Set(['PONE', 'TANLE', 'TANCE', 'TANEE']);
+const ellRefs = (k) => (k.t === 'TANEE' ? [k.refs[0], k.refs[1]] : [k.refs[1]]);
+function nativeEllipses(doc) {
+  const out = new Set();
+  for (const [id, e] of Object.entries(doc.ellipses || {})) if (isPartial(e)) out.add(id);
+  for (const k of Object.values(doc.cons)) if (ELL.has(k.t) && !k.ref) for (const r of ellRefs(k)) if (doc.ellipses?.[r]) out.add(r);
+  return out;
+}
+function nativeEllipsePrims(doc, pos, ids) {
+  const out = [], P = (id) => pos?.pts?.[id] || doc.pts[id];
+  const geo = {};
+  for (const id of ids) {
+    const e = doc.ellipses[id], C = P(e.c), A = P(e.a), B = P(e.b);
+    const g = ellipseOf({ pts: { [e.c]: C, [e.a]: A, [e.b]: B } }, e);
+    geo[id] = g;
+    const aMajor = g.ra >= g.rb, rmaj = Math.max(g.ra, g.rb), rmin = Math.max(Math.min(g.ra, g.rb), 1e-9);
+    // direccion del eje mayor y lado del punto del eje menor
+    const side = (B.x - C.x) * -g.uy + (B.y - C.y) * g.ux >= 0 ? 1 : -1; // b a la izquierda (+) o derecha (-) de c->a
+    const d = aMajor ? { x: g.ux, y: g.uy } : { x: -g.uy * side, y: g.ux * side };
+    const f = Math.max(Math.sqrt(Math.max(rmaj * rmaj - rmin * rmin, 0)), 1e-6 * rmaj);
+    const fid = `__ef:${id}`;
+    out.push({ id: fid, type: 'point', x: C.x + d.x * f, y: C.y + d.y * f, fixed: false });
+    if (isPartial(e)) {
+      const ang = (Q) => Math.atan2(((Q.x - C.x) * -d.y + (Q.y - C.y) * d.x) / rmin, ((Q.x - C.x) * d.x + (Q.y - C.y) * d.y) / rmaj);
+      const a0 = ang(P(e.p1));
+      let sw = (((ang(P(e.p2)) - a0) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      if (sw < 1e-9) sw = 2 * Math.PI;
+      out.push({ id, type: 'arc_of_ellipse', c_id: e.c, focus1_id: fid, start_id: e.p1, end_id: e.p2, radmin: rmin, start_angle: a0, end_angle: a0 + sw });
+      out.push({ id: `${id}_rules`, type: 'arc_of_ellipse_rules', a_id: id });
+    } else out.push({ id, type: 'ellipse', c_id: e.c, focus1_id: fid, radmin: rmin });
+    const M = aMajor ? e.a : e.b, Nid = aMajor ? e.b : e.a;
+    out.push({ id: `__ex:${id}`, type: 'line', p1_id: e.c, p2_id: M });
+    out.push({ id: `${id}_fx`, type: 'point_on_line_pl', p_id: fid, l_id: `__ex:${id}` });
+    out.push({ id: `${id}_mv`, type: 'point_on_ellipse', p_id: M, e_id: id });
+    out.push({ id: `${id}_rn`, type: 'p2p_distance', p1_id: e.c, p2_id: Nid, distance: { o_id: id, prop: 'radmin' } });
+  }
+  // tangente (sentido antihorario) de la elipse en el punto Q
+  const etan = (id, Q) => { const g = geo[id], t = ellipseParam(g, Q), x = -g.ra * Math.sin(t), y = g.rb * Math.cos(t); return { x: x * g.ux - y * g.uy, y: x * g.uy + y * g.ux }; };
+  for (const [id, k] of Object.entries(doc.cons)) {
+    if (!ELL.has(k.t) || k.ref || !ellRefs(k).every((r) => ids.has(r))) continue;
+    if (k.t === 'PONE') { out.push({ id, type: 'point_on_ellipse', p_id: k.refs[0], e_id: k.refs[1] }); continue; }
+    const [o, eid, tp] = k.refs, T = P(tp), t1 = etan(eid, T);
+    out.push({ id: `${id}_s`, type: 'point_on_ellipse', p_id: tp, e_id: eid });
+    let dir;
+    if (k.t === 'TANLE') {
+      const l = doc.lines[o], A = P(l.a), B = P(l.b);
+      dir = { x: B.x - A.x, y: B.y - A.y };
+      out.push({ id: `${id}_p`, type: 'point_on_line_pl', p_id: tp, l_id: o });
+    } else if (k.t === 'TANCE') {
+      const arc = o in doc.arcs, C = P((arc ? doc.arcs : doc.circles)[o].c);
+      dir = { x: -(T.y - C.y), y: T.x - C.x };
+      out.push(arc ? { id: `${id}_p`, type: 'point_on_arc', p_id: tp, a_id: o } : { id: `${id}_p`, type: 'point_on_circle', p_id: tp, c_id: o });
+    } else {
+      dir = etan(o, T);
+      out.push({ id: `${id}_p`, type: 'point_on_ellipse', p_id: tp, e_id: o });
+    }
+    out.push({ id, type: 'angle_via_point', crv1_id: eid, crv2_id: o, p_id: tp, angle: t1.x * dir.x + t1.y * dir.y >= 0 ? 0 : Math.PI });
+  }
+  return out;
+}
+
+// Al arrastrar el punto de un eje de una elipse nativa mas alla del otro eje, los ejes mayor y menor cambian de
+// papel. El solver no puede cruzar ese punto por si solo (pasaria por un circulo, con el foco en el centro), asi que
+// en ese caso la resolucion arranca con el punto arrastrado casi en su destino.
+function ellipseFlipStart(doc, live) {
+  const ids = nativeEllipses(doc);
+  let pts = null;
+  for (const id of ids) {
+    const e = doc.ellipses[id], C = doc.pts[e.c];
+    for (const t of live) {
+      if (t.id !== e.a && t.id !== e.b) continue;
+      const o = doc.pts[t.id === e.a ? e.b : e.a], d0 = Math.hypot(doc.pts[t.id].x - C.x, doc.pts[t.id].y - C.y);
+      const d1 = Math.hypot(t.x - C.x, t.y - C.y), dn = Math.hypot(o.x - C.x, o.y - C.y);
+      // casi en el destino (no justo encima: la atraccion al destino se indefine a distancia cero)
+      const q = doc.pts[t.id], w = { x: q.x + 0.97 * (t.x - q.x), y: q.y + 0.97 * (t.y - q.y) };
+      if ((d0 - dn) * (Math.hypot(w.x - C.x, w.y - C.y) - dn) < 0 && d1 !== dn) (pts ||= {})[t.id] = w;
+    }
+  }
+  return pts ? { pts } : null;
 }
 
 // ---------------------------------------------------------------- splines
@@ -231,6 +322,8 @@ function build(doc, pos, extra) {
     out.push({ id, type: 'arc', c_id: a.c, start_id: a.a, end_id: a.b, radius: pos?.arcs?.[id] ?? a.r, start_angle: a0, end_angle: a0 + sweep });
     out.push({ id: `${id}_rules`, type: 'arc_rules', a_id: id });
   }
+  const ell = nativeEllipses(doc);
+  if (ell.size) out.push(...nativeEllipsePrims(doc, pos, ell));
   for (const [id, k] of Object.entries(doc.cons)) out.push(...conPrims(doc, id, k));
   if (extra) out.push(...extra);
   return out;
@@ -278,7 +371,7 @@ export function solve(doc, targets = []) {
       extra.push({ id: `__t${i}`, type: 'point', x: t.x, y: t.y, fixed: true });
       extra.push({ id: `__d${i}`, type: 'p2p_distance', p1_id: t.id, p2_id: `__t${i}`, distance: 0, scale: 0.02 });
     });
-    const r1 = solveLoop(doc, null, extra);
+    const r1 = solveLoop(doc, ellipseFlipStart(doc, live), extra);
     const u = {};
     for (const [name, v] of Object.entries(r1.params || {})) if (name.startsWith('__u:')) u[name.slice(4)] = v;
     pos = { pts: r1.pts, circles: r1.circles, arcs: r1.arcs, u };

@@ -64,24 +64,42 @@ export function arcOf(doc, arc) {
 // Elipse: centro c, extremo a del primer eje y un punto b que define el 2.o eje (su distancia al primer eje
 // es el semieje menor). Al crearla se agrega una restriccion oculta de 90 grados entre c-a y c-b, asi b queda
 // en el extremo del 2.o eje.
-export function addEllipse(doc, c, a, b, style) {
+// Elipse parcial (arco eliptico): ademas lleva p1 y p2, los puntos donde empieza y termina (antihorario de p1 a p2).
+export function addEllipse(doc, c, a, b, style, p1 = null, p2 = null) {
   doc.ellipses ||= {};
   const id = nextId(doc, 'e');
-  doc.ellipses[id] = { c, a, b, ...style };
+  doc.ellipses[id] = { c, a, b, ...style, ...(p1 && p2 ? { p1, p2 } : {}) };
   return id;
 }
+export const isPartial = (e) => !!(e.p1 && e.p2);
 export function ellipseOf(doc, e) {
   const C = doc.pts[e.c], A = doc.pts[e.a], B = doc.pts[e.b];
   const ra = Math.hypot(A.x - C.x, A.y - C.y) || 1e-9, ux = (A.x - C.x) / ra, uy = (A.y - C.y) / ra;
   return { cx: C.x, cy: C.y, ra, rb: Math.abs((B.x - C.x) * uy - (B.y - C.y) * ux), ux, uy };
 }
-// Poligonal cerrada (el ultimo punto repite el primero).
+// Punto de la elipse g en el parametro t (0 = extremo del primer eje, antihorario) y parametro de un punto.
+export function ellipsePoint(g, t) {
+  const x = g.ra * Math.cos(t), y = g.rb * Math.sin(t);
+  return { x: g.cx + x * g.ux - y * g.uy, y: g.cy + x * g.uy + y * g.ux };
+}
+export function ellipseParam(g, P) {
+  const dx = P.x - g.cx, dy = P.y - g.cy;
+  return Math.atan2((-dx * g.uy + dy * g.ux) / (g.rb || 1e-9), (dx * g.ux + dy * g.uy) / g.ra);
+}
+// Tramo que ocupa: { t0, sweep } (elipse completa: 0 y 2pi).
+export function ellipseRange(doc, e, g = ellipseOf(doc, e)) {
+  if (!isPartial(e) || !doc.pts[e.p1] || !doc.pts[e.p2]) return { t0: 0, sweep: TAU };
+  const t0 = ellipseParam(g, doc.pts[e.p1]), t1 = ellipseParam(g, doc.pts[e.p2]);
+  let sweep = (((t1 - t0) % TAU) + TAU) % TAU;
+  if (sweep < 1e-9) sweep = TAU;
+  return { t0, sweep };
+}
+// Poligonal de la elipse (n tramos por vuelta). Completa: cerrada (el ultimo punto repite el primero);
+// parcial: de p1 a p2.
 export function ellipsePolyline(doc, e, n = 96) {
-  const g = ellipseOf(doc, e), out = [];
-  for (let i = 0; i <= n; i++) {
-    const t = (TAU * i) / n, x = g.ra * Math.cos(t), y = g.rb * Math.sin(t);
-    out.push({ x: g.cx + x * g.ux - y * g.uy, y: g.cy + x * g.uy + y * g.ux });
-  }
+  const g = ellipseOf(doc, e), out = [], { t0, sweep } = ellipseRange(doc, e, g);
+  const m = sweep >= TAU - 1e-9 ? n : Math.max(4, Math.ceil((n * sweep) / TAU));
+  for (let i = 0; i <= m; i++) out.push(ellipsePoint(g, t0 + (sweep * i) / m));
   return out;
 }
 
@@ -120,7 +138,7 @@ export function addText(doc, pt, text, opts = {}) {
 // Numeracion de restricciones: cada tipo cuenta aparte (V1, V2, ⟂1, ∥1...). Las que involucran varios
 // elementos comparten un solo numero. "Punto sobre" y "coincidente" son la misma familia (●). Las ocultas
 // y las cotas no se numeran. El numero no se reutiliza al borrar.
-export const CON_GROUP = { H: 'H', V: 'V', PAR: 'PAR', PERP: 'PERP', EQL: 'EQ', EQR: 'EQ', COI: 'COI', PONL: 'COI', PONC: 'COI', PONS: 'COI', COL: 'COL', MID: 'MID', CONC: 'CONC', TANLC: 'TAN', TANCC: 'TAN', TANLS: 'TAN', TANCS: 'TAN' };
+export const CON_GROUP = { H: 'H', V: 'V', PAR: 'PAR', PERP: 'PERP', EQL: 'EQ', EQR: 'EQ', COI: 'COI', PONL: 'COI', PONC: 'COI', PONS: 'COI', PONE: 'COI', COL: 'COL', MID: 'MID', CONC: 'CONC', TANLC: 'TAN', TANCC: 'TAN', TANLS: 'TAN', TANCS: 'TAN', TANLE: 'TAN', TANCE: 'TAN', TANEE: 'TAN' };
 export const CON_GLYPH = { H: 'H', V: 'V', PAR: '∥', PERP: '⟂', EQ: '=', COI: '●', COL: 'Col', MID: 'M', CONC: '◎', TAN: 'T' };
 export const conTag = (k) => (CON_GROUP[k.t] ? CON_GLYPH[CON_GROUP[k.t]] + (k.n ?? '') : '');
 export function addCon(doc, con) {
@@ -154,7 +172,7 @@ function pointsUsed(doc) {
   for (const l of Object.values(doc.lines)) { used.add(l.a); used.add(l.b); }
   for (const c of Object.values(doc.circles)) used.add(c.c);
   for (const a of Object.values(doc.arcs)) { used.add(a.c); used.add(a.a); used.add(a.b); }
-  for (const e of Object.values(doc.ellipses || {})) { used.add(e.c); used.add(e.a); used.add(e.b); }
+  for (const e of Object.values(doc.ellipses || {})) { used.add(e.c); used.add(e.a); used.add(e.b); if (e.p1) used.add(e.p1); if (e.p2) used.add(e.p2); }
   for (const t of Object.values(doc.texts || {})) used.add(t.pt);
   for (const sp of Object.values(doc.splines || {})) for (const p of sp.pts) used.add(p);
   for (const k of Object.values(doc.cons)) for (const r of conRefs(k)) used.add(r);
@@ -176,7 +194,7 @@ export function cleanup(doc) {
       if (keep.length !== sp.pts.length) { sp.pts = keep; changed = true; }
       if (sp.pts.length < 2) { delete doc.splines[id]; changed = true; }
     }
-    for (const [id, e] of Object.entries(doc.ellipses || {})) if (!(e.c in doc.pts && e.a in doc.pts && e.b in doc.pts)) { delete doc.ellipses[id]; changed = true; }
+    for (const [id, e] of Object.entries(doc.ellipses || {})) if (!(e.c in doc.pts && e.a in doc.pts && e.b in doc.pts) || (isPartial(e) && !(e.p1 in doc.pts && e.p2 in doc.pts))) { delete doc.ellipses[id]; changed = true; }
     // un spline sin relaciones no conserva parametros fijos
     for (const [id, sp] of Object.entries(doc.splines || {})) {
       if (sp.ts && !Object.values(doc.cons).some((k) => (k.t === 'PONS' || k.t === 'TANLS' || k.t === 'TANCS') && k.refs[1] === id)) delete sp.ts;
@@ -203,7 +221,7 @@ export function deleteItems(doc, items) {
       for (const [lid, l] of Object.entries(doc.lines)) if (l.a === id || l.b === id) delete doc.lines[lid];
       for (const [cid, c] of Object.entries(doc.circles)) if (c.c === id) delete doc.circles[cid];
       for (const [aid, a] of Object.entries(doc.arcs)) if (a.c === id || a.a === id || a.b === id) delete doc.arcs[aid];
-      for (const [eid, e] of Object.entries(doc.ellipses || {})) if (e.c === id || e.a === id || e.b === id) delete doc.ellipses[eid];
+      for (const [eid, e] of Object.entries(doc.ellipses || {})) if (e.c === id || e.a === id || e.b === id || e.p1 === id || e.p2 === id) delete doc.ellipses[eid];
       delete doc.pts[id];
     } else if (k === 'ln') delete doc.lines[id];
     else if (k === 'ci') delete doc.circles[id];

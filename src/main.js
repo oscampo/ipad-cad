@@ -2,7 +2,7 @@ import wasmUrl from '@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url';
 import { initSolver, solve, reparamSplines } from './solver.js';
 import {
   newDoc, addPoint, addLine, addCircle, addArc, addText, addSpline, splinePolyline, addCon, cleanup, deleteItems, clone, hatchLoops,
-  allLtypes, PALETTE, arcOf, conTag, ensureNumbers, addEllipse, ellipsePolyline, ellipseOf,
+  allLtypes, PALETTE, arcOf, conTag, ensureNumbers, addEllipse, ellipsePolyline, ellipseOf, ellipsePoint, ellipseParam, ellipseRange, isPartial,
 } from './model.js';
 import {
   dist, closestOnSeg, lineLine, lineCircle, circleCircle, signedAngle, dashFromPattern, parsePattern,
@@ -24,7 +24,7 @@ import { parseValue, isPlainNumber } from './expr.js';
 import { HELP_HTML } from './help.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from './lock.js';
 
-const VERSION = '1.0.6';
+const VERSION = '1.1.0';
 const STORE = 'ipad-cad-v1';
 const $ = (id) => document.getElementById(id);
 const cv = $('cv');
@@ -37,6 +37,7 @@ let tool = 'select';
 let toolName = 'select'; // nombre en la interfaz (incluye los constructivos, que usan la herramienta base)
 let consMode = false; // se dibuja con el estilo de linea constructiva
 const CONS_TOOLS = { ccircle: 'circle', carcc: 'arcc', carc3: 'arc3' };
+const BASE_TOOL = { ...CONS_TOOLS, earc: 'ellipse' }; // earc: elipse parcial (arco eliptico)
 let sel = []; // [{k:'pt'|'ln'|'ci'|'ha', id}]
 let cur = { color: 'auto', ltype: 'continua', w: 2, ls: 1, tx: { h: null, ang: 0, anchor: 'bl', readable: true } };
 const opts = { grid: true, snap: false, cons: true, pts: true, dims: true, texts: true, touch: false, ltScale: 1, labels: true, lock: true, lockDeg: 45, intMs: 80, arrLink: true, arrDims: false, filtKinds: [], filtLt: [], grp: {}, polyN: 6, polyCirc: false, sections: {} };
@@ -99,7 +100,7 @@ function afterChange() { updateButtons(); updateEnabled(); syncPanel(); persist(
 
 // Un boton de restriccion solo se activa si la seleccion actual le sirve (mismas reglas que applyCon).
 function updateEnabled() {
-  const n = { pt: 0, ln: 0, ci: 0, ar: 0, sp: 0 };
+  const n = { pt: 0, ln: 0, ci: 0, ar: 0, sp: 0, el: 0 };
   for (const x of sel) if (x.k in n) n[x.k]++;
   n.pt += sel.filter((x) => x.k === 'tx').length;
   const { pt, ln } = n;
@@ -107,11 +108,12 @@ function updateEnabled() {
   const rules = {
     H: ln >= 1 || pt >= 2, V: ln >= 1 || pt >= 2,
     PAR: ln >= 2, PERP: ln >= 2, COL: ln >= 2,
-    COI: (pt >= 2 && ln + crv + n.sp === 0) || (pt >= 1 && ln + crv + n.sp === 1), // 2 puntos coincidentes, o puntos sobre un elemento
+    // 2 puntos coincidentes, puntos sobre un elemento, o lineas/arcos con una elipse o spline (su extremo mas cercano)
+    COI: (pt >= 2 && ln + crv + n.sp + n.el === 0) || (pt >= 1 && ln + crv + n.sp + n.el === 1) || (!pt && n.sp + n.el === 1 && ln + n.ar >= 1 && !n.ci),
     MID: pt === 1 && ln === 1,
     EQ: (ln >= 2 && !crv) || (crv >= 2 && !ln),
     CONC: crv >= 2 && !ln && !n.sp,
-    TAN: (ln === 1 && crv === 1 && !n.sp) || (crv === 2 && !ln && !n.sp) || (n.sp === 1 && ln + crv === 1),
+    TAN: (ln === 1 && crv === 1 && !n.sp && !n.el) || (crv === 2 && !ln && !n.sp && !n.el) || (n.sp === 1 && ln + crv === 1 && !n.el) || (n.el === 1 && ln + crv === 1 && !n.sp) || (n.el === 2 && !ln && !crv && !n.sp),
     FIX: pt + ln + crv > 0,
     DIM: (pt === 2 && !ln) || (ln === 1 && !pt) || (pt === 1 && ln === 1),
     ANG: ln === 2,
@@ -410,6 +412,12 @@ function snapAt(sx, sy, o = {}) {
     if (!f) continue;
     const d = dist(toScreen(f), { x: sx, y: sy });
     if (d < bd) { bd = d; best = { type: 'sp', id, x: f.x, y: f.y }; }
+  }
+  for (const [id, e] of Object.entries(doc.ellipses)) {
+    const f = closestOnPolyline(ellipsePolyline(doc, e, 96), m);
+    if (!f) continue;
+    const d = dist(toScreen(f), { x: sx, y: sy });
+    if (d < bd) { const g = ellipseOf(doc, e), q = ellipsePoint(g, ellipseParam(g, f)); bd = d; best = { type: 'el', id, x: q.x, y: q.y }; }
   }
   if (best) return best;
   if (opts.snap) { const g = gridStep(); return { type: 'free', x: Math.round(m.x / g) * g, y: Math.round(m.y / g) * g }; }
@@ -788,14 +796,14 @@ function anchorOf(r) {
   if (r in doc.circles) { const o = doc.circles[r], c = doc.pts[o.c]; return { x: c.x + o.r * Math.SQRT1_2, y: c.y + o.r * Math.SQRT1_2 }; }
   if (r in doc.arcs) { const o = doc.arcs[r], c = doc.pts[o.c], g = arcOf(doc, o), t = g.a0 + g.sweep / 2; return { x: c.x + o.r * Math.cos(t), y: c.y + o.r * Math.sin(t) }; }
   if (r in (doc.splines || {})) { const P = splinePolyline(doc, doc.splines[r], 8); return P[Math.floor(P.length / 2)]; }
-  if (r in (doc.ellipses || {})) { const P = ellipsePolyline(doc, doc.ellipses[r], 48); return P[6]; }
+  if (r in (doc.ellipses || {})) { const P = ellipsePolyline(doc, doc.ellipses[r], 48); return P[Math.min(6, P.length >> 1)]; }
   return null;
 }
 // Donde se rotula una relacion: junto a cada elemento que involucra (el mismo numero en todos); las de un
 // punto con un elemento, junto al punto.
 function conAnchors(k) {
   const r = k.refs;
-  if (['COI', 'PONL', 'PONC', 'PONS'].includes(k.t)) return [anchorOf(r[0])];
+  if (['COI', 'PONL', 'PONC', 'PONS', 'PONE'].includes(k.t)) return [anchorOf(r[0])];
   if (k.t === 'MID') return [anchorOf(r[2])];
   if ((k.t === 'H' || k.t === 'V') && r.length === 2) return [midOf(r)];
   return r.map(anchorOf);
@@ -968,7 +976,22 @@ function drawPreview(c) {
         V.forEach((q, i) => (i ? c.lineTo(q.x * dpr, q.y * dpr) : c.moveTo(q.x * dpr, q.y * dpr))); c.closePath(); c.stroke();
       }
     }
-    if (tool === 'ellipse' && pending?.c) {
+    if (tool === 'ellipse' && pending?.g) { // elipse parcial: la elipse de referencia y el tramo que se va marcando
+      const g = pending.g, path = (t0, sw, n) => {
+        c.beginPath();
+        for (let i = 0; i <= n; i++) { const q = toScreen(ellipsePoint(g, t0 + (sw * i) / n)); if (i) c.lineTo(q.x * dpr, q.y * dpr); else c.moveTo(q.x * dpr, q.y * dpr); }
+        c.stroke();
+      };
+      c.setLineDash([6 * dpr, 4 * dpr]); c.strokeStyle = theme.accent; path(0, TAU, 96);
+      if (pending.t1 !== undefined) {
+        const a = earcSweep(hover ? ellipseParam(g, toModel(hover.x, hover.y)) : pending.t1);
+        c.setLineDash([]); c.lineWidth = 3.5 * dpr; path(a.t0, a.sweep, 96);
+        const q = toScreen(ellipsePoint(g, pending.t1));
+        c.fillStyle = theme.accent; c.beginPath(); c.arc(q.x * dpr, q.y * dpr, 4.5 * dpr, 0, 7); c.fill();
+        const cs = toScreen({ x: g.cx, y: g.cy });
+        label(c, `${fmt((a.sweep * 180) / Math.PI)}° ${a.cw ? '↻' : '↺'}`, cs.x, cs.y - 18, null, theme.accent);
+      }
+    } else if (tool === 'ellipse' && pending?.c) {
       const C = doc.pts[pending.c], cs = toScreen(C);
       c.setLineDash([6 * dpr, 4 * dpr]); c.strokeStyle = theme.accent;
       if (!pending.a) {
@@ -1071,10 +1094,11 @@ function applyLock(lineId, lk) {
 function pointFrom(s) {
   if (s.type === 'pt') return s.id;
   const id = addPoint(doc, s.x, s.y, true);
-  if (s.type === 'int') for (const r of s.refs) addCon(doc, { t: r.k === 'ln' ? 'PONL' : r.k === 'sp' ? 'PONS' : 'PONC', refs: [id, r.id], hidden: true });
+  if (s.type === 'int') for (const r of s.refs) addCon(doc, { t: r.k === 'ln' ? 'PONL' : r.k === 'sp' ? 'PONS' : r.k === 'el' ? 'PONE' : 'PONC', refs: [id, r.id], hidden: true });
   if (s.type === 'ln') addCon(doc, { t: 'PONL', refs: [id, s.id], hidden: true });
   if (s.type === 'ci' || s.type === 'ar') addCon(doc, { t: 'PONC', refs: [id, s.id], hidden: true });
   if (s.type === 'sp') addCon(doc, { t: 'PONS', refs: [id, s.id], hidden: true });
+  if (s.type === 'el') addCon(doc, { t: 'PONE', refs: [id, s.id], hidden: true });
   return id;
 }
 
@@ -1089,6 +1113,32 @@ function trackArc(p) {
   pending.dir.acc += d; pending.dir.last = a;
 }
 const arcCW = (E) => { const C = doc.pts[pending.center], S = doc.pts[pending.start]; return arcIsClockwise(pending.dir?.acc ?? 0, C, S, E); };
+
+// Elipse parcial: tramo que va de pending.t1 al parametro t2. El sentido lo da el movimiento acumulado del cursor
+// sobre la elipse de referencia; si casi no hubo (dos toques), el tramo corto.
+function earcSweep(t2) {
+  const acc = pending.dir?.acc ?? 0, d = (((t2 - pending.t1) % TAU) + TAU) % TAU;
+  const cw = Math.abs(acc) > 0.05 ? acc < 0 : d > Math.PI;
+  const sweep = cw ? (TAU - d) % TAU : d;
+  return { cw, sweep, t0: cw ? t2 : pending.t1 };
+}
+function trackEarc(p) {
+  if (tool !== 'ellipse' || !pending?.g || pending.t1 === undefined) return;
+  const a = ellipseParam(pending.g, toModel(p.x, p.y));
+  const d = ((((a - pending.dir.last) + Math.PI) % TAU) + TAU) % TAU - Math.PI;
+  pending.dir.acc += d; pending.dir.last = a;
+}
+function makeEarc(t2) {
+  const g = pending.g, a = earcSweep(t2);
+  if (a.sweep < 0.02) { toast('El tramo es demasiado corto: arrastra sobre la elipse o toca otro punto'); return; }
+  pushUndo();
+  const b = pending.b.id || addPoint(doc, pending.b.x, pending.b.y, false);
+  const q1 = ellipsePoint(g, a.t0), q2 = ellipsePoint(g, a.t0 + a.sweep);
+  const p1 = addPoint(doc, q1.x, q1.y, true), p2 = addPoint(doc, q2.x, q2.y, true);
+  addEllipse(doc, pending.c, pending.a, b, style(), p1, p2);
+  addCon(doc, { t: 'ANG4', refs: [pending.c, pending.a, pending.c, b], v: pending.b.rb > 0 ? 90 : -90, hidden: true });
+  pending = null; finishEdit();
+}
 
 function cancelPending() {
   if (pending) { pending = null; cleanup(doc); }
@@ -1114,7 +1164,7 @@ cv.addEventListener('pointermove', (e) => {
   if (gesture) { gestureMove(); return; }
   hover = p;
   trackIntersections(p);
-  trackArc(p);
+  trackArc(p); trackEarc(p);
   if (q) toolMove(p);
   updateStatus(p);
   draw();
@@ -1221,6 +1271,10 @@ function toolDown(p) {
     }
   } else {
     drag = { p0: p, moved: false };
+    if (tool === 'ellipse' && pending?.g && pending.t1 === undefined) { // elipse parcial: aqui empieza el tramo
+      pending.t1 = ellipseParam(pending.g, toModel(p.x, p.y));
+      pending.dir = { last: pending.t1, acc: 0 }; pending.fresh = true;
+    }
     if (tool === 'trim') { drag.trail = [p]; drag.last = p; trimStep(p, drag); }
   }
 }
@@ -1240,7 +1294,6 @@ function finishBox(d, p) {
 function trimStep(p, d) {
   const h = hitCurves(p.x, p.y);
   if (!h) return;
-  if (h.k === 'sp' || h.k === 'el') { toast(h.k === 'el' ? 'Las elipses no se recortan' : 'Los splines no se recortan'); return; }
   const bak = snapshot();
   if (!d.undone) { pushUndo(); d.undone = true; }
   const fail = (msg) => { doc = JSON.parse(bak); if (!d.trimmed) { undoStack.pop(); d.undone = false; } toast(msg); };
@@ -1396,6 +1449,13 @@ function toolUp(p, q) {
     return;
   }
   if (tool === 'ellipse') { // centro, extremo del 1.er eje y punto del 2.o eje (toques o arrastres)
+    if (pending?.g) { // elipse parcial: arrastrar sobre la elipse de referencia, o tocar el inicio y luego el fin
+      if (pending.t1 === undefined) return;
+      const fresh = pending.fresh; pending.fresh = false;
+      if (fresh && !(moved && Math.abs(pending.dir.acc) > 0.05)) { draw(); return; } // fue el toque del inicio
+      makeEarc(ellipseParam(pending.g, toModel(p.x, p.y)));
+      return;
+    }
     if (!pending) {
       pushUndo();
       if (moved) {
@@ -1413,6 +1473,11 @@ function toolUp(p, q) {
     if (ra < 1e-9) { cancelPending(); return; }
     const nx = -(A.y - C.y) / ra, ny = (A.x - C.x) / ra, rb = (sUp.x - C.x) * nx + (sUp.y - C.y) * ny;
     if (Math.abs(rb) < 1e-6) { toast('El segundo eje no puede ser nulo'); return; }
+    if (toolName === 'earc') { // queda la elipse de referencia; falta marcar el tramo
+      pending.b = sUp.type === 'pt' ? { id: sUp.id, rb } : { x: C.x + nx * rb, y: C.y + ny * rb, rb };
+      pending.g = { cx: C.x, cy: C.y, ra, rb: Math.abs(rb), ux: (A.x - C.x) / ra, uy: (A.y - C.y) / ra };
+      updateStatus(); draw(); return;
+    }
     pushUndo();
     const b = sUp.type === 'pt' ? sUp.id : addPoint(doc, C.x + nx * rb, C.y + ny * rb, false);
     addEllipse(doc, pending.c, pending.a, b, style());
@@ -1732,13 +1797,13 @@ function selBy() {
   const crv = sel.filter((x) => x.k === 'ci' || x.k === 'ar').map((x) => x.id);
   // un texto seleccionado aporta su punto de insercion a las restricciones
   const txPts = sel.filter((x) => x.k === 'tx').map((x) => doc.texts[x.id]?.pt).filter((q) => q && !ids('pt').includes(q));
-  return { pts: [...ids('pt'), ...txPts], lns: ids('ln'), cis: ids('ci'), ars: ids('ar'), sps: ids('sp'), crv };
+  return { pts: [...ids('pt'), ...txPts], lns: ids('ln'), cis: ids('ci'), ars: ids('ar'), sps: ids('sp'), els: ids('el'), crv };
 }
 const lineEnds = (id) => [doc.lines[id].a, doc.lines[id].b];
 const curveOf = (id) => doc.circles[id] || doc.arcs[id];
 
 async function applyCon(kind) {
-  const { pts, lns, crv, sps } = selBy();
+  const { pts, lns, crv, sps, els, cis, ars } = selBy();
   const list = [];
   let pre = null; // ajuste previo del dibujo (despues de guardar el estado para deshacer)
   const bad = (m) => { toast(m); return null; };
@@ -1769,14 +1834,27 @@ async function applyCon(kind) {
       }
       if (!list.length) return bad('Ya son concéntricos (comparten el centro)');
       break;
-    case 'COI':
-      // 1 linea, arco, circulo o spline + puntos: los puntos quedan sobre el elemento; 2 o mas puntos: coincidentes
-      if (pts.length && sps.length === 1 && !lns.length && !crv.length) pts.forEach((p) => list.push({ t: 'PONS', refs: [p, sps[0]] }));
-      else if (pts.length && lns.length === 1 && !crv.length && !sps.length) pts.forEach((p) => list.push({ t: 'PONL', refs: [p, lns[0]] }));
-      else if (pts.length && crv.length === 1 && !lns.length && !sps.length) pts.forEach((p) => list.push({ t: 'PONC', refs: [p, crv[0]] }));
-      else if (pts.length >= 2 && !lns.length && !crv.length && !sps.length) for (let i = 1; i < pts.length; i++) list.push({ t: 'COI', refs: [pts[0], pts[i]] });
-      else return bad('Selecciona 2 o más puntos, o punto(s) y una línea, arco, círculo o spline');
+    case 'COI': {
+      // 1 linea, arco, circulo, elipse o spline + puntos: los puntos quedan sobre el elemento; 2 o mas puntos:
+      // coincidentes; lineas o arcos + 1 elipse o spline: el extremo mas cercano de cada uno queda sobre la curva
+      const nOther = lns.length + crv.length + sps.length + els.length;
+      if (pts.length && nOther === 1) {
+        const t = sps.length ? 'PONS' : els.length ? 'PONE' : lns.length ? 'PONL' : 'PONC', o = [...sps, ...els, ...lns, ...crv][0];
+        pts.forEach((p) => list.push({ t, refs: [p, o] }));
+      } else if (pts.length >= 2 && !nOther) for (let i = 1; i < pts.length; i++) list.push({ t: 'COI', refs: [pts[0], pts[i]] });
+      else if (!pts.length && sps.length + els.length === 1 && lns.length + ars.length >= 1 && !cis.length) {
+        const cid = sps[0] || els[0], poly = sps.length ? splinePolyline(doc, doc.splines[cid], 32) : ellipsePolyline(doc, doc.ellipses[cid], 360);
+        const dd = (pid) => closestOnPolyline(poly, doc.pts[pid])?.d ?? Infinity;
+        for (const o of [...lns, ...ars]) {
+          const ends = o in doc.lines ? lineEnds(o) : [doc.arcs[o].a, doc.arcs[o].b];
+          const e = dd(ends[0]) <= dd(ends[1]) ? ends[0] : ends[1];
+          if (sps.length && doc.splines[cid].pts.includes(e)) continue; // ya es un punto del spline
+          list.push({ t: sps.length ? 'PONS' : 'PONE', refs: [e, cid] });
+        }
+        if (!list.length) return bad('Ese extremo ya es un punto del spline');
+      } else return bad('Selecciona 2 o más puntos; punto(s) y una línea, arco, círculo, elipse o spline; o líneas/arcos y una elipse o spline');
       break;
+    }
     case 'MID':
       if (pts.length !== 1 || lns.length !== 1) return bad('Selecciona 1 punto y 1 línea');
       list.push({ t: 'MID', refs: [...lineEnds(lns[0]), pts[0]] });
@@ -1792,9 +1870,26 @@ async function applyCon(kind) {
         const tp = addPoint(doc, q0.x, q0.y, true);
         list.push({ t: lns.length ? 'TANLS' : 'TANCS', refs: [lns.length ? lns[0] : crv[0], sps[0], tp] });
         pre = () => seedTangent(lns[0], sps[0], tp, poly);
-      } else if (lns.length === 1 && crv.length === 1) list.push({ t: 'TANLC', refs: [lns[0], crv[0]] });
+      } else if (els.length === 1 && lns.length + crv.length === 1 && !sps.length) {
+        // punto de contacto: el punto de la elipse mas cercano a la recta (o a la circunferencia)
+        const poly = ellipsePolyline(doc, doc.ellipses[els[0]], 360);
+        let score;
+        if (lns.length) { const [a, b] = lineEnds(lns[0]).map((i) => doc.pts[i]); const L = dist(a, b) || 1; score = (q) => Math.abs((b.x - a.x) * (a.y - q.y) - (a.x - q.x) * (b.y - a.y)) / L; }
+        else { const o = curveOf(crv[0]), c = doc.pts[o.c]; score = (q) => Math.abs(dist(c, q) - o.r); }
+        const q0 = poly.reduce((m, q) => (score(q) < score(m) ? q : m), poly[0]);
+        const tp = addPoint(doc, q0.x, q0.y, true);
+        list.push({ t: lns.length ? 'TANLE' : 'TANCE', refs: [lns.length ? lns[0] : crv[0], els[0], tp] });
+      } else if (els.length === 2 && !lns.length && !crv.length && !sps.length) {
+        // dos elipses: el punto de contacto arranca en el punto de la 2.a mas cercano a la 1.a
+        const P1 = ellipsePolyline(doc, doc.ellipses[els[0]], 180), P2 = ellipsePolyline(doc, doc.ellipses[els[1]], 180);
+        let q0 = P2[0], bd = Infinity;
+        for (const q of P2) { const f = closestOnPolyline(P1, q); if (f && f.d < bd) { bd = f.d; q0 = { x: (q.x + f.x) / 2, y: (q.y + f.y) / 2 }; } }
+        const tp = addPoint(doc, q0.x, q0.y, true);
+        list.push({ t: 'TANEE', refs: [els[0], els[1], tp] });
+      } else if (els.length || sps.length) return bad('Selecciona una elipse + línea/círculo/arco, 2 elipses, o un spline + línea/círculo/arco');
+      else if (lns.length === 1 && crv.length === 1) list.push({ t: 'TANLC', refs: [lns[0], crv[0]] });
       else if (crv.length === 2 && !lns.length) list.push({ t: 'TANCC', refs: [crv[0], crv[1]] });
-      else return bad('Selecciona línea + círculo/arco, 2 círculos/arcos, o un spline + línea/círculo/arco');
+      else return bad('Selecciona línea + círculo/arco, 2 círculos/arcos, o una elipse o spline + línea/círculo/arco');
       break;
     case 'FIX': {
       const ids = new Set(pts);
@@ -2092,6 +2187,7 @@ const HINTS = {
   spline: 'Spline por puntos: toca los puntos por donde pasa la curva. Tocar de nuevo el último (o Esc) termina; tocar el primero la cierra.',
   arcc: 'Arco por centro y extremos: toca el centro, el inicio y el fin. El sentido (horario o antihorario) sale de hacia dónde mueves el cursor o arrastras; con un toque directo, el arco corto.',
   arc3: 'Arco por 3 puntos: toca el inicio, un punto intermedio y el fin.',
+  earc: 'Elipse parcial: toca el centro, el extremo del primer eje y un punto del segundo eje; después arrastra sobre la elipse punteada para marcar el tramo (o toca el inicio y luego el fin). El sentido es el de tu movimiento.',
   ellipse: 'Elipse: toca el centro; luego toca (o arrastra hasta) el extremo del primer eje y, por último, un punto del segundo eje. Se puede arrastrar desde el centro.',
   trim: 'Recortar: mantén presionado y arrastra sobre los tramos que quieres quitar (entre cruces con otros elementos). Un toque recorta un solo tramo.',
   extend: 'Extender: toca un segmento o arco cerca del extremo que quieres alargar hasta el primer elemento que encuentre.',
@@ -2102,7 +2198,7 @@ function ltLabel(o) {
 }
 
 function updateStatus(p) {
-  let txt = HINTS[tool];
+  let txt = (toolName === 'earc' && (pending?.g ? 'Elipse parcial: arrastra sobre la elipse punteada desde donde empieza el tramo hasta donde termina (o toca el inicio y luego el fin). Esc cancela.' : HINTS.earc)) || HINTS[tool];
   if (sel.length === 1) {
     const s = sel[0];
     if (s.k === 'pt') { const q = doc.pts[s.id]; txt = `Punto (${fmt(q.x)}, ${fmt(q.y)})${q.fixed ? ' fijo' : ''}`; }
@@ -2110,7 +2206,7 @@ function updateStatus(p) {
     else if (s.k === 'ci') txt = `Círculo: radio ${fmt(doc.circles[s.id].r)}, ${ltLabel(doc.circles[s.id])}`;
     else if (s.k === 'tx') { const t = doc.texts[s.id]; txt = `Texto: “${t.text.split('\n')[0].slice(0, 24)}”, ${fmt(t.ang)}°, insercion ${t.anchor}${t.ref ? ', alineado con una línea' : ''}`; }
     else if (s.k === 'sp') { const sp = doc.splines[s.id]; txt = `Spline: ${sp.pts.length} puntos, ${sp.closed ? 'cerrada' : 'abierta'}, ${ltLabel(sp)}`; }
-    else if (s.k === 'el') { const g = ellipseOf(doc, doc.ellipses[s.id]); txt = `Elipse: semiejes ${fmt(g.ra)} y ${fmt(g.rb)}, ${ltLabel(doc.ellipses[s.id])}`; }
+    else if (s.k === 'el') { const g = ellipseOf(doc, doc.ellipses[s.id]); txt = `${isPartial(doc.ellipses[s.id]) ? `Arco elíptico de ${fmt((ellipseRange(doc, doc.ellipses[s.id], g).sweep * 180) / Math.PI)}°` : 'Elipse'}: semiejes ${fmt(g.ra)} y ${fmt(g.rb)}, ${ltLabel(doc.ellipses[s.id])}`; }
     else if (s.k === 'ar') { const g = arcOf(doc, doc.arcs[s.id]); txt = `Arco: radio ${fmt(doc.arcs[s.id].r)}, ${fmt((g.sweep * 180) / Math.PI)}°, ${ltLabel(doc.arcs[s.id])}`; }
     else if (s.k === 'ha') txt = 'Relleno seleccionado';
     else if (s.k === 'co') txt = 'Restricción/cota seleccionada';
@@ -2208,7 +2304,7 @@ async function exportPNG() {
 // ---------------------------------------------------------------- cableado de la interfaz
 function setTool(t) {
   if (pending) { if (tool === 'spline' && pending.ids?.length >= 2) finishSpline(false); else { pending = null; cleanup(doc); } }
-  toolName = t; consMode = t in CONS_TOOLS; tool = CONS_TOOLS[t] || t;
+  toolName = t; consMode = t in CONS_TOOLS; tool = BASE_TOOL[t] || t;
   document.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === t));
   $('tPaste').classList.toggle('on', t === 'paste');
   closeFly(); syncGroups(t);
@@ -2224,6 +2320,7 @@ const GROUPS = {
   line: [['line', 'line', 'Línea (L)'], ['mline', 'mline', 'Línea de punto medio (M)'], ['cline', 'cline', 'Línea constructiva (K)']],
   circle: [['circle', 'circle', 'Círculo (C)'], ['circle3', 'circle3', 'Círculo perimetral (3 puntos)'], ['ccircle', 'ccircle', 'Círculo constructivo']],
   arc: [['arcc', 'arc-c', 'Arco por centro y extremos (R)'], ['arc3', 'arc-3', 'Arco por 3 puntos (A)'], ['carcc', 'carcc', 'Arco constructivo por centro y extremos'], ['carc3', 'carc3', 'Arco constructivo por 3 puntos']],
+  ellipse: [['ellipse', 'ellipse', 'Elipse: centro y dos ejes (O)'], ['earc', 'earc', 'Elipse parcial (arco elíptico)']],
   rect: [['rect', 'rect', 'Rectángulo por diagonal (B)'], ['rectc', 'rect-c', 'Rectángulo de centro']],
 };
 const grpTool = (g) => { const c = (opts.grp || {})[g]; return GROUPS[g].some((x) => x[0] === c && x[0] !== 'filter') ? c : GROUPS[g][0][0]; };

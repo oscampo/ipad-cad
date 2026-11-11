@@ -1,5 +1,14 @@
 # Historial de cambios
 
+## v1.1.0 (2026-11-11)
+
+- **Elipse parcial** (desplegable de Elipse): arco elíptico definido con el centro, el primer eje y el segundo eje, y arrastrando sobre la elipse de referencia para marcar el tramo (en el sentido del movimiento). Sus extremos son puntos que se deslizan sobre la elipse.
+- **Recortar elipses y splines**: la elipse queda como arco elíptico (o se parte en dos que comparten centro y ejes); el spline queda en trozos que conservan la forma con puntos extra tomados de la curva original.
+- **Extender** líneas y arcos hasta elipses, arcos elípticos y splines.
+- **Coincidente con elipses** (punto sobre elipse) y, con una elipse o spline, el extremo más cercano de las líneas o arcos seleccionados. Al dibujar, los puntos se enganchan también a las elipses.
+- **Tangente con elipses**: línea, círculo, arco u otra elipse.
+- Las elipses con relaciones y los arcos elípticos se resuelven como elipses nativas del solver.
+
 ## v1.0.6 (2026-11-11)
 
 - **Círculos y arcos constructivos**: herramientas nuevas en los desplegables de Círculo y Arco (círculo constructivo; arco constructivo por centro y extremos y por 3 puntos) y conversión de cualquier elemento con el tipo «Constructiva» del panel de Estilo. Color y grosor de la línea constructiva; el círculo se ve en «traza y punto» y los arcos llevan un punto en cada extremo.
