@@ -125,6 +125,7 @@ export const HELP_HTML = `
 <p>V seleccionar, P punto, L línea, K línea constructiva, C círculo, B rectángulo, G polígono, O elipse, Ctrl/Cmd+C copiar, Ctrl/Cmd+V pegar, R arco por centro, A arco por 3 puntos, S spline, T texto, I intersección, X recortar, E extender. Ctrl/Cmd+Z deshacer, Ctrl/Cmd+Y (o Ctrl/Cmd+Mayús+Z) rehacer, Supr o Retroceso borra, Esc cancela o termina.</p></details>
 
 <details><summary>Historial de versiones</summary>
+<p><b>v1.1.1</b>: la restricción coincidente entre puntos lejanos se resuelve por pasos cuando el solver no llega de golpe.</p>
 <p><b>v1.1.0</b>: elipse parcial (arco elíptico), recorte de elipses y splines, extensión hasta elipses y splines, y restricciones coincidente y tangente con elipses.</p>
 <p><b>v1.0.6</b>: círculos y arcos constructivos, y arcos por centro y extremos en sentido horario o antihorario según el movimiento.</p>
 <p><b>v1.0.5</b>: línea de punto medio y restricción concéntrica entre círculos y arcos.</p>

@@ -1,5 +1,5 @@
 import wasmUrl from '@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url';
-import { initSolver, solve, reparamSplines } from './solver.js';
+import { initSolver, solve, reparamSplines, addConsSolved } from './solver.js';
 import {
   newDoc, addPoint, addLine, addCircle, addArc, addText, addSpline, splinePolyline, addCon, cleanup, deleteItems, clone, hatchLoops,
   allLtypes, PALETTE, arcOf, conTag, ensureNumbers, addEllipse, ellipsePolyline, ellipseOf, ellipsePoint, ellipseParam, ellipseRange, isPartial,
@@ -24,7 +24,7 @@ import { parseValue, isPlainNumber } from './expr.js';
 import { HELP_HTML } from './help.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from './lock.js';
 
-const VERSION = '1.1.0';
+const VERSION = '1.1.1';
 const STORE = 'ipad-cad-v1';
 const $ = (id) => document.getElementById(id);
 const cv = $('cv');
@@ -2019,8 +2019,7 @@ function splitSelected() {
 function commitCons(list, pre) {
   pushUndo();
   if (pre) pre();
-  list.forEach((k) => addCon(doc, k));
-  const r = solve(doc, []);
+  const r = addConsSolved(doc, list);
   if (!r.ok) { rollback(); toast('No se pudo: entra en conflicto con otras restricciones. Si solo quieres medir, usa «Solo lectura»'); afterChange(); return; }
   afterChange();
 }

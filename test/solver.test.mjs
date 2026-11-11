@@ -12,7 +12,8 @@ import { trimAt, extendEnd, cutsOf, curveCuts, linearArray, mirrorCopy, circular
 import { CLINE_STYLE, circleThrough3, addRectangle, polygonVertices, addPolygon, arcIsClockwise, constructionArcDash } from '../src/shapes.js';
 import { FONTS, fontCss } from '../src/text.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from '../src/lock.js';
-import { initSolver, solve, reparamSplines } from '../src/solver.js';
+import { initSolver, solve, reparamSplines, addConsSolved } from '../src/solver.js';
+import { readFileSync } from 'node:fs';
 import { bsplineThrough, bsplinePoint } from '../src/bspline.js';
 import { boxSelect } from '../src/boxsel.js';
 import { crossPoints } from '../src/snapx.js';
@@ -1843,6 +1844,24 @@ t('extender hasta elipses y splines: la linea y el arco llegan a la curva y qued
   assert.ok(extendEnd(d3, 'ln', l3, { x: 25, y: 20 }).ok && solve(d3, []).ok);
   const end = d3.pts[d3.lines[l3].b];
   near(end.x, 25, 1e-6); near(closestOnPolyline(splinePolyline(d3, d3.splines[s], 48), end).d, 0, 1e-2);
+});
+
+t('coincidente entre dos puntos lejanos con arcos tangentes: se resuelve acercandolos por pasos (caso del iPad)', () => {
+  const d = JSON.parse(readFileSync(new URL('./fixtures/arcos-tangentes-coincidente.json', import.meta.url), 'utf8'));
+  assert.ok(solve(d, []).ok);
+  // directo, de golpe, el solver pierde el hilo aunque el caso tiene solucion
+  const directo = JSON.parse(JSON.stringify(d)); addCon(directo, { t: 'COI', refs: ['p3', 'p8'] });
+  assert.equal(solve(directo, []).ok, false);
+  const r = addConsSolved(d, [{ t: 'COI', refs: ['p3', 'p8'] }]);
+  assert.ok(r.ok);
+  near(d.pts.p3.x, d.pts.p8.x, 1e-6); near(d.pts.p3.y, d.pts.p8.y, 1e-6);
+  assert.ok(Object.values(d.cons).some((k) => k.t === 'COI'));
+  assert.ok(solve(d, []).ok);
+  // sin solucion: el documento queda como estaba
+  const e = JSON.parse(JSON.stringify(d)), n = Object.keys(e.cons).length;
+  e.pts.p1.fixed = e.pts.p9.fixed = true;
+  const bad = addConsSolved(e, [{ t: 'COI', refs: ['p1', 'p2'] }, { t: 'COI', refs: ['p9', 'p3'] }]);
+  assert.equal(bad.ok, false); assert.equal(Object.keys(e.cons).length, n, 'sin restricciones nuevas');
 });
 
 console.log(`\n${passed} pruebas pasaron`);

@@ -1,6 +1,6 @@
 // Puente entre el documento y el solver de restricciones (planegcs, de FreeCAD, en WASM).
 import { init_planegcs_module, GcsWrapper } from '@salusoft89/planegcs';
-import { conRefs, ellipseOf, ellipseParam, isPartial } from './model.js';
+import { conRefs, addCon, ellipseOf, ellipseParam, isPartial } from './model.js';
 import { arcSweepOf, closestOnPolyline } from './geom.js';
 import { bsplineThrough, bsplineSamples, bsplinePoint, bsplineTangent, sampleParam, chordParams, validParams } from './bspline.js';
 
@@ -380,6 +380,31 @@ export function solve(doc, targets = []) {
   const ok = (res.status === 0 || res.status === 1) && res.conflicts.length === 0 && (!hasSpl(doc) || splineResidual(doc, res) < 1e-3);
   if (ok) commit(doc, res);
   return { ok, conflicts: res.conflicts, status: res.status };
+}
+
+// Agrega restricciones y resuelve. Si falla y hay coincidencias entre puntos, reintenta acercando los puntos poco a
+// poco y poniendo las restricciones al final: un salto grande de golpe puede hacer que el solver pierda el hilo (por
+// ejemplo con arcos tangentes, que cambian de rama) aunque el caso tenga solucion. Si no hay solucion, doc queda
+// como estaba antes de agregarlas.
+export function addConsSolved(doc, list, steps = 16) {
+  const before = JSON.stringify(doc);
+  const restore = () => { const d = JSON.parse(before); for (const k of Object.keys(doc)) delete doc[k]; Object.assign(doc, d); };
+  list.forEach((k) => addCon(doc, k));
+  let r = solve(doc, []);
+  if (r.ok || !list.some((k) => k.t === 'COI')) { if (!r.ok) restore(); return r; }
+  restore();
+  const goals = list.filter((k) => k.t === 'COI').map((k) => {
+    const [a, b] = k.refs, mover = doc.pts[b].fixed ? a : b, other = mover === b ? a : b;
+    return { id: mover, from: { x: doc.pts[mover].x, y: doc.pts[mover].y }, to: { x: doc.pts[other].x, y: doc.pts[other].y } };
+  });
+  for (let i = 1; i <= steps; i++) {
+    const f = i / steps;
+    if (!solve(doc, goals.map((g) => ({ id: g.id, x: g.from.x + (g.to.x - g.from.x) * f, y: g.from.y + (g.to.y - g.from.y) * f }))).ok) { restore(); return { ok: false, conflicts: [] }; }
+  }
+  list.forEach((k) => addCon(doc, k));
+  r = solve(doc, []);
+  if (!r.ok) restore();
+  return r;
 }
 
 // Tras mover los puntos de un spline con relaciones, sus parametros (fijos mientras se resuelve) pueden

@@ -1,5 +1,9 @@
 # Historial de cambios
 
+## v1.1.1 (2026-11-11)
+
+- **Coincidente entre puntos lejanos**: si de golpe el solver pierde el hilo (pasaba con arcos tangentes y un punto a más de una unidad), ahora reintenta acercando los puntos poco a poco y pone la restricción al final. Antes decía «No se pudo» aunque el caso tenía solución.
+
 ## v1.1.0 (2026-11-11)
 
 - **Elipse parcial** (desplegable de Elipse): arco elíptico definido con el centro, el primer eje y el segundo eje, y arrastrando sobre la elipse de referencia para marcar el tramo (en el sentido del movimiento). Sus extremos son puntos que se deslizan sobre la elipse.
