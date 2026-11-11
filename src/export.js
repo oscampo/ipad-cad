@@ -1,9 +1,9 @@
-import { hatchLoops, allLtypes, arcOf, arcSamples, splinePolyline } from './model.js';
+import { hatchLoops, allLtypes, arcOf, arcSamples, splinePolyline, ellipsePolyline } from './model.js';
 import { dashFromPattern, norm, splineBezier } from './geom.js';
 import { textFrame, textCorners, textPose, LINE_SPACING } from './text.js';
 import { layoutDim } from './dims.js';
 
-const DIM_KINDS = new Set(['DIST', 'DISTPL', 'ANG', 'RAD']);
+const DIM_KINDS = new Set(['DIST', 'DISTPL', 'ANG', 'ANG4', 'RAD']);
 const approx = (ln) => 0.6 * ln.length; // ancho aproximado de texto (por altura 1)
 
 function bounds(doc) {
@@ -12,6 +12,7 @@ function bounds(doc) {
   for (const c of Object.values(doc.circles)) { const p = doc.pts[c.c]; xs.push(p.x - c.r, p.x + c.r); ys.push(p.y - c.r, p.y + c.r); }
   for (const a of Object.values(doc.arcs || {})) { const p = doc.pts[a.c]; xs.push(p.x - a.r, p.x + a.r); ys.push(p.y - a.r, p.y + a.r); }
   for (const sp of Object.values(doc.splines || {})) for (const q of splinePolyline(doc, sp, 8)) { xs.push(q.x); ys.push(q.y); }
+  for (const e of Object.values(doc.ellipses || {})) for (const q of ellipsePolyline(doc, e, 48)) { xs.push(q.x); ys.push(q.y); }
   for (const tr of Object.values(doc.traces || {})) for (const q of tr.pts) { xs.push(q.x); ys.push(q.y); }
   if (!xs.length) return null;
   return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
@@ -132,6 +133,9 @@ export function exportSVG(doc, ltScale = 1, vis = {}) {
   for (const sp of Object.values(doc.splines || {})) {
     out.push(`<path d="${polyPath(splinePolyline(doc, sp, 16), sp.closed)}" fill="none" stroke="${col(sp.color)}" stroke-width="${sp.w}" stroke-linejoin="round"${dash(sp.ltype, sp.ls)}/>`);
   }
+  for (const e of Object.values(doc.ellipses || {})) {
+    out.push(`<path d="${polyPath(ellipsePolyline(doc, e, 120), true)}" fill="none" stroke="${col(e.color)}" stroke-width="${e.w}" stroke-linejoin="round"${dash(e.ltype, e.ls)}/>`);
+  }
   for (const tr of Object.values(doc.traces || {})) {
     if (tr.pts.length < 2) continue;
     out.push(`<path d="${polyPath(tr.pts, false)}" fill="none" stroke="${col(tr.color)}" stroke-width="${tr.w}" stroke-linejoin="round"${dash(tr.ltype, tr.ls)}/>`);
@@ -192,6 +196,7 @@ export function exportDXF(doc, viewScale = 5, vis = {}) {
     g(0, 'SEQEND'); g(8, '0');
   };
   for (const sp of Object.values(doc.splines || {})) poly(splinePolyline(doc, sp, 16), sp.closed);
+  for (const e of Object.values(doc.ellipses || {})) poly(ellipsePolyline(doc, e, 120).slice(0, -1), true);
   for (const tr of Object.values(doc.traces || {})) if (tr.pts.length >= 2) poly(tr.pts, false);
   // textos: una entidad TEXT por linea, alineada segun el punto de insercion (ancho aproximado)
   for (const t of vis.texts === false ? [] : Object.values(doc.texts || {})) {
@@ -242,7 +247,7 @@ export const styleKey = (e) => `${e.ltype ?? 'continua'}|${e.color ?? 'auto'}|${
 // Clases presentes en el dibujo, con cuantos elementos tiene cada una (lineas, circulos, arcos y splines).
 export function laserClasses(doc) {
   const m = new Map();
-  for (const set of [doc.lines, doc.circles, doc.arcs || {}, doc.splines || {}]) {
+  for (const set of [doc.lines, doc.circles, doc.arcs || {}, doc.splines || {}, doc.ellipses || {}]) {
     for (const e of Object.values(set)) {
       const key = styleKey(e);
       if (!m.has(key)) { const [ltype, color, w] = key.split('|'); m.set(key, { key, ltype, color, w: Number(w), count: 0 }); }
@@ -267,13 +272,14 @@ export function exportSVGLaser(doc, o = {}) {
     return o.onlyContinuous === false || (e.ltype ?? 'continua') === 'continua' ? 'cut' : 'skip';
   };
   const pick = (set) => Object.values(set || {}).map((e) => ({ e, mode: modeOf(e) })).filter((x) => x.mode !== 'skip');
-  const lines = pick(doc.lines), circles = pick(doc.circles), arcs = pick(doc.arcs), splines = pick(doc.splines);
+  const lines = pick(doc.lines), circles = pick(doc.circles), arcs = pick(doc.arcs), splines = pick(doc.splines), ellipses = pick(doc.ellipses);
   const xs = [], ys = [];
   const add = (x, y) => { xs.push(x); ys.push(y); };
   for (const { e: l } of lines) { add(doc.pts[l.a].x, doc.pts[l.a].y); add(doc.pts[l.b].x, doc.pts[l.b].y); }
   for (const { e: c } of circles) { const p = doc.pts[c.c]; add(p.x - c.r, p.y - c.r); add(p.x + c.r, p.y + c.r); }
   for (const { e: a } of arcs) for (const q of arcSamples(doc, a)) add(q.x, q.y);
   for (const { e: sp } of splines) for (const q of splinePolyline(doc, sp, 24)) add(q.x, q.y);
+  for (const { e } of ellipses) for (const q of ellipsePolyline(doc, e, 90)) add(q.x, q.y);
   if (!xs.length) return null;
   const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
   const f = (v) => Math.round(v * 1e4) / 1e4;
@@ -294,6 +300,7 @@ export function exportSVGLaser(doc, o = {}) {
     const q = (pt) => `${X(pt.x)} ${Y(pt.y)}`;
     out[mode].push(`<path d="M${q(segs[0].p0)} ${segs.map((b) => `C${q(b.c1)} ${q(b.c2)} ${q(b.p1)}`).join(' ')}${sp.closed ? ' Z' : ''}"/>`);
   }
+  for (const { e, mode } of ellipses) out[mode].push(`<path d="M${ellipsePolyline(doc, e, 180).slice(0, -1).map((q) => `${X(q.x)} ${Y(q.y)}`).join(' L')} Z"/>`);
   const grp = (id, color, items) => (items.length ? [`<g id="${id}" fill="none" stroke="${color}" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round">`, ...items, '</g>'] : []);
   const svg = [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}mm" height="${H}mm" viewBox="0 0 ${W} ${H}">`,

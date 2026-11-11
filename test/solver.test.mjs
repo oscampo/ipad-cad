@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { newDoc, addPoint, addLine, addCircle, addArc, addCon, addText, addSpline, deleteItems, hatchLoops, arcOf, cleanup, splinePolyline } from '../src/model.js';
+import { newDoc, addPoint, addLine, addCircle, addArc, addCon, addText, addSpline, deleteItems, hatchLoops, arcOf, cleanup, splinePolyline, conTag, ensureNumbers, addEllipse, ellipseOf, ellipsePolyline } from '../src/model.js';
 import { startTrace, recordTraces, traceToSpline, offsetPolyline, firstLap } from '../src/curves.js';
 import { layoutDim, dragDim, dimValue, dimText, angSector, angTrue } from '../src/dims.js';
 import { textFrame, textCorners, textHit, textPose, rawAngle } from '../src/text.js';
@@ -861,7 +861,7 @@ t('arbol de elementos: grupos, puntos de cada elemento y relaciones', () => {
   assert.equal(ln1.children.filter((c) => c.sel.k === 'pt').length, 2, 'y sus dos puntos');
   const spn = g('g:sp').children[0];
   assert.equal(spn.children.find((c) => c.group).children.length, 3, 'puntos de control del spline');
-  assert.ok(spn.children.some((c) => /Punto sobre spline/.test(c.label)));
+  assert.ok(spn.children.some((c) => /punto sobre spline/.test(c.label)));
   assert.ok(!g('g:pt').children.some((c) => ids.includes(c.sel.id)), 'los puntos de control no aparecen sueltos');
   assert.equal(g('g:co').children.length, 3);
   assert.equal(conLabel(d, { t: 'DIST', refs: [a, b], v: 14.14, ref: true }), 'Distancia = 14.14 (referencia)');
@@ -1383,6 +1383,145 @@ t('interseccion para iman: cruces dentro de cada elemento (linea, circulo, arco 
   assert.equal(crossPoints(d, { k: 'ci', id: c }, { k: 'ci', id: c }).length, 0);
   const sp = addSpline(d, [addPoint(d, 0, 5), addPoint(d, 5, 5), addPoint(d, 10, 5)], {}, false);
   assert.ok(crossPoints(d, { k: 'sp', id: sp }, { k: 'ln', id: l1 }).length >= 1);
+});
+
+
+t('recortar: solo quita el tramo, el resto no se divide en los demas cruces', () => {
+  const d = newDoc();
+  const l = addLine(d, addPoint(d, 0, 0), addPoint(d, 60, 0), {});
+  for (const x of [10, 30, 50]) addLine(d, addPoint(d, x, -5), addPoint(d, x, 5), {});
+  const nPts = Object.keys(d.pts).length;
+  // recortar a la izquierda del primer cruce: queda UNA sola linea de x = 10 a x = 60
+  const r = trimAt(d, 'ln', l, { x: 4, y: 0 });
+  assert.ok(r.ok && r.pieces.length === 1, 'una sola pieza restante');
+  const q = d.lines[r.pieces[0]], xs = [d.pts[q.a].x, d.pts[q.b].x].sort((m, n) => m - n);
+  near(xs[0], 10, 1e-6); near(xs[1], 60, 1e-6);
+  assert.equal(Object.keys(d.pts).length, nPts + 1, 'solo se crea el punto del cruce en x = 10');
+  const horizontals = Object.values(d.lines).filter((m) => Math.abs(d.pts[m.a].y) < 1e-9 && Math.abs(d.pts[m.b].y) < 1e-9);
+  assert.equal(horizontals.length, 1);
+  // un tramo del medio entre cruces: quedan dos lineas (izquierda y derecha), sin mas divisiones
+  const d2 = newDoc();
+  const l2 = addLine(d2, addPoint(d2, 0, 0), addPoint(d2, 60, 0), {});
+  for (const x of [10, 20, 30, 50]) addLine(d2, addPoint(d2, x, -5), addPoint(d2, x, 5), {});
+  const r2 = trimAt(d2, 'ln', l2, { x: 25, y: 0 }); // entre x = 20 y x = 30
+  assert.equal(r2.pieces.length, 2);
+  const spans = r2.pieces.map((id) => [d2.pts[d2.lines[id].a].x, d2.pts[d2.lines[id].b].x].sort((m, n) => m - n)).sort((m, n) => m[0] - n[0]);
+  near(spans[0][0], 0); near(spans[0][1], 20, 1e-6); near(spans[1][0], 30, 1e-6); near(spans[1][1], 60);
+});
+
+
+t('numeracion de restricciones: por tipo, compartida entre elementos, sin reutilizar; coincidente unifica punto sobre', () => {
+  const d = newDoc();
+  const l1 = addLine(d, addPoint(d, 0, 0), addPoint(d, 10, 0), {}), l2 = addLine(d, addPoint(d, 0, 5), addPoint(d, 10, 5), {}), l3 = addLine(d, addPoint(d, 3, 0), addPoint(d, 3, 9), {});
+  const k1 = addCon(d, { t: 'H', refs: [l1] }), k2 = addCon(d, { t: 'H', refs: [l2] });
+  const kp = addCon(d, { t: 'PERP', refs: [l1, l3] });
+  addCon(d, { t: 'PONL', refs: [d.lines[l3].a, l1], hidden: true });
+  const kc = addCon(d, { t: 'PONL', refs: [d.lines[l3].b, l2] });
+  assert.equal(conTag(d.cons[k1]), 'H1'); assert.equal(conTag(d.cons[k2]), 'H2');
+  assert.equal(conTag(d.cons[kp]), '⟂1', 'una sola numeracion para las dos lineas');
+  assert.equal(conTag(d.cons[kc]), '●1', 'las ocultas no se numeran; el punto sobre linea es coincidente');
+  delete d.cons[k1];
+  const k3 = addCon(d, { t: 'H', refs: [l3] });
+  assert.equal(conTag(d.cons[k3]), 'H3', 'no se reutiliza el numero borrado');
+  // dibujos viejos sin numeros: se numeran en el orden de creacion
+  const old = newDoc();
+  const a = addLine(old, addPoint(old, 0, 0), addPoint(old, 1, 0), {});
+  old.cons.k5 = { t: 'V', refs: [a] }; old.cons.k9 = { t: 'V', refs: [a] }; delete old.cn;
+  ensureNumbers(old);
+  assert.equal(old.cons.k5.n, 1); assert.equal(old.cons.k9.n, 2);
+});
+t('matriz lineal vinculada: la copia sigue al original (distancia + direccion); cota visible opcional', () => {
+  for (const dims of [false, true]) {
+    const d = newDoc();
+    const a = addPoint(d, 0, 0), b = addPoint(d, 4, 0);
+    const l = addLine(d, a, b, {});
+    d.pts[a].fixed = true;
+    const r = linearArray(d, [{ k: 'ln', id: l }], [{ u: { x: 0, y: 1 }, s: 10, n: 2 }], { link: true, dims });
+    assert.ok(r.ok && solve(d, []).ok);
+    const dimK = Object.values(d.cons).filter((k) => k.t === 'DIST' && !k.hidden);
+    assert.equal(dimK.length, dims ? 2 : 0, 'una cota visible por copia solo si se pide');
+    // al girar el original (mover su otro extremo), las copias se mueven rigidamente y no cambian de forma
+    assert.ok(solve(d, [{ id: b, x: 4, y: 3 }]).ok);
+    near(d.pts[b].x, 4, 1e-3); near(d.pts[b].y, 3, 1e-3);
+    const copies = r.made.map((m) => d.lines[m.id]);
+    copies.forEach((c, i) => {
+      const A = d.pts[c.a], B = d.pts[c.b];
+      near(B.x - A.x, 4, 1e-4, 'misma forma'); near(B.y - A.y, 3, 1e-4);
+      near(A.x, 0, 1e-4); near(A.y, 10 * (i + 1), 1e-4, 'en su lugar');
+    });
+  }
+});
+t('matriz lineal vinculada con linea de direccion: sigue a la linea si esta gira', () => {
+  const d = newDoc();
+  const l = addLine(d, addPoint(d, 0, 0), addPoint(d, 4, 0), {});
+  const dir = addLine(d, addPoint(d, 20, 20), addPoint(d, 30, 20), {}); // direccion horizontal
+  d.pts[d.lines[l].a].fixed = true; d.pts[d.lines[dir].a].fixed = true;
+  const r = linearArray(d, [{ k: 'ln', id: l }], [{ u: { x: 1, y: 0 }, s: 10, n: 1, line: dir }], { link: true });
+  assert.ok(r.ok && solve(d, []).ok);
+  assert.ok(solve(d, [{ id: d.lines[dir].b, x: 20, y: 30 }]).ok, 'la linea de direccion se pone vertical');
+  const c = d.lines[r.made[0].id];
+  near(d.pts[c.a].x, 0, 1e-3); near(d.pts[c.a].y, 10, 1e-3, 'la copia ahora esta arriba');
+});
+t('matriz circular vinculada: copias a igual distancia del centro y con el angulo; siguen al original', () => {
+  const d = newDoc();
+  const c = addPoint(d, 0, 0), p = addPoint(d, 10, 0);
+  d.pts[c].fixed = true;
+  const l = addLine(d, c, p, {});
+  const r = circularArray(d, [{ k: 'ln', id: l }], { c: { x: 0, y: 0 }, step: Math.PI / 2, n: 3, link: true, cid: c, dims: true });
+  assert.ok(r.ok && solve(d, []).ok);
+  assert.equal(Object.values(d.cons).filter((k) => k.t === 'ANG4' && !k.hidden).length, 2, 'cota angular visible');
+  assert.ok(solve(d, [{ id: p, x: 6, y: 8 }]).ok); // el original gira y se acorta
+  r.made.forEach((m, i) => {
+    const q = d.pts[d.lines[m.id].b];
+    near(Math.hypot(q.x, q.y), 10, 1e-3, 'mismo radio');
+    const want = Math.atan2(8, 6) + (Math.PI / 2) * (i + 1);
+    near(Math.atan2(Math.sin(Math.atan2(q.y, q.x) - want), Math.cos(Math.atan2(q.y, q.x) - want)), 0, 1e-3, 'angulo de la copia');
+  });
+});
+t('copia espejo vinculada: simetria con el eje; sigue al original', () => {
+  const d = newDoc();
+  const ax = addPoint(d, 0, -10), bx = addPoint(d, 0, 10);
+  d.pts[ax].fixed = d.pts[bx].fixed = true;
+  const axis = addLine(d, ax, bx, {});
+  const a = addPoint(d, 5, 0), b = addPoint(d, 8, 3);
+  const l = addLine(d, a, b, {});
+  const ci = addCircle(d, addPoint(d, 5, 6), 2, {});
+  const r = mirrorCopy(d, [{ k: 'ln', id: l }, { k: 'ci', id: ci }], d.pts[ax], d.pts[bx], { axis });
+  assert.ok(r.ok && solve(d, []).ok);
+  assert.ok(solve(d, [{ id: b, x: 9, y: 5 }]).ok);
+  const m = d.lines[r.made.find((x) => x.k === 'ln').id];
+  near(d.pts[m.b].x, -9, 1e-3); near(d.pts[m.b].y, 5, 1e-3);
+  const mc = d.circles[r.made.find((x) => x.k === 'ci').id];
+  assert.ok(solve(d, [{ id: d.circles[ci].c, x: 7, y: 6 }]).ok);
+  near(d.pts[mc.c].x, -7, 1e-3);
+  d.circles[ci].r = 3; assert.ok(solve(d, []).ok); near(mc.r, 3, 1e-3, 'igual radio');
+});
+
+
+t('elipse: semiejes desde el centro y dos puntos, cierra, se copia, se exporta y se borra con sus puntos', () => {
+  const d = newDoc();
+  const c = addPoint(d, 10, 5), a = addPoint(d, 16, 5), b = addPoint(d, 10, 8);
+  const e = addEllipse(d, c, a, b, { color: 'auto', ltype: 'continua', w: 2, ls: 1 });
+  addCon(d, { t: 'ANG4', refs: [c, a, c, b], v: 90, hidden: true });
+  const g = ellipseOf(d, d.ellipses[e]);
+  near(g.ra, 6); near(g.rb, 3); near(g.ux, 1); near(g.uy, 0, 1e-12);
+  const P = ellipsePolyline(d, d.ellipses[e], 96);
+  near(P[0].x, 16); near(P[0].y, 5); near(P[24].x, 10, 1e-9); near(P[24].y, 8, 1e-9, 'extremo del eje 2');
+  near(P[96].x, P[0].x, 1e-9, 'cerrada');
+  // el 2.o eje se mantiene perpendicular al mover el extremo del 1.o
+  d.pts[c].fixed = true;
+  assert.ok(solve(d, [{ id: a, x: 10, y: 11 }]).ok);
+  const g2 = ellipseOf(d, d.ellipses[e]);
+  near(g2.ra, 6, 1e-4); near(g2.uy, 1, 1e-4, 'el eje gira'); near(d.pts[b].y, 5, 1e-3, 'b sigue perpendicular al eje girado (a la altura del centro)');
+  // copias (lineal) y exportacion
+  const r = linearArray(d, [{ k: 'el', id: e }], [{ u: { x: 1, y: 0 }, s: 30, n: 1 }], {});
+  assert.ok(r.ok && r.made[0].k === 'el' && Object.keys(d.ellipses).length === 2);
+  assert.match(exportSVG(d, 1, {}), /<path d="M[^"]+ Z"/);
+  assert.ok(exportDXF(d, 5, {}).includes('POLYLINE'));
+  assert.ok(exportSVGLaser(d, { modes: { [styleKey(d.ellipses[e])]: 'cut' } }).svg.includes('id="corte"'));
+  assert.equal(boxSelect(d, { x0: 0, y0: -5, x1: 30, y1: 25 }, {}).filter((x) => x.k === 'el').length, 1, 'cuadro: solo la elipse que cae dentro');
+  deleteItems(d, [{ k: 'pt', id: a }]);
+  assert.equal(Object.keys(d.ellipses).length, 1, 'al borrar un punto de la elipse, se borra la elipse');
 });
 
 console.log(`\n${passed} pruebas pasaron`);

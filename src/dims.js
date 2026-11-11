@@ -55,7 +55,13 @@ export function angTrue(doc, k, valDeg) {
 }
 
 // Valor que muestra una cota. Las de referencia (k.ref) no restringen nada: miden en vivo.
+// ANG4 (angulo entre dos segmentos de puntos) se acota como un angulo entre dos lineas virtuales.
+const v4 = (doc, k) => ({
+  d: { ...doc, lines: { ...doc.lines, __v1: { a: k.refs[0], b: k.refs[1] }, __v2: { a: k.refs[2], b: k.refs[3] } } },
+  k: { ...k, t: 'ANG', refs: ['__v1', '__v2'] },
+});
 export function dimValue(doc, k) {
+  if (k.t === 'ANG4') { const x = v4(doc, k); return dimValue(x.d, x.k); }
   if (k.t === 'ANG') return angSector(doc, k).val;
   if (!k.ref) return k.v;
   if (k.t === 'DIST' || k.t === 'DISTPL') { const [p1, p2] = distEnds(doc, k); return Math.hypot(p2.x - p1.x, p2.y - p1.y); }
@@ -64,6 +70,7 @@ export function dimValue(doc, k) {
 }
 
 export function dimText(doc, k) {
+  if (k.t === 'ANG4') { const x = v4(doc, k); return dimText(x.d, x.k); }
   const v = dimValue(doc, k);
   if (k.t === 'ANG') return k.unit === 'rad' ? fmtNum((v * Math.PI) / 180) + ' rad' : fmtNum(v) + '°';
   if (k.t === 'RAD') return (k.refs[0] in doc.circles ? DIAM + fmtNum(2 * v) : 'R' + fmtNum(v));
@@ -190,6 +197,7 @@ function layoutDimBase(doc, k, view) {
 
 // Las cotas de referencia llevan la etiqueta en cursiva (label.italic).
 export function layoutDim(doc, k, view) {
+  if (k.t === 'ANG4') { const x = v4(doc, k); return layoutDim(x.d, x.k, view); }
   const L = layoutDimBase(doc, k, view);
   if (L.label) L.label.italic = !!k.ref;
   return L;
@@ -197,6 +205,11 @@ export function layoutDim(doc, k, view) {
 
 // El usuario arrastra la etiqueta: reposiciona la cota. Devuelve true si cambio algo.
 export function dragDim(doc, k, view, p) {
+  if (k.t === 'ANG4') {
+    const x = v4(doc, k), ok = dragDim(x.d, x.k, view, p);
+    for (const f of ['off', 'lt', 'ang', 'lp', 's1', 's2']) if (x.k[f] !== undefined) k[f] = x.k[f];
+    return ok;
+  }
   const s = view.s, v = V(view);
   if (k.t === 'DIST' || k.t === 'DISTPL') {
     const [p1, p2] = distEnds(doc, k);

@@ -54,6 +54,8 @@ const custom = {
   'array-circ': S('<circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="4.5" r="2.2"/><circle cx="18.9" cy="15.5" r="2.2" opacity=".65"/><circle cx="5.1" cy="15.5" r="2.2" opacity=".35"/><path d="M12 12V6.7" opacity=".4" stroke-dasharray="1.5 2.5"/>'),
   // copia espejo: eje discontinuo con un triangulo y su reflejo
   mirror: S('<path d="M12 2v20" stroke-dasharray="2 3"/><path d="M9 7 3 18h6z"/><path d="M15 7l6 11h-6z" opacity=".5"/>'),
+  // elipse inclinada con su centro
+  ellipse: S('<ellipse cx="12" cy="12" rx="10" ry="5.5" transform="rotate(-30 12 12)"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/>'),
   // spline: una "S" girada 90 grados (onda) con puntos en los extremos y en cada seno
   spline: S('<path d="M3 16C3 9 5 6 8 6c5 0 3 12 8 12 3 0 5-6 5-10"/><circle cx="3" cy="16" r="1.6" fill="currentColor"/><circle cx="8" cy="6" r="1.6" fill="currentColor"/><circle cx="16" cy="18" r="1.6" fill="currentColor"/><circle cx="21" cy="8" r="1.6" fill="currentColor"/>'),
   // abrir/cerrar spline: triangulo de lados curvos con uno discontinuo

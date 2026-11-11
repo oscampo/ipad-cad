@@ -1,6 +1,6 @@
 // Recortar, extender y matriz lineal. Sin DOM (se prueba en Node). Mutan doc; quien llama hace undo/solve
 // y revierte si el solver falla.
-import { addPoint, addLine, addArc, addCircle, addSpline, addText, addCon, nextId, arcOf, splinePolyline, deleteItems } from './model.js';
+import { addPoint, addLine, addArc, addCircle, addEllipse, addSpline, addText, addCon, nextId, arcOf, splinePolyline, deleteItems } from './model.js';
 import { dist, closestOnSeg, lineLine, lineCircle, circleCircle, polylineLine, polylineCircle, inSweep, angleFrom, norm, TAU } from './geom.js';
 import { splitElement } from './split.js';
 
@@ -89,7 +89,7 @@ const conFor = (v) => (v.k === 'ln' ? 'PONL' : v.k === 'sp' ? 'PONS' : 'PONC');
 function pointAt(doc, c) {
   for (const [pid, p] of Object.entries(doc.pts)) if (dist(p, c) <= TOL) return pid;
   const pid = addPoint(doc, c.x, c.y, true);
-  for (const v of c.vias) addCon(doc, { t: conFor(v), refs: [pid, v.id] });
+  for (const v of c.vias) addCon(doc, { t: conFor(v), refs: [pid, v.id], hidden: true });
   return pid;
 }
 
@@ -100,8 +100,9 @@ function lastLE(arr, v) {
 }
 
 // ---------------------------------------------------------------- recortar
-// Quita el tramo del elemento que esta bajo m (punto del modelo) entre los cruces mas cercanos con otros
-// elementos. Sin cruces a ningun lado se borra completo.
+// Quita el tramo del elemento que esta bajo m (punto del modelo) entre los dos cruces mas cercanos con otros
+// elementos, y nada mas: el resto del elemento no se divide en los demas cruces. Sin cruces a ningun lado
+// se borra completo.
 export function trimAt(doc, kind, id, m) {
   if (!['ln', 'ar', 'ci'].includes(kind)) return { ok: false, msg: 'Solo se recortan segmentos, arcos y círculos' };
   const { cuts, total, base } = cutsOf(doc, kind, id);
@@ -112,19 +113,20 @@ export function trimAt(doc, kind, id, m) {
     deleteItems(doc, [{ k: kind, id }]);
     return { ok: true, deleted: true, pieces: [], dropped: [] };
   }
-  const ptIds = cuts.map((c) => pointAt(doc, c));
+  // los cruces que acotan el tramo bajo el cursor (en un circulo, cíclicos)
+  let lo = null, hi = null;
+  for (const c of cuts) { if (c.s <= s) lo = c; else if (!hi) hi = c; }
+  if (kind === 'ci') { lo = lo || cuts[cuts.length - 1]; hi = hi || cuts[0]; }
+  const sub = (kind === 'ci' ? [lo, hi].sort((u, v) => u.s - v.s) : [lo, hi].filter(Boolean));
+  const ptIds = sub.map((c) => pointAt(doc, c));
   const res = splitElement(doc, id, ptIds);
   if (!res.ok) return res;
   let idx;
-  if (kind === 'ci') { const rel = cuts.map((c) => norm(c.s - cuts[0].s)); idx = lastLE(rel, norm(s - cuts[0].s)); }
-  else idx = lastLE([0, ...cuts.map((c) => c.s), total], s);
+  if (kind === 'ci') { const rel = sub.map((c) => norm(c.s - sub[0].s)); idx = lastLE(rel, norm(s - sub[0].s)); }
+  else idx = lastLE([0, ...sub.map((c) => c.s), total], s);
   idx = Math.min(idx, res.pieces.length - 1);
   const gone = res.pieces[idx];
-  const n = res.pieces.length;
-  const before = res.pieces[kind === 'ci' ? (idx + n - 1) % n : idx - 1], after = res.pieces[kind === 'ci' ? (idx + 1) % n : idx + 1];
   deleteItems(doc, [{ k: kind === 'ln' ? 'ln' : 'ar', id: gone }]);
-  // al quitar un trozo del medio, los arcos que quedan siguen con igual radio
-  if (kind !== 'ln' && before && after && before !== after && before !== gone && after !== gone) addCon(doc, { t: 'EQR', refs: [before, after], hidden: true });
   return { ok: true, pieces: res.pieces.filter((p) => p !== gone), dropped: res.dropped };
 }
 
@@ -154,7 +156,7 @@ function relocateEnd(doc, elId, owner, field, t) {
   let pid = old;
   if (free) { doc.pts[old].x = t.x; doc.pts[old].y = t.y; }
   else { pid = addPoint(doc, t.x, t.y, true); owner[field] = pid; }
-  for (const v of t.vias) addCon(doc, { t: conFor(v), refs: [pid, v.id] });
+  for (const v of t.vias) addCon(doc, { t: conFor(v), refs: [pid, v.id], hidden: true });
   return pid;
 }
 
@@ -200,7 +202,7 @@ export function extendEnd(doc, kind, id, near, { dropLength = false } = {}) {
 // ---------------------------------------------------------------- copias (matriz lineal y espejo)
 // Reune lo que se copia: puntos, elementos y las restricciones/rellenos que quedan completos dentro del conjunto.
 function collect(doc, items) {
-  const P = new Set(), L = [], Ci = [], Ar = [], Sp = [], Tx = [];
+  const P = new Set(), L = [], Ci = [], Ar = [], Sp = [], Tx = [], El = [];
   for (const { k, id } of items) {
     if (k === 'pt' && doc.pts[id]) P.add(id);
     else if (k === 'ln' && doc.lines[id]) { L.push(id); P.add(doc.lines[id].a); P.add(doc.lines[id].b); }
@@ -208,11 +210,12 @@ function collect(doc, items) {
     else if (k === 'ar' && doc.arcs[id]) { const a = doc.arcs[id]; Ar.push(id); P.add(a.c); P.add(a.a); P.add(a.b); }
     else if (k === 'sp' && doc.splines[id]) { Sp.push(id); for (const p of doc.splines[id].pts) P.add(p); }
     else if (k === 'tx' && doc.texts[id]) { Tx.push(id); P.add(doc.texts[id].pt); }
+    else if (k === 'el' && doc.ellipses?.[id]) { const e = doc.ellipses[id]; El.push(id); P.add(e.c); P.add(e.a); P.add(e.b); }
   }
-  const inSet = new Set([...P, ...L, ...Ci, ...Ar, ...Sp, ...Tx]);
+  const inSet = new Set([...P, ...L, ...Ci, ...Ar, ...Sp, ...Tx, ...El]);
   const cons = Object.values(doc.cons).filter((k) => (k.refs || []).length && k.refs.every((r) => inSet.has(r)));
   const hatches = Object.values(doc.hatches || {}).filter((h) => h.ids.length && h.ids.every((i) => inSet.has(i)));
-  return { P, L, Ci, Ar, Sp, Tx, cons, hatches };
+  return { P, L, Ci, Ar, Sp, Tx, El, cons, hatches };
 }
 
 const jclone = (o) => JSON.parse(JSON.stringify(o));
@@ -223,14 +226,15 @@ const jclone = (o) => JSON.parse(JSON.stringify(o));
 // hvAngle: grados a los que va a parar una direccion horizontal (rotacion o reflejo); las restricciones H/V
 // solo siguen valiendo si ese angulo es multiplo de 90 (con 90 se intercambian); si no, no se copian.
 // rotDeg: giro que se suma al angulo de los textos (en el reflejo se usa axisAng).
-function makeCopy(doc, col, tf, { mirror = false, reuse = null, axisAng = 0, hvAngle, rotDeg = 0 } = {}) {
-  const { P, L, Ci, Ar, Sp, Tx, cons, hatches } = col;
+function makeCopy(doc, col, tf, { mirror = false, reuse = null, axisAng = 0, hvAngle, rotDeg = 0, linked = false } = {}) {
+  const { P, L, Ci, Ar, Sp, Tx, El, cons, hatches } = col;
   const M = {}, made = [];
   for (const pid of P) {
     if (reuse && reuse(pid)) { M[pid] = pid; continue; }
     const o = doc.pts[pid], q = tf(o), np = addPoint(doc, q.x, q.y, !!o.auto);
     const { x, y, ...flags } = o;
     Object.assign(doc.pts[np], flags);
+    if (linked) doc.pts[np].fixed = false; // la copia sigue al original
     M[pid] = np;
   }
   for (const id of L) { const { a, b, ...st } = doc.lines[id]; M[id] = addLine(doc, M[a], M[b], st); made.push({ k: 'ln', id: M[id] }); }
@@ -240,6 +244,7 @@ function makeCopy(doc, col, tf, { mirror = false, reuse = null, axisAng = 0, hvA
     M[id] = mirror ? addArc(doc, M[c], M[b], M[a], r, st) : addArc(doc, M[c], M[a], M[b], r, st);
     made.push({ k: 'ar', id: M[id] });
   }
+  for (const id of El) { const { c, a, b, ...st } = doc.ellipses[id]; M[id] = addEllipse(doc, M[c], M[a], M[b], st); made.push({ k: 'el', id: M[id] }); }
   for (const id of Sp) { const { pts, closed, ...st } = doc.splines[id]; M[id] = addSpline(doc, pts.map((p) => M[p]), st, closed); made.push({ k: 'sp', id: M[id] }); }
   for (const id of Tx) {
     const t = doc.texts[id];
@@ -247,24 +252,62 @@ function makeCopy(doc, col, tf, { mirror = false, reuse = null, axisAng = 0, hvA
     if (t.ref && M[t.ref]) doc.texts[M[id]].ref = M[t.ref];
     made.push({ k: 'tx', id: M[id] });
   }
-  for (const k of cons) {
+  for (const k of linked ? [] : cons) { // vinculadas: las restricciones internas las hereda la copia por estar atada al original
     const n = { ...jclone(k), refs: k.refs.map((r) => M[r]) };
     if (hvAngle !== undefined && (n.t === 'H' || n.t === 'V')) {
       const m = ((hvAngle % 180) + 180) % 180;
       if (Math.abs(m - 90) < 1e-6) n.t = n.t === 'H' ? 'V' : 'H';
       else if (m > 1e-6 && 180 - m > 1e-6) continue;
     }
-    if (mirror && n.t === 'ANG' && typeof n.v === 'number') n.v = -n.v;
+    if (mirror && (n.t === 'ANG' || n.t === 'ANG4') && typeof n.v === 'number') n.v = -n.v;
     addCon(doc, n);
   }
   for (const h of hatches) doc.hatches[nextId(doc, 'h')] = { ...jclone(h), ids: h.ids.map((x) => M[x]) };
-  return made;
+  return { made, M };
+}
+
+// ---------------------------------------------------------------- vinculos entre original y copia
+// Cada punto de la copia queda atado a su original con restricciones, de modo que la copia es una
+// transformacion rigida del original y lo sigue si este cambia:
+//  - lineal: distancia entre el punto y su copia + direccion (acimut, o angulo respecto de la linea elegida);
+//  - circular: igual distancia al centro + angulo en el centro;
+//  - espejo: simetria respecto de la linea eje.
+// Los circulos ademas llevan igual radio. dims: la distancia (lineal) o el angulo (circular) del primer
+// punto quedan como cota visible; las demas restricciones son automaticas (ocultas).
+const normDeg = (a) => { a = ((a % 360) + 360) % 360; return a > 180 ? a - 360 : a; };
+function equalRadius(doc, col, M) {
+  for (const id of col.Ci) addCon(doc, { t: 'EQR', refs: [id, M[id]], hidden: true });
+}
+const pairsOf = (col, M) => [...col.P].filter((p) => M[p] !== p).map((p) => [p, M[p]]);
+
+function linkLinear(doc, col, M, { dx, dy, line, dims }) {
+  const d = Math.hypot(dx, dy), az = (Math.atan2(dy, dx) * 180) / Math.PI;
+  let rel = null;
+  if (line && doc.lines[line]) { const l = doc.lines[line], A = doc.pts[l.a], B = doc.pts[l.b]; rel = normDeg((Math.atan2(B.y - A.y, B.x - A.x) * 180) / Math.PI - az); }
+  pairsOf(col, M).forEach(([p, q], i) => {
+    addCon(doc, { t: 'DIST', refs: [p, q], v: d, ...(dims && i === 0 ? {} : { hidden: true }) });
+    if (rel !== null) addCon(doc, { t: 'ANG4', refs: [p, q, doc.lines[line].a, doc.lines[line].b], v: rel, hidden: true });
+    else addCon(doc, { t: 'AZ', refs: [p, q], v: az, hidden: true });
+  });
+  equalRadius(doc, col, M);
+}
+function linkCircular(doc, col, M, { c, deg, dims }) {
+  pairsOf(col, M).forEach(([p, q], i) => {
+    addCon(doc, { t: 'EQD', refs: [c, p, c, q], hidden: true });
+    addCon(doc, { t: 'ANG4', refs: [c, p, c, q], v: normDeg(deg), ...(dims && i === 0 ? {} : { hidden: true }) });
+  });
+  equalRadius(doc, col, M);
+}
+function linkMirror(doc, col, M, axis) {
+  for (const [p, q] of pairsOf(col, M)) addCon(doc, { t: 'SYM', refs: [p, q, axis], hidden: true });
+  equalRadius(doc, col, M);
 }
 
 // ---------------------------------------------------------------- matriz lineal
 // items: [{k,id}] a copiar. dirs: [{u:{x,y} unitario, s: espaciado, n: copias nuevas}] (1 o 2 direcciones).
 // Con dos direcciones se crea la cuadricula completa. Devuelve los elementos nuevos.
-export function linearArray(doc, items, dirs) {
+// opts: { link: copias atadas al original, dims: mostrar la cota de distancia (solo con link) }
+export function linearArray(doc, items, dirs, { link = false, dims = false } = {}) {
   const col = collect(doc, items);
   if (!col.P.size) return { ok: false, msg: 'No hay nada que copiar' };
   const [d1, d2] = dirs;
@@ -275,7 +318,9 @@ export function linearArray(doc, items, dirs) {
     for (let j = 0; j <= n2; j++) {
       if (!i && !j) continue;
       const dx = i * d1.s * d1.u.x + (d2 ? j * d2.s * d2.u.x : 0), dy = i * d1.s * d1.u.y + (d2 ? j * d2.s * d2.u.y : 0);
-      made.push(...makeCopy(doc, col, (o) => ({ x: o.x + dx, y: o.y + dy })));
+      const r = makeCopy(doc, col, (o) => ({ x: o.x + dx, y: o.y + dy }), { linked: link });
+      made.push(...r.made);
+      if (link) linkLinear(doc, col, r.M, { dx, dy, line: d1.line || null, dims });
     }
   }
   return { ok: true, made };
@@ -284,7 +329,8 @@ export function linearArray(doc, items, dirs) {
 // ---------------------------------------------------------------- copia espejo
 // Refleja una copia de items respecto de la recta que pasa por A y B. Los puntos que ya estan sobre el eje
 // se comparten (la copia queda unida al original por ahi). El eje no se copia.
-export function mirrorCopy(doc, items, A, B) {
+// opts: { axis: id de la linea eje, para vincular las copias con simetria }
+export function mirrorCopy(doc, items, A, B, { axis = null } = {}) {
   const len = dist(A, B);
   if (len < 1e-9) return { ok: false, msg: 'El eje no tiene longitud' };
   const u = { x: (B.x - A.x) / len, y: (B.y - A.y) / len };
@@ -296,24 +342,32 @@ export function mirrorCopy(doc, items, A, B) {
     return { x: 2 * fx - o.x, y: 2 * fy - o.y };
   };
   const onAxis = (pid) => { const o = doc.pts[pid], r = refl(o); return Math.hypot(r.x - o.x, r.y - o.y) / 2 <= TOL; };
-  const made = makeCopy(doc, col, refl, { mirror: true, reuse: onAxis, axisAng: (Math.atan2(u.y, u.x) * 180) / Math.PI, hvAngle: (2 * Math.atan2(u.y, u.x) * 180) / Math.PI });
-  return { ok: true, made };
+  const r = makeCopy(doc, col, refl, { mirror: true, reuse: onAxis, axisAng: (Math.atan2(u.y, u.x) * 180) / Math.PI, hvAngle: (2 * Math.atan2(u.y, u.x) * 180) / Math.PI, linked: !!axis });
+  if (axis) linkMirror(doc, col, r.M, axis);
+  return { ok: true, made: r.made };
 }
 
 // ---------------------------------------------------------------- matriz circular
 // c: centro {x,y}; step: angulo entre instancias (rad, con signo); n: instancias totales (incluye el original);
 // skip: Set de numeros de instancia (2..n) que no se crean. Los puntos que coinciden con el centro se comparten.
-export function circularArray(doc, items, { c, step, n, skip = new Set() }) {
+// link: copias atadas al original; cid: punto del centro (si no hay, con link se crea uno fijo); dims: cota angular visible
+export function circularArray(doc, items, { c, step, n, skip = new Set(), link = false, cid = null, dims = false }) {
   const col = collect(doc, items);
   if (!col.P.size) return { ok: false, msg: 'No hay nada que copiar' };
   if (!(n >= 2) || n > 400) return { ok: false, msg: 'Número de instancias no válido' };
   const made = [];
+  if (link && !cid) { // el centro tiene que ser un punto del dibujo para poder acotarlo
+    for (const [pid, p] of Object.entries(doc.pts)) if (dist(p, c) <= TOL) { cid = pid; break; }
+    if (!cid) { cid = addPoint(doc, c.x, c.y, false); doc.pts[cid].fixed = true; }
+  }
   for (let i = 1; i < n; i++) {
     if (skip.has(i + 1)) continue;
     const a = i * step, ca = Math.cos(a), sa = Math.sin(a);
     const rot = (o) => ({ x: c.x + (o.x - c.x) * ca - (o.y - c.y) * sa, y: c.y + (o.x - c.x) * sa + (o.y - c.y) * ca });
     const deg = (a * 180) / Math.PI;
-    made.push(...makeCopy(doc, col, rot, { reuse: (pid) => dist(doc.pts[pid], c) <= TOL, hvAngle: deg, rotDeg: deg }));
+    const r = makeCopy(doc, col, rot, { reuse: (pid) => dist(doc.pts[pid], c) <= TOL, hvAngle: deg, rotDeg: deg, linked: link });
+    made.push(...r.made);
+    if (link) linkCircular(doc, col, r.M, { c: cid, deg, dims });
   }
   if (!made.length) return { ok: false, msg: 'Todas las instancias están omitidas' };
   return { ok: true, made };

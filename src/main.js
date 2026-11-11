@@ -2,7 +2,7 @@ import wasmUrl from '@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url';
 import { initSolver, solve, reparamSplines } from './solver.js';
 import {
   newDoc, addPoint, addLine, addCircle, addArc, addText, addSpline, splinePolyline, addCon, cleanup, deleteItems, clone, hatchLoops,
-  allLtypes, PALETTE, arcOf,
+  allLtypes, PALETTE, arcOf, conTag, ensureNumbers, addEllipse, ellipsePolyline, ellipseOf,
 } from './model.js';
 import {
   dist, closestOnSeg, lineLine, lineCircle, circleCircle, signedAngle, dashFromPattern, parsePattern,
@@ -23,7 +23,7 @@ import { parseValue, isPlainNumber } from './expr.js';
 import { HELP_HTML } from './help.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from './lock.js';
 
-const VERSION = '1.0.2';
+const VERSION = '1.0.3';
 const STORE = 'ipad-cad-v1';
 const $ = (id) => document.getElementById(id);
 const cv = $('cv');
@@ -35,7 +35,7 @@ let view = { ox: 200, oy: 300, s: 3 }; // px por unidad; y del modelo hacia arri
 let tool = 'select';
 let sel = []; // [{k:'pt'|'ln'|'ci'|'ha', id}]
 let cur = { color: 'auto', ltype: 'continua', w: 2, ls: 1, tx: { h: null, ang: 0, anchor: 'bl', readable: true } };
-const opts = { grid: true, snap: false, cons: true, pts: true, dims: true, texts: true, touch: false, ltScale: 1, labels: true, lock: true, lockDeg: 45, intMs: 80, sections: {} };
+const opts = { grid: true, snap: false, cons: true, pts: true, dims: true, texts: true, touch: false, ltScale: 1, labels: true, lock: true, lockDeg: 45, intMs: 80, arrLink: true, arrDims: false, sections: {} };
 let undoStack = [], redoStack = [];
 let pending = null; // estado de la herramienta en curso
 let hover = null; // posicion del puntero en pantalla
@@ -81,7 +81,7 @@ function redo() {
   pending = null; sel = sel.filter(exists); afterChange();
 }
 function exists(s) {
-  return s.k === 'pt' ? s.id in doc.pts : s.k === 'ln' ? s.id in doc.lines : s.k === 'ci' ? s.id in doc.circles : s.k === 'ar' ? s.id in doc.arcs : s.k === 'tx' ? s.id in doc.texts : s.k === 'sp' ? s.id in doc.splines : s.k === 'ha' ? s.id in doc.hatches : s.id in doc.cons;
+  return s.k === 'pt' ? s.id in doc.pts : s.k === 'ln' ? s.id in doc.lines : s.k === 'ci' ? s.id in doc.circles : s.k === 'ar' ? s.id in doc.arcs : s.k === 'tx' ? s.id in doc.texts : s.k === 'sp' ? s.id in doc.splines : s.k === 'el' ? s.id in doc.ellipses : s.k === 'ha' ? s.id in doc.hatches : s.id in doc.cons;
 }
 let saveTimer = 0;
 function persist() {
@@ -102,11 +102,10 @@ function updateEnabled() {
   const rules = {
     H: ln >= 1 || pt >= 2, V: ln >= 1 || pt >= 2,
     PAR: ln >= 2, PERP: ln >= 2, COL: ln >= 2,
-    COI: pt >= 2,
+    COI: (pt >= 2 && ln + crv + n.sp === 0) || (pt >= 1 && ln + crv + n.sp === 1), // 2 puntos coincidentes, o puntos sobre un elemento
     MID: pt === 1 && ln === 1,
     EQ: (ln >= 2 && !crv) || (crv >= 2 && !ln),
     TAN: (ln === 1 && crv === 1 && !n.sp) || (crv === 2 && !ln && !n.sp) || (n.sp === 1 && ln + crv === 1),
-    ONC: pt >= 1 && ln + crv + n.sp === 1,
     FIX: pt + ln + crv > 0,
     DIM: (pt === 2 && !ln) || (ln === 1 && !pt) || (pt === 1 && ln === 1),
     ANG: ln === 2,
@@ -116,7 +115,7 @@ function updateEnabled() {
   $('mkint').disabled = ln + crv + n.sp !== 2;
   $('mksplit').disabled = !(ln + crv === 1 && !n.sp); // con puntos: divide en ellos; sin puntos: en n partes iguales
   $('mkhatch').disabled = ln + crv + n.sp < 1;
-  $('mkarr').disabled = !sel.some((x) => ['pt', 'ln', 'ci', 'ar', 'sp', 'tx'].includes(x.k));
+  $('mkarr').disabled = !sel.some((x) => ['pt', 'ln', 'ci', 'ar', 'sp', 'tx', 'el'].includes(x.k));
   $('mkmir').disabled = $('mkarr').disabled;
   $('mkcir').disabled = $('mkarr').disabled;
   const selPts = sel.filter((x) => x.k === 'pt').map((x) => x.id);
@@ -205,6 +204,7 @@ function elementBounds(items) {
     else if (k === 'ln' && doc.lines[id]) pts.push(doc.pts[doc.lines[id].a], doc.pts[doc.lines[id].b]);
     else if ((k === 'ci' && doc.circles[id]) || (k === 'ar' && doc.arcs[id])) { const o = doc.circles[id] || doc.arcs[id], c = doc.pts[o.c]; pts.push({ x: c.x - o.r, y: c.y - o.r }, { x: c.x + o.r, y: c.y + o.r }); }
     else if (k === 'sp' && doc.splines[id]) pts.push(...doc.splines[id].pts.map((p) => doc.pts[p]));
+    else if (k === 'el' && doc.ellipses[id]) pts.push(...ellipsePolyline(doc, doc.ellipses[id], 24));
     else if (k === 'tx' && doc.texts[id]) pts.push(doc.pts[doc.texts[id].pt]);
   }
   return pts.filter(Boolean);
@@ -320,7 +320,7 @@ function shownPoints() {
 
 // ---- iman a intersecciones: la interseccion de dos elementos cercanos al cursor se toma como punto, una vez
 // que el cursor se queda ahi opts.intMs milisegundos (un toque o el inicio de un arrastre la toman al instante).
-const DRAW_TOOLS = new Set(['point', 'line', 'circle', 'arcc', 'arc3', 'spline', 'text']);
+const DRAW_TOOLS = new Set(['point', 'line', 'circle', 'ellipse', 'arcc', 'arc3', 'spline', 'text']);
 const intSeen = new Map();
 let intTimer = 0;
 function curvesNear(sx, sy, px) {
@@ -454,6 +454,10 @@ function hitCurves(sx, sy) {
   for (const [id, sp] of Object.entries(doc.splines)) {
     const d = distToPolyline(splinePolyline(doc, sp, 12).map(toScreen), sx, sy);
     if (d < bd) { bd = d; best = { k: 'sp', id }; }
+  }
+  for (const [id, e] of Object.entries(doc.ellipses)) {
+    const d = distToPolyline(ellipsePolyline(doc, e, 72).map(toScreen), sx, sy);
+    if (d < bd) { bd = d; best = { k: 'el', id }; }
   }
   return best;
 }
@@ -630,6 +634,16 @@ export function render(c, W, H, v, o) {
     c.lineJoin = 'round';
     strokePolyline(c, P, dsh);
   }
+  for (const [id, e] of Object.entries(doc.ellipses)) {
+    const P = ellipsePolyline(doc, e, 96).map((q) => { const s = toScreen(q); return { x: s.x * dpr, y: s.y * dpr }; });
+    if (o.ui && isSel('el', id)) {
+      c.setLineDash([]); c.strokeStyle = theme.sel + '88'; c.lineWidth = (e.w + 6) * dpr; c.lineJoin = 'round';
+      c.beginPath(); P.forEach((q, i) => (i ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y))); c.stroke();
+    }
+    const dsh = applyStroke(c, e.color, e.w, e.ltype, o, e.ls);
+    c.lineJoin = 'round';
+    strokePolyline(c, P, dsh);
+  }
   for (const tr of Object.values(doc.traces)) {
     if (tr.pts.length < 2) continue;
     const P = tr.pts.map((q) => { const s = toScreen(q); return { x: s.x * dpr, y: s.y * dpr }; });
@@ -733,7 +747,26 @@ function midOf(refs) {
   return { x: pts.reduce((s, p) => s + p.x, 0) / pts.length, y: pts.reduce((s, p) => s + p.y, 0) / pts.length };
 }
 
-const GLYPH = { H: 'H', V: 'V', PAR: '∥', PERP: '⟂', EQL: '=', EQR: '=', MID: 'M', TANLC: 'T', TANCC: 'T', TANLS: 'T', TANCS: 'T', PONS: '●', COL: 'Col' };
+// Posicion cercana a un elemento (punto, linea, circulo, arco, spline) donde se rotula una relacion.
+function anchorOf(r) {
+  if (r in doc.pts) return doc.pts[r];
+  if (r in doc.lines) { const l = doc.lines[r], a = doc.pts[l.a], b = doc.pts[l.b]; return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
+  if (r in doc.circles) { const o = doc.circles[r], c = doc.pts[o.c]; return { x: c.x + o.r * Math.SQRT1_2, y: c.y + o.r * Math.SQRT1_2 }; }
+  if (r in doc.arcs) { const o = doc.arcs[r], c = doc.pts[o.c], g = arcOf(doc, o), t = g.a0 + g.sweep / 2; return { x: c.x + o.r * Math.cos(t), y: c.y + o.r * Math.sin(t) }; }
+  if (r in (doc.splines || {})) { const P = splinePolyline(doc, doc.splines[r], 8); return P[Math.floor(P.length / 2)]; }
+  if (r in (doc.ellipses || {})) { const P = ellipsePolyline(doc, doc.ellipses[r], 48); return P[6]; }
+  return null;
+}
+// Donde se rotula una relacion: junto a cada elemento que involucra (el mismo numero en todos); las de un
+// punto con un elemento, junto al punto.
+function conAnchors(k) {
+  const r = k.refs;
+  if (['COI', 'PONL', 'PONC', 'PONS'].includes(k.t)) return [anchorOf(r[0])];
+  if (k.t === 'MID') return [anchorOf(r[2])];
+  if ((k.t === 'H' || k.t === 'V') && r.length === 2) return [midOf(r)];
+  return r.map(anchorOf);
+}
+
 const FONT = '-apple-system, system-ui, "Segoe UI", sans-serif';
 let mctx = null;
 // ancho de una linea de texto para altura 1 (se escala por la altura real del texto)
@@ -792,14 +825,17 @@ function drawConstraints(c, o) {
     if (k.hidden) continue;
     // al exportar (sin interfaz) las cotas van en el color del dibujo y no se pintan los simbolos de relaciones
     const col = !o.ui ? o.fg : isSel('co', id) ? theme.sel : theme.accent;
-    if (k.t === 'DIST' || k.t === 'DISTPL' || k.t === 'ANG' || k.t === 'RAD') { if (o.dims) drawDim(c, id, k, col); continue; }
+    if (k.t === 'DIST' || k.t === 'DISTPL' || k.t === 'ANG' || k.t === 'ANG4' || k.t === 'RAD') { if (o.dims) drawDim(c, id, k, col); continue; }
     if (!o.cons) continue;
-    const m = GLYPH[k.t] && midOf(k.refs);
-    if (!m) continue;
-    const sp = toScreen(m);
-    const key = `${Math.round(sp.x)},${Math.round(sp.y)}`;
-    used[key] = (used[key] || 0) + 1;
-    label(c, GLYPH[k.t], sp.x + 12 + (used[key] - 1) * 18, sp.y + 14, id, col);
+    const text = conTag(k);
+    if (!text) continue;
+    for (const m of conAnchors(k)) {
+      if (!m) continue;
+      const sp = toScreen(m);
+      const key = `${Math.round(sp.x)},${Math.round(sp.y)}`;
+      used[key] = (used[key] || 0) + 1;
+      label(c, text, sp.x + 12 + (used[key] - 1) * 26, sp.y + 14, id, col);
+    }
   }
 }
 
@@ -859,6 +895,23 @@ function drawPreview(c) {
       c.beginPath(); c.moveTo(a.x * dpr, a.y * dpr); c.lineTo(sp.x * dpr, sp.y * dpr); c.stroke();
       label(c, fmt(dist(S0, s)), (a.x + sp.x) / 2, (a.y + sp.y) / 2 - 14, null, theme.accent);
       if (lk) label(c, lk.label, sp.x + 16, sp.y - 16, null, theme.accent);
+    }
+    if (tool === 'ellipse' && pending?.c) {
+      const C = doc.pts[pending.c], cs = toScreen(C);
+      c.setLineDash([6 * dpr, 4 * dpr]); c.strokeStyle = theme.accent;
+      if (!pending.a) {
+        c.beginPath(); c.moveTo(cs.x * dpr, cs.y * dpr); c.lineTo(sp.x * dpr, sp.y * dpr); c.stroke();
+        label(c, 'a = ' + fmt(dist(C, s)), (cs.x + sp.x) / 2, (cs.y + sp.y) / 2 - 14, null, theme.accent);
+      } else {
+        const A = doc.pts[pending.a], ra = dist(C, A) || 1e-9, ux = (A.x - C.x) / ra, uy = (A.y - C.y) / ra;
+        const rb = Math.abs((s.x - C.x) * -uy + (s.y - C.y) * ux);
+        const pts = [];
+        for (let i = 0; i <= 72; i++) { const t = (i / 72) * 2 * Math.PI, x = ra * Math.cos(t), y = rb * Math.sin(t); pts.push(toScreen({ x: C.x + x * ux - y * uy, y: C.y + x * uy + y * ux })); }
+        c.beginPath(); pts.forEach((q, i) => (i ? c.lineTo(q.x * dpr, q.y * dpr) : c.moveTo(q.x * dpr, q.y * dpr))); c.stroke();
+        const as = toScreen(A);
+        c.beginPath(); c.moveTo(cs.x * dpr, cs.y * dpr); c.lineTo(as.x * dpr, as.y * dpr); c.stroke();
+        label(c, `a = ${fmt(ra)}   b = ${fmt(rb)}`, cs.x, cs.y - 18, null, theme.accent);
+      }
     }
     if (tool === 'arcc' && pending?.center) {
       const cc = toScreen(doc.pts[pending.center]);
@@ -943,10 +996,10 @@ function applyLock(lineId, lk) {
 function pointFrom(s) {
   if (s.type === 'pt') return s.id;
   const id = addPoint(doc, s.x, s.y, true);
-  if (s.type === 'int') for (const r of s.refs) addCon(doc, { t: r.k === 'ln' ? 'PONL' : r.k === 'sp' ? 'PONS' : 'PONC', refs: [id, r.id] });
-  if (s.type === 'ln') addCon(doc, { t: 'PONL', refs: [id, s.id] });
-  if (s.type === 'ci' || s.type === 'ar') addCon(doc, { t: 'PONC', refs: [id, s.id] });
-  if (s.type === 'sp') addCon(doc, { t: 'PONS', refs: [id, s.id] });
+  if (s.type === 'int') for (const r of s.refs) addCon(doc, { t: r.k === 'ln' ? 'PONL' : r.k === 'sp' ? 'PONS' : 'PONC', refs: [id, r.id], hidden: true });
+  if (s.type === 'ln') addCon(doc, { t: 'PONL', refs: [id, s.id], hidden: true });
+  if (s.type === 'ci' || s.type === 'ar') addCon(doc, { t: 'PONC', refs: [id, s.id], hidden: true });
+  if (s.type === 'sp') addCon(doc, { t: 'PONS', refs: [id, s.id], hidden: true });
   return id;
 }
 
@@ -1099,7 +1152,7 @@ function finishBox(d, p) {
 function trimStep(p, d) {
   const h = hitCurves(p.x, p.y);
   if (!h) return;
-  if (h.k === 'sp') { toast('Los splines no se recortan'); return; }
+  if (h.k === 'sp' || h.k === 'el') { toast(h.k === 'el' ? 'Las elipses no se recortan' : 'Los splines no se recortan'); return; }
   const bak = snapshot();
   if (!d.undone) { pushUndo(); d.undone = true; }
   const fail = (msg) => { doc = JSON.parse(bak); if (!d.trimmed) { undoStack.pop(); d.undone = false; } toast(msg); };
@@ -1206,7 +1259,32 @@ function toolUp(p, q) {
     if (r < 1e-6) { toast('Radio nulo'); return; }
     pushUndo();
     const id = addCircle(doc, pending.center, r, style());
-    if (sUp.type === 'pt') addCon(doc, { t: 'PONC', refs: [sUp.id, id] });
+    if (sUp.type === 'pt') addCon(doc, { t: 'PONC', refs: [sUp.id, id], hidden: true });
+    pending = null; finishEdit();
+    return;
+  }
+  if (tool === 'ellipse') { // centro, extremo del 1.er eje y punto del 2.o eje (toques o arrastres)
+    if (!pending) {
+      pushUndo();
+      if (moved) {
+        const c = pointFrom(sDown), a = pointFrom(sUp);
+        if (c === a) { rollback(); return; }
+        pending = { c, a };
+      } else pending = { c: pointFrom(sUp) };
+      draw(); return;
+    }
+    if (!pending.a) {
+      if (sUp.type === 'pt' && sUp.id === pending.c) return;
+      pending.a = pointFrom(sUp); draw(); return;
+    }
+    const C = doc.pts[pending.c], A = doc.pts[pending.a], ra = dist(C, A);
+    if (ra < 1e-9) { cancelPending(); return; }
+    const nx = -(A.y - C.y) / ra, ny = (A.x - C.x) / ra, rb = (sUp.x - C.x) * nx + (sUp.y - C.y) * ny;
+    if (Math.abs(rb) < 1e-6) { toast('El segundo eje no puede ser nulo'); return; }
+    pushUndo();
+    const b = sUp.type === 'pt' ? sUp.id : addPoint(doc, C.x + nx * rb, C.y + ny * rb, false);
+    addEllipse(doc, pending.c, pending.a, b, style());
+    addCon(doc, { t: 'ANG4', refs: [pending.c, pending.a, pending.c, b], v: rb > 0 ? 90 : -90, hidden: true });
     pending = null; finishEdit();
     return;
   }
@@ -1272,7 +1350,7 @@ function toolUp(p, q) {
 function extendAt(p) {
   const h = hitCurves(p.x, p.y);
   if (!h) { toast('Toca el segmento o arco cerca del extremo que quieres alargar'); return; }
-  if (h.k === 'sp') { toast('Los splines no se extienden'); return; }
+  if (h.k === 'sp' || h.k === 'el') { toast(h.k === 'el' ? 'Las elipses no se extienden' : 'Los splines no se extienden'); return; }
   if (h.k === 'ci') { toast('Un círculo no se extiende'); return; }
   const near = toModel(p.x, p.y), bak = snapshot();
   pushUndo();
@@ -1367,7 +1445,7 @@ function makeIntersections(items) {
   const created = [];
   for (const q of pts) {
     const id = addPoint(doc, q.x, q.y, false);
-    for (const it of items) addCon(doc, { t: it.k === 'ln' ? 'PONL' : it.k === 'sp' ? 'PONS' : 'PONC', refs: [id, it.id] });
+    for (const it of items) addCon(doc, { t: it.k === 'ln' ? 'PONL' : it.k === 'sp' ? 'PONS' : 'PONC', refs: [id, it.id], hidden: true });
     created.push(id);
   }
   const r = solve(doc, []);
@@ -1473,14 +1551,12 @@ async function applyCon(kind) {
       else return bad('Selecciona 2 líneas, o 2 círculos/arcos');
       break;
     case 'COI':
-      if (pts.length < 2) return bad('Selecciona 2 puntos');
-      for (let i = 1; i < pts.length; i++) list.push({ t: 'COI', refs: [pts[0], pts[i]] });
-      break;
-    case 'ONC':
+      // 1 linea, arco, circulo o spline + puntos: los puntos quedan sobre el elemento; 2 o mas puntos: coincidentes
       if (pts.length && sps.length === 1 && !lns.length && !crv.length) pts.forEach((p) => list.push({ t: 'PONS', refs: [p, sps[0]] }));
-      else if (pts.length && lns.length === 1 && !crv.length) pts.forEach((p) => list.push({ t: 'PONL', refs: [p, lns[0]] }));
-      else if (pts.length && crv.length === 1 && !lns.length) pts.forEach((p) => list.push({ t: 'PONC', refs: [p, crv[0]] }));
-      else return bad('Selecciona punto(s) y una línea, arco, círculo o spline');
+      else if (pts.length && lns.length === 1 && !crv.length && !sps.length) pts.forEach((p) => list.push({ t: 'PONL', refs: [p, lns[0]] }));
+      else if (pts.length && crv.length === 1 && !lns.length && !sps.length) pts.forEach((p) => list.push({ t: 'PONC', refs: [p, crv[0]] }));
+      else if (pts.length >= 2 && !lns.length && !crv.length && !sps.length) for (let i = 1; i < pts.length; i++) list.push({ t: 'COI', refs: [pts[0], pts[i]] });
+      else return bad('Selecciona 2 o más puntos, o punto(s) y una línea, arco, círculo o spline');
       break;
     case 'MID':
       if (pts.length !== 1 || lns.length !== 1) return bad('Selecciona 1 punto y 1 línea');
@@ -1638,6 +1714,7 @@ function commitCons(list, pre) {
 async function editDimension(id) {
   const k = doc.cons[id];
   if (!k || k.v === undefined) return;
+  if (k.t === 'ANG4') { toast('Esta cota es de una matriz circular: para cambiarla, rehaz la matriz'); return; }
   const isC = k.t === 'RAD' && k.refs[0] in doc.circles;
   const now = dimValue(doc, k); // las de referencia muestran el valor medido en este momento
   const shown = isC ? 2 * now : now;
@@ -1665,7 +1742,7 @@ function applyStyle(prop, value) {
   let touched = false;
   if (sel.length) pushUndo();
   for (const s of sel) {
-    const o = s.k === 'ln' ? doc.lines[s.id] : s.k === 'ci' ? doc.circles[s.id] : s.k === 'ar' ? doc.arcs[s.id] : s.k === 'sp' ? doc.splines[s.id] : (s.k === 'ha' || s.k === 'tx') && prop === 'color' ? (s.k === 'ha' ? doc.hatches[s.id] : doc.texts[s.id]) : null;
+    const o = s.k === 'ln' ? doc.lines[s.id] : s.k === 'ci' ? doc.circles[s.id] : s.k === 'ar' ? doc.arcs[s.id] : s.k === 'sp' ? doc.splines[s.id] : s.k === 'el' ? doc.ellipses[s.id] : (s.k === 'ha' || s.k === 'tx') && prop === 'color' ? (s.k === 'ha' ? doc.hatches[s.id] : doc.texts[s.id]) : null;
     if (o) { o[prop] = value; touched = true; }
     else if (s.k === 'pt' && doc.traces[s.id]) { doc.traces[s.id][prop] = value; touched = true; } // el estilo de un punto con trazado es el de su trayectoria
   }
@@ -1735,7 +1812,7 @@ function buildAnchors() {
 }
 
 function syncPanel() {
-  const first = sel.map((s) => (s.k === 'ln' ? doc.lines[s.id] : s.k === 'ci' ? doc.circles[s.id] : s.k === 'ar' ? doc.arcs[s.id] : s.k === 'sp' ? doc.splines[s.id] : null)).find(Boolean);
+  const first = sel.map((s) => (s.k === 'ln' ? doc.lines[s.id] : s.k === 'ci' ? doc.circles[s.id] : s.k === 'ar' ? doc.arcs[s.id] : s.k === 'sp' ? doc.splines[s.id] : s.k === 'el' ? doc.ellipses[s.id] : null)).find(Boolean);
   const hat = sel.map((s) => (s.k === 'ha' ? doc.hatches[s.id] : null)).find(Boolean);
   const txt = sel.map((s) => (s.k === 'tx' ? doc.texts[s.id] : null)).find(Boolean);
   if (first) { cur.color = first.color; cur.ltype = first.ltype; cur.w = first.w; cur.ls = first.ls ?? 1; }
@@ -1785,6 +1862,7 @@ const HINTS = {
   spline: 'Spline por puntos: toca los puntos por donde pasa la curva. Tocar de nuevo el último (o Esc) termina; tocar el primero la cierra.',
   arcc: 'Arco por centro y extremos: toca el centro, el inicio y el fin (sentido antihorario).',
   arc3: 'Arco por 3 puntos: toca el inicio, un punto intermedio y el fin.',
+  ellipse: 'Elipse: toca el centro; luego toca (o arrastra hasta) el extremo del primer eje y, por último, un punto del segundo eje. Se puede arrastrar desde el centro.',
   trim: 'Recortar: mantén presionado y arrastra sobre los tramos que quieres quitar (entre cruces con otros elementos). Un toque recorta un solo tramo.',
   extend: 'Extender: toca un segmento o arco cerca del extremo que quieres alargar hasta el primer elemento que encuentre.',
 };
@@ -1802,6 +1880,7 @@ function updateStatus(p) {
     else if (s.k === 'ci') txt = `Círculo: radio ${fmt(doc.circles[s.id].r)}, ${ltLabel(doc.circles[s.id])}`;
     else if (s.k === 'tx') { const t = doc.texts[s.id]; txt = `Texto: “${t.text.split('\n')[0].slice(0, 24)}”, ${fmt(t.ang)}°, insercion ${t.anchor}${t.ref ? ', alineado con una línea' : ''}`; }
     else if (s.k === 'sp') { const sp = doc.splines[s.id]; txt = `Spline: ${sp.pts.length} puntos, ${sp.closed ? 'cerrada' : 'abierta'}, ${ltLabel(sp)}`; }
+    else if (s.k === 'el') { const g = ellipseOf(doc, doc.ellipses[s.id]); txt = `Elipse: semiejes ${fmt(g.ra)} y ${fmt(g.rb)}, ${ltLabel(doc.ellipses[s.id])}`; }
     else if (s.k === 'ar') { const g = arcOf(doc, doc.arcs[s.id]); txt = `Arco: radio ${fmt(doc.arcs[s.id].r)}, ${fmt((g.sweep * 180) / Math.PI)}°, ${ltLabel(doc.arcs[s.id])}`; }
     else if (s.k === 'ha') txt = 'Relleno seleccionado';
     else if (s.k === 'co') txt = 'Restricción/cota seleccionada';
@@ -1850,6 +1929,7 @@ function contentBounds() {
   for (const c of Object.values(doc.circles)) { const p = doc.pts[c.c]; xs.push(p.x - c.r, p.x + c.r); ys.push(p.y - c.r, p.y + c.r); }
   for (const a of Object.values(doc.arcs)) { const p = doc.pts[a.c]; xs.push(p.x - a.r, p.x + a.r); ys.push(p.y - a.r, p.y + a.r); }
   for (const sp of Object.values(doc.splines)) for (const q of splinePolyline(doc, sp, 8)) { xs.push(q.x); ys.push(q.y); }
+  for (const e of Object.values(doc.ellipses)) for (const q of ellipsePolyline(doc, e, 48)) { xs.push(q.x); ys.push(q.y); }
   for (const tr of Object.values(doc.traces)) for (const q of tr.pts) { xs.push(q.x); ys.push(q.y); }
   if (!xs.length) return null;
   return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
@@ -1865,7 +1945,8 @@ function fitView() {
 }
 function loadDoc(d) {
   if (!d || typeof d !== 'object' || !d.pts || !d.lines || !d.circles) throw new Error('Archivo no válido');
-  doc = { n: 0, cons: {}, hatches: {}, ltypes: {}, arcs: {}, texts: {}, splines: {}, traces: {}, ...d };
+  doc = { n: 0, cons: {}, hatches: {}, ltypes: {}, arcs: {}, ellipses: {}, texts: {}, splines: {}, traces: {}, cn: {}, ...d };
+  ensureNumbers(doc);
   undoStack = []; redoStack = []; sel = []; pending = null;
 }
 async function exportPNG() {
@@ -1923,8 +2004,9 @@ function showArrayDialog(st, count) {
     $('arrD2').textContent = name(st.l2) || 'Perpendicular a la dirección 1';
     $('arrS1').value = st.s1; $('arrN1').value = st.n1; $('arrF1').checked = st.f1;
     $('arrS2').value = st.s2; $('arrN2').value = st.n2; $('arrF2').checked = st.f2;
+    $('arrLink').checked = st.link; $('arrDims').checked = st.dims;
     $('arrErr').textContent = '';
-    const read = () => { st.s1 = $('arrS1').value; st.n1 = $('arrN1').value; st.f1 = $('arrF1').checked; st.s2 = $('arrS2').value; st.n2 = $('arrN2').value; st.f2 = $('arrF2').checked; };
+    const read = () => { st.s1 = $('arrS1').value; st.n1 = $('arrN1').value; st.f1 = $('arrF1').checked; st.s2 = $('arrS2').value; st.n2 = $('arrN2').value; st.f2 = $('arrF2').checked; st.link = $('arrLink').checked; st.dims = $('arrDims').checked; };
     let done = false;
     const finish = (v) => { if (done) return; done = true; read(); dlg.close(); if (v === 'ok' || v === 'cancel') arrAxes = null; draw(); resolve(v); };
     $('arrOk').onclick = (ev) => { ev.preventDefault(); finish('ok'); };
@@ -1952,13 +2034,13 @@ function readArrayDir(lineId, base, sTxt, nTxt, flip) {
     u = { x: (B.x - A.x) / len, y: (B.y - A.y) / len };
   }
   if (flip) u = { x: -u.x, y: -u.y };
-  return { u, s, n };
+  return { u, s, n, line: lineId || null };
 }
 
 async function linearArrayCmd() {
-  const items = sel.filter((x) => ['pt', 'ln', 'ci', 'ar', 'sp', 'tx'].includes(x.k));
+  const items = sel.filter((x) => ['pt', 'ln', 'ci', 'ar', 'sp', 'tx', 'el'].includes(x.k));
   if (!items.length) { toast('Selecciona lo que quieres copiar'); return; }
-  const st = { l1: null, l2: null, s1: '', n1: '', f1: false, s2: '', n2: '', f2: false };
+  const st = { l1: null, l2: null, s1: '', n1: '', f1: false, s2: '', n2: '', f2: false, link: opts.arrLink !== false, dims: !!opts.arrDims };
   for (;;) {
     const act = await showArrayDialog(st, items.length);
     if (act === 'cancel') return;
@@ -1975,7 +2057,8 @@ async function linearArrayCmd() {
     if (d2?.err) { toast(d2.err); continue; }
     if (d2 && Math.abs(d1.u.x * d2.u.y - d1.u.y * d2.u.x) < 1e-6) { toast('Las dos direcciones no pueden ser paralelas'); continue; }
     pushUndo();
-    const r = linearArray(doc, items, d2 ? [d1, d2] : [d1]);
+    opts.arrLink = st.link; opts.arrDims = st.dims;
+    const r = linearArray(doc, items, d2 ? [d1, d2] : [d1], { link: st.link, dims: st.dims });
     if (!r.ok) { rollback(); toast(r.msg); continue; }
     if (!solve(doc, []).ok) { rollback(); toast('Conflicto con las restricciones: se deshizo la matriz'); afterChange(); return; }
     sel = [];
@@ -1993,9 +2076,10 @@ function showCircDialog(st, count) {
     const dlg = $('dlgC');
     $('cirInfo').textContent = `${count} elemento${count === 1 ? '' : 's'} a copiar`;
     $('cirC').textContent = st.c ? (st.c.id ? `Punto ${st.c.id} (${fmt(st.c.x)}, ${fmt(st.c.y)})` : `(${fmt(st.c.x)}, ${fmt(st.c.y)})`) : 'Origen (0, 0)';
+    $('cirLink').checked = st.link; $('cirDims').checked = st.dims;
     $('cirT').value = st.t; $('cirN').value = st.n; $('cirEq').checked = st.eq; $('cirS').value = st.s; $('cirRev').checked = st.rev; $('cirK').value = st.k;
     circC = st.c || { x: 0, y: 0 }; draw();
-    const read = () => { st.t = $('cirT').value; st.n = $('cirN').value; st.eq = $('cirEq').checked; st.s = $('cirS').value; st.rev = $('cirRev').checked; st.k = $('cirK').value; };
+    const read = () => { st.t = $('cirT').value; st.n = $('cirN').value; st.eq = $('cirEq').checked; st.s = $('cirS').value; st.rev = $('cirRev').checked; st.k = $('cirK').value; st.link = $('cirLink').checked; st.dims = $('cirDims').checked; };
     const sync = () => { $('cirStepRow').style.display = $('cirEq').checked ? 'none' : 'flex'; };
     $('cirEq').onchange = sync; sync();
     let done = false;
@@ -2009,9 +2093,9 @@ function showCircDialog(st, count) {
 }
 
 async function circularCmd() {
-  const items = sel.filter((x) => ['pt', 'ln', 'ci', 'ar', 'sp', 'tx'].includes(x.k));
+  const items = sel.filter((x) => ['pt', 'ln', 'ci', 'ar', 'sp', 'tx', 'el'].includes(x.k));
   if (!items.length) { toast('Selecciona lo que quieres copiar'); return; }
-  const st = { c: null, t: '360', n: '', eq: true, s: '', rev: false, k: '' };
+  const st = { c: null, t: '360', n: '', eq: true, s: '', rev: false, k: '', link: opts.arrLink !== false, dims: !!opts.arrDims };
   for (;;) {
     const act = await showCircDialog(st, items.length);
     if (act === 'cancel') return;
@@ -2034,7 +2118,8 @@ async function circularCmd() {
     const skip = new Set(String(st.k).split(/[\s,;]+/).filter(Boolean).map(Number));
     if ([...skip].some((v) => !Number.isInteger(v) || v < 2 || v > n)) { toast(`Omitir: números enteros de 2 a ${n} (el 1 es el original)`); continue; }
     pushUndo();
-    const r = circularArray(doc, items, { c: st.c || { x: 0, y: 0 }, step: (stepDeg * Math.PI) / 180, n, skip });
+    opts.arrLink = st.link; opts.arrDims = st.dims;
+    const r = circularArray(doc, items, { c: st.c || { x: 0, y: 0 }, step: (stepDeg * Math.PI) / 180, n, skip, link: st.link, cid: st.c?.id || null, dims: st.dims });
     if (!r.ok) { rollback(); toast(r.msg); continue; }
     if (!solve(doc, []).ok) { rollback(); toast('Conflicto con las restricciones: se deshizo la matriz'); afterChange(); return; }
     sel = [];
@@ -2048,13 +2133,13 @@ $('mkcir').onclick = circularCmd;
 
 // ---- copia espejo: elementos seleccionados + toque sobre la linea que hace de eje ----
 async function mirrorCmd() {
-  const items = sel.filter((x) => ['pt', 'ln', 'ci', 'ar', 'sp', 'tx'].includes(x.k));
+  const items = sel.filter((x) => ['pt', 'ln', 'ci', 'ar', 'sp', 'tx', 'el'].includes(x.k));
   if (!items.length) { toast('Selecciona lo que quieres reflejar'); return; }
   const h = await pickLine('Toca la línea que hace de eje de simetría');
   if (!h) { toast('Copia espejo cancelada'); return; }
   const l = doc.lines[h.id];
   pushUndo();
-  const r = mirrorCopy(doc, items.filter((x) => x.id !== h.id), doc.pts[l.a], doc.pts[l.b]);
+  const r = mirrorCopy(doc, items.filter((x) => x.id !== h.id), doc.pts[l.a], doc.pts[l.b], { axis: opts.arrLink !== false ? h.id : null });
   if (!r.ok) { rollback(); toast(r.msg); return; }
   if (!solve(doc, []).ok) { rollback(); toast('Conflicto con las restricciones: se deshizo la copia espejo'); afterChange(); return; }
   sel = r.made;
@@ -2271,7 +2356,7 @@ window.addEventListener('keydown', (e) => {
   else if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); }
   else if (k === 'escape') { if (pickResolve) { const r = pickResolve; pickResolve = null; r(null); } else if (pending) { if (tool === 'spline' && pending.ids?.length >= 2) finishSpline(false); else cancelPending(); } else { sel = []; afterChange(); } }
   else if (k === 'delete' || k === 'backspace') $('del').click();
-  else if (!e.ctrlKey && !e.metaKey) { const m = { v: 'select', p: 'point', l: 'line', c: 'circle', i: 'intersect', a: 'arc3', r: 'arcc', t: 'text', s: 'spline', x: 'trim', e: 'extend' }[k]; if (m) setTool(m); }
+  else if (!e.ctrlKey && !e.metaKey) { const m = { v: 'select', p: 'point', l: 'line', c: 'circle', i: 'intersect', a: 'arc3', r: 'arcc', t: 'text', s: 'spline', x: 'trim', e: 'extend', o: 'ellipse' }[k]; if (m) setTool(m); }
 });
 window.addEventListener('keyup', (e) => { if (e.code === 'Space') spaceDown = false; if (e.key === 'Shift') shiftDown = false; });
 // Area visible real (con teclado en pantalla): los dialogos se acomodan arriba de ella

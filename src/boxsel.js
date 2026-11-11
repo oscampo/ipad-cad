@@ -1,7 +1,7 @@
 // Seleccion por cuadro (sin DOM). rect en coordenadas del modelo. Dos modos, como en los CAD:
 //  - ventana (cross = false): solo lo que queda completamente dentro del cuadro;
 //  - cruce (cross = true): lo que queda dentro o toca el cuadro.
-import { splinePolyline, arcSamples } from './model.js';
+import { splinePolyline, arcSamples, ellipsePolyline } from './model.js';
 
 const inside = (p, r) => p.x >= r.x0 && p.x <= r.x1 && p.y >= r.y0 && p.y <= r.y1;
 
@@ -44,6 +44,7 @@ export function boxSelect(doc, rect, { cross = false, shown = null } = {}) {
   }
   for (const [id, a] of Object.entries(doc.arcs)) if (polyIn(arcSamples(doc, a), r, cross)) out.push({ k: 'ar', id });
   for (const [id, sp] of Object.entries(doc.splines || {})) if (polyIn(splinePolyline(doc, sp, 12), r, cross)) out.push({ k: 'sp', id });
+  for (const [id, e] of Object.entries(doc.ellipses || {})) if (polyIn(ellipsePolyline(doc, e, 48), r, cross)) out.push({ k: 'el', id });
   for (const [id, t] of Object.entries(doc.texts || {})) if (doc.pts[t.pt] && inside(doc.pts[t.pt], r)) out.push({ k: 'tx', id });
   return out;
 }

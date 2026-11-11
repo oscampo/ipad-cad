@@ -1,5 +1,14 @@
 # Historial de cambios
 
+## v1.0.3 (2026-11-11)
+
+- **Restricciones numeradas** por tipo (H1, V2, ⟂1, ∥1, =1, ●1, T1...). Las que involucran varios elementos comparten número y se rotulan junto a cada uno. El número no se reutiliza. Se muestran en el árbol de elementos, que lleva el lienzo hasta ellas.
+- **Coincidente** unifica «Punto sobre»: 2 puntos coinciden; punto(s) y una línea, arco, círculo o spline quedan sobre el elemento. Se quita el botón «Punto sobre».
+- **Restricciones automáticas del bloqueo suave** (verificado): horizontal, vertical, perpendicular, paralela y tangente, con los elementos involucrados.
+- **Matrices lineal y circular y copia espejo con copias vinculadas** al original (distancia y dirección, igual distancia al centro y ángulo, simetría, igual radio), activables y con **cotas opcionales**.
+- **Herramienta de elipse** (O): centro, primer eje y segundo eje, con toques o arrastrando. Se selecciona, copia, exporta (PNG, SVG, DXF, SVG CUT) y aparece en el árbol.
+- **Recorte corregido**: solo quita el tramo bajo el cursor entre los dos cruces más cercanos; ya no divide el resto del elemento en los demás cruces.
+
 ## v1.0.2 (2026-11-10)
 
 - El bloqueo suave vuelve a horizontal, vertical y 45° por defecto (cada 45°). El paso sigue siendo configurable en Vista ("Bloqueo suave cada (°)"), por ejemplo 15.

@@ -1,28 +1,30 @@
 // Arbol de elementos del documento (sin DOM): cada elemento con sus puntos y sus relaciones.
 import { dist } from './geom.js';
-import { conRefs } from './model.js';
+import { conRefs, conTag } from './model.js';
 import { dimValue, dimText, DIAM } from './dims.js';
 
 const f = (v, d = 2) => String(Math.round(v * 10 ** d) / 10 ** d);
 
 const CON_NAMES = {
   H: 'Horizontal', V: 'Vertical', PAR: 'Paralelas', PERP: 'Perpendiculares', EQL: 'Igual longitud', EQR: 'Igual radio',
-  COI: 'Coincidentes', PONL: 'Punto sobre línea', PONC: 'Punto sobre círculo/arco', PONS: 'Punto sobre spline',
+  COI: 'Coincidentes', PONL: 'Coincidente (punto sobre línea)', PONC: 'Coincidente (punto sobre círculo/arco)', PONS: 'Coincidente (punto sobre spline)',
   COL: 'Colineales', MID: 'Punto medio', TANLC: 'Tangente', TANCC: 'Tangente', TANLS: 'Tangente a spline', TANCS: 'Tangente a spline',
-  DIST: 'Distancia', DISTPL: 'Distancia a recta', ANG: 'Ángulo', RAD: 'Radio',
+  DIST: 'Distancia', DISTPL: 'Distancia a recta', ANG: 'Ángulo', ANG4: 'Ángulo', RAD: 'Radio',
+  AZ: 'Dirección', EQD: 'Igual distancia', SYM: 'Simetría',
 };
 
 export function conLabel(doc, k) {
-  let s = CON_NAMES[k.t] || k.t;
+  const tag = conTag(k);
+  let s = (tag ? tag + ' · ' : '') + (CON_NAMES[k.t] || k.t);
   if (k.t === 'DIST' || k.t === 'DISTPL') s += ` = ${f(k.v)}`;
-  else if (k.t === 'ANG') s += ` = ${dimText(doc, k)}`;
+  else if (k.t === 'ANG' || k.t === 'ANG4') s += ` = ${dimText(doc, k)}`;
   else if (k.t === 'RAD') s += (k.refs[0] in doc.circles ? ` ${DIAM} = ${f(k.v * 2)}` : ` R = ${f(k.v)}`);
   if (k.ref) s += ' (referencia)';
   if (k.hidden) s += ' (auto)';
   return s;
 }
 
-const kindOf = (doc, id) => (id in doc.pts ? 'pt' : id in doc.lines ? 'ln' : id in doc.circles ? 'ci' : id in doc.arcs ? 'ar' : id in (doc.splines || {}) ? 'sp' : null);
+const kindOf = (doc, id) => (id in doc.pts ? 'pt' : id in doc.lines ? 'ln' : id in doc.circles ? 'ci' : id in doc.arcs ? 'ar' : id in (doc.splines || {}) ? 'sp' : id in (doc.ellipses || {}) ? 'el' : null);
 export { kindOf };
 
 // Nodo: { key, label, sel?: {k,id}, con?: id, lock?: boolean|undefined, children?: [] }
@@ -53,6 +55,10 @@ export function buildTree(doc) {
     key: `sp:${id}`, label: `Spline ${id} · ${s.pts.length} puntos${s.closed ? ', cerrada' : ''}`, sel: { k: 'sp', id },
     children: [...conNodes(id), group(`spp:${id}`, 'Puntos de control', compact(s.pts.map((p) => ptNode(p))))],
   }));
+  const ellipses = Object.entries(doc.ellipses || {}).map(([id, e]) => ({
+    key: `el:${id}`, label: `Elipse ${id}`, sel: { k: 'el', id },
+    children: [...conNodes(id), ...compact([ptNode(e.c, 'Centro:'), ptNode(e.a, 'Eje 1:'), ptNode(e.b, 'Eje 2:')])],
+  }));
   const texts = Object.entries(doc.texts || {}).map(([id, t]) => ({
     key: `tx:${id}`, label: `Texto «${String(t.text).split('\n')[0].slice(0, 24)}»`, sel: { k: 'tx', id },
     children: compact([ptNode(t.pt, 'Inserción:')]),
@@ -67,7 +73,7 @@ export function buildTree(doc) {
   const traces = Object.entries(doc.traces || {}).map(([id, t]) => ({ key: `tr:${id}`, label: `Trazado del punto ${id} · ${t.pts.length} muestras`, sel: doc.pts[id] ? { k: 'pt', id } : null }));
 
   const out = [
-    group('g:ln', 'Líneas', lines), group('g:ci', 'Círculos', circles), group('g:ar', 'Arcos', arcs), group('g:sp', 'Splines', splines),
+    group('g:ln', 'Líneas', lines), group('g:ci', 'Círculos', circles), group('g:ar', 'Arcos', arcs), group('g:el', 'Elipses', ellipses), group('g:sp', 'Splines', splines),
     group('g:tx', 'Textos', texts), group('g:ha', 'Rellenos', hatches), group('g:pt', 'Puntos', pts),
     group('g:co', 'Relaciones y cotas', cons), group('g:tr', 'Trazados', traces),
   ];

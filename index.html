@@ -118,6 +118,7 @@ body.nopanel #panel { display: none; }
   <button data-tool="point" data-icon="point" title="Punto (P)" aria-label="Punto"><i></i></button>
   <button data-tool="line" data-icon="line" title="Línea (L)" aria-label="Línea"><i></i></button>
   <button data-tool="circle" data-icon="circle" title="Círculo (C)" aria-label="Círculo"><i></i></button>
+  <button data-tool="ellipse" data-icon="ellipse" title="Elipse: centro y dos ejes (O)" aria-label="Elipse"><i></i></button>
   <button data-tool="arcc" data-icon="arc-c" title="Arco por centro y extremos (R)" aria-label="Arco por centro y extremos"><i></i></button>
   <button data-tool="arc3" data-icon="arc-3" title="Arco por 3 puntos (A)" aria-label="Arco por 3 puntos"><i></i></button>
   <button data-tool="spline" data-icon="spline" title="Spline por puntos (S)" aria-label="Spline por puntos"><i></i></button>
@@ -145,12 +146,11 @@ body.nopanel #panel { display: none; }
 <button data-con="V" data-icon="con-v" data-hint="líneas, o 2 puntos" title="Vertical: líneas, o 2 puntos"><i></i><span>Vertical</span></button>
 <button data-con="PAR" data-icon="con-par" data-hint="2 o más líneas" title="Paralela: 2 o más líneas"><i></i><span>Paralela</span></button>
 <button data-con="PERP" data-icon="con-perp" data-hint="2 o más líneas" title="Perpendic.: 2 o más líneas"><i></i><span>Perpendic.</span></button>
-<button data-con="COI" data-icon="con-coi" data-hint="2 o más puntos" title="Coincidente: 2 o más puntos"><i></i><span>Coincidente</span></button>
+<button data-con="COI" data-icon="con-coi" data-hint="2 o más puntos, o punto(s) + 1 línea, arco, círculo o spline" title="Coincidente: 2 o más puntos, o punto(s) sobre 1 línea, arco, círculo o spline"><i></i><span>Coincidente</span></button>
 <button data-con="COL" data-icon="con-col" data-hint="2 o más líneas" title="Colineal: 2 o más líneas"><i></i><span>Colineal</span></button>
 <button data-con="MID" data-icon="con-mid" data-hint="1 punto + 1 línea" title="Punto medio: 1 punto + 1 línea"><i></i><span>Punto medio</span></button>
 <button data-con="EQ" data-icon="equal" data-hint="2 líneas, o 2 círculos/arcos" title="Igual: 2 líneas, o 2 círculos/arcos"><i></i><span>Igual</span></button>
 <button data-con="TAN" data-icon="con-tan" data-hint="línea, círculo o arco + otro, o un spline" title="Tangente: línea + círculo/arco, 2 círculos/arcos, o spline + línea/círculo/arco"><i></i><span>Tangente</span></button>
-<button data-con="ONC" data-icon="con-onc" data-hint="punto(s) + 1 línea, arco, círculo o spline" title="Punto sobre: punto(s) + 1 línea, arco, círculo o spline"><i></i><span>Punto sobre</span></button>
 <button data-con="FIX" data-icon="lock" data-hint="puntos, líneas o círculos" title="Fijar / soltar: puntos, líneas o círculos"><i></i><span>Fijar / soltar</span></button>
 </div></details>
 <details class="sec" data-sec="dims" open><summary data-icon="ruler"><i></i>Cotas, intersección, división y copias</summary>
@@ -275,6 +275,8 @@ body.nopanel #panel { display: none; }
     <label style="display:flex;gap:8px;align-items:center;font-size:13px"><input type="checkbox" id="arrF2" style="width:22px;height:22px;min-height:22px;margin:0">Invertir sentido</label>
   </fieldset>
   <small>El número total incluye el original. Si solo escribes el espaciado, el total es 2 (el original y 1 copia). Con dos direcciones se llena la cuadrícula completa. La dirección sale de la línea elegida (de su inicio a su fin); sin línea, la 1 es horizontal y la 2 perpendicular a la 1.</small>
+  <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin:4px 0"><input type="checkbox" id="arrLink" style="width:22px;height:22px;min-height:22px;margin:0">Vincular las copias al original (restricciones automáticas: distancia, dirección e igualdad)</label>
+  <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin:4px 0"><input type="checkbox" id="arrDims" style="width:22px;height:22px;min-height:22px;margin:0">Mostrar las cotas de la matriz</label>
   <div id="arrErr" style="color:var(--warn);font-size:13px"></div>
   <div class="actions"><button type="button" id="arrCancel">Cancelar</button><button id="arrOk" class="on">Crear copias</button></div>
 </form></dialog>
@@ -291,6 +293,8 @@ body.nopanel #panel { display: none; }
   <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin:4px 0"><input type="checkbox" id="cirRev" style="width:22px;height:22px;min-height:22px;margin:0">Invertir sentido (horario)</label>
   <div class="row"><label for="cirK">Omitir instancias</label><input id="cirK" type="text" inputmode="text" autocomplete="off" placeholder="ej. 3, 5"></div>
   <small>El número total incluye el original (instancia 1); el sentido por defecto es antihorario. Con 360° las instancias se reparten en toda la vuelta; con menos, el original y la última quedan en los extremos. Los puntos sobre el centro se comparten. Sin centro elegido se usa el origen.</small>
+  <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin:4px 0"><input type="checkbox" id="cirLink" style="width:22px;height:22px;min-height:22px;margin:0">Vincular las copias al original (restricciones automáticas: igual distancia al centro y ángulo)</label>
+  <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin:4px 0"><input type="checkbox" id="cirDims" style="width:22px;height:22px;min-height:22px;margin:0">Mostrar la cota angular</label>
   <div class="actions"><button type="button" id="cirCancel">Cancelar</button><button id="cirOk" class="on">Crear copias</button></div>
 </form></dialog>
 <dialog id="dlgH" class="help"><div class="hhead"><b>Ayuda</b><button id="helpClose" aria-label="Cerrar">✕</button></div><div id="helpBody"></div></dialog>

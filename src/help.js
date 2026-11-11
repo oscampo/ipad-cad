@@ -19,12 +19,13 @@ export const HELP_HTML = `
 <li><b>Punto (P)</b>: sobre una línea o círculo queda restringido a él.</li>
 <li><b>Línea (L)</b>: toca inicio y fin (encadena) o arrastra un segmento. Esc o Seleccionar termina.</li>
 <li><b>Círculo (C)</b>: centro y un punto del borde.</li>
+<li><b>Elipse (O)</b>: toca el centro; luego toca (o arrastra hasta) el extremo del primer eje y, por último, un punto del segundo eje (la elipse pasa por la proyección de ese punto sobre la perpendicular al primer eje). También puedes arrastrar desde el centro hasta el extremo del primer eje. Es un elemento propio: se selecciona, se copia, se exporta, aparece en el árbol y sus tres puntos (centro, eje 1 y eje 2) se pueden acotar y restringir. No se recorta, no se extiende y no admite intersecciones.</li>
 <li><b>Arco por centro y extremos (R)</b>: centro, inicio y fin (sentido antihorario).</li>
 <li><b>Arco por 3 puntos (A)</b>: inicio, punto intermedio y fin.</li>
 <li><b>Spline (S)</b>: toca los puntos por donde pasa la curva; tocar de nuevo el último (o Esc) termina, tocar el primero la cierra.</li>
 <li><b>Texto (T)</b>: toca donde va el punto de inserción.</li>
 <li><b>Intersección (I)</b>: toca dos elementos (línea, arco, círculo o spline) para crear su punto de intersección con las relaciones correspondientes.</li>
-<li><b>Recortar (X)</b>: mantén presionado y arrastra sobre los tramos que quieres quitar (entre los cruces con otros elementos). Un toque recorta un tramo. Sin cruces, borra el elemento completo. No recorta splines.</li>
+<li><b>Recortar (X)</b>: mantén presionado y arrastra sobre los tramos que quieres quitar (entre los cruces con otros elementos). Un toque recorta un tramo. Solo se quita ese tramo: el resto del elemento no se divide en los demás cruces. Sin cruces, borra el elemento completo. No recorta splines ni elipses.</li>
 <li><b>Extender (E)</b>: toca un segmento o arco cerca del extremo que quieres alargar; llega hasta el primer elemento que encuentre.</li>
 <li>Deshacer, rehacer, borrar selección y ajustar vista están a la derecha de la barra.</li>
 </ul></details>
@@ -36,6 +37,7 @@ export const HELP_HTML = `
 <li><b>Cerca de una línea existente</b> (a menos de unos 36 px del cursor): <b>paralela (∥)</b> o <b>perpendicular (⟂)</b> a ella, con la restricción correspondiente. Si la dirección bloqueada cruza una línea, un arco o un círculo cerca del cursor, la nueva línea <b>termina en ese cruce</b>, sobre ese elemento (la perpendicular termina en el pie de la perpendicular).</li>
 <li><b>Cerca de un arco o círculo</b>: <b>tangente (T)</b>, con el extremo sobre la curva. También si empiezas en una curva.</li>
 <li>Si empiezas en una línea o en su extremo, también da paralela y perpendicular a ella.</li>
+<li><b>Restricciones automáticas</b>: si la línea queda horizontal, vertical, perpendicular, paralela o tangente por haber aceptado el bloqueo, se crea la restricción correspondiente con los elementos involucrados (el final que cae sobre una línea o curva queda sobre ella). Los 45° y demás ángulos intermedios no agregan restricción.</li>
 <li>Un <b>punto existente</b> o una <b>intersección</b> cerca del cursor mandan sobre el bloqueo.</li>
 </ul>
 <p><b>Imán a intersecciones</b>: si el inicio o el final de la línea está cerca de la intersección de dos elementos (líneas, arcos, círculos o splines), la línea empieza o termina ahí (∩) y el punto queda sobre ambos. Con el cursor, hay que quedarse cerca unos milisegundos (por defecto 80, configurable en Vista; 0 = al instante); un toque o el inicio de un arrastre la toman al instante.</p>
@@ -46,13 +48,13 @@ export const HELP_HTML = `
 <ul>
 <li><b>Horizontal / Vertical</b>: líneas, o 2 puntos.</li>
 <li><b>Paralela / Perpendicular</b>: 2 o más líneas.</li>
-<li><b>Coincidente</b>: 2 o más puntos. <b>Colineal</b>: 2 o más líneas.</li>
+<li><b>Coincidente</b>: 2 o más puntos (quedan en el mismo lugar), o punto(s) y 1 línea, arco, círculo o spline (los puntos quedan sobre el elemento). <b>Colineal</b>: 2 o más líneas.</li>
 <li><b>Punto medio</b>: 1 punto + 1 línea.</li>
 <li><b>Igual</b>: 2 líneas (igual longitud) o 2 círculos/arcos (igual radio).</li>
 <li><b>Tangente</b>: línea + círculo/arco, 2 círculos/arcos, o un spline con una línea, círculo o arco.</li>
-<li><b>Punto sobre</b>: punto(s) + 1 línea, arco, círculo o spline.</li>
 <li><b>Fijar / soltar</b>: puntos, líneas o círculos. Un punto fijo no se mueve al arrastrar.</li>
 </ul>
+<p><b>Numeración</b>: cada restricción lleva un número por tipo (H1, H2, ⟂1, ∥1, =1, ●1, T1...). Las que involucran varios elementos comparten un solo número y se rotulan junto a cada elemento (por ejemplo, dos líneas perpendiculares muestran ⟂1 cada una). El número no se reutiliza si borras la restricción. En el árbol de elementos cada restricción aparece con su número: tócala para seleccionarla junto con sus elementos y llevar el lienzo hasta ahí. Las restricciones automáticas que ponen un punto sobre un elemento al dibujar (●) no se rotulan.</p>
 <p>Si una restricción contradice a las demás, la app avisa y deshace la acción.</p></details>
 
 <details><summary>Cotas (dimensiones)</summary>
@@ -73,7 +75,7 @@ export const HELP_HTML = `
 <li><b>Matriz circular</b>: centro (origen o un punto que toques), ángulo total (360° por defecto), número total, separación igual o ángulo entre instancias, sentido invertido y <i>omitir instancias</i> (por ejemplo 3, 5).</li>
 <li><b>Copia espejo</b>: selecciona lo que quieres reflejar, pulsa el botón y toca la línea que hace de eje. Los puntos sobre el eje se comparten.</li>
 </ul>
-<p>Las copias son independientes del original: llevan sus restricciones internas, pero si cambias el original, no cambian.</p></details>
+<p><b>Copias vinculadas</b> (opción "Vincular las copias al original", activa por defecto): cada punto de la copia queda atado a su original con restricciones automáticas, así que la copia es una réplica rígida que <b>sigue al original</b> si lo mueves, lo giras o cambias su tamaño. En la matriz lineal, la distancia y la dirección (el ángulo respecto de la línea elegida, o absoluta si no hay línea); en la circular, igual distancia al centro y el ángulo en el centro; en la copia espejo, simetría respecto del eje y, en los círculos, igual radio. <b>Las cotas de la matriz son opcionales</b> ("Mostrar las cotas"): la distancia entre el original y la primera copia en la lineal, y la cota angular en la circular. Con la opción desactivada, las copias son independientes y llevan solo sus restricciones internas.</p></details>
 
 <details><summary>Splines y trazados (levas y trayectorias)</summary>
 <ul>
@@ -111,6 +113,7 @@ export const HELP_HTML = `
 <p>V seleccionar, P punto, L línea, C círculo, R arco por centro, A arco por 3 puntos, S spline, T texto, I intersección, X recortar, E extender. Ctrl/Cmd+Z deshacer, Ctrl/Cmd+Y (o Ctrl/Cmd+Mayús+Z) rehacer, Supr o Retroceso borra, Esc cancela o termina.</p></details>
 
 <details><summary>Historial de versiones</summary>
+<p><b>v1.0.3</b>: restricciones numeradas y navegables desde el árbol, «Punto sobre» unificado en Coincidente, copias vinculadas con cotas opcionales (matrices y espejo), herramienta de elipse y recorte que no divide el resto del elemento.</p>
 <p><b>v1.0.2</b>: el bloqueo suave vuelve a horizontal, vertical y 45° por defecto (el paso es configurable).</p>
 <p><b>v1.0.1</b>: bloqueo suave que se mantiene cerca de otras líneas, con perpendicular, paralela y tangente al acercarse a elementos, y el imán a intersecciones.</p>
 <p><b>v1.0.0</b>: primera versión numerada. Incluye dibujo paramétrico con restricciones y cotas (fórmulas, grados o radianes, ANSI), splines B-spline nativos de PlaneGCS, recortar, extender, dividir, matrices lineal y circular, copia espejo, bloqueo suave, selección con cuadro, árbol de elementos, exportación PNG, SVG, DXF y SVG CUT, y esta ayuda. El detalle está en <a href="https://github.com/oscampo/ipad-cad/blob/main/CHANGELOG.md" target="_blank" rel="noopener">CHANGELOG.md</a>.</p></details>
@@ -123,10 +126,10 @@ export const HELP_HTML = `
 
 <details><summary>Límites conocidos</summary>
 <ul>
-<li>Un spline no se recorta ni se extiende.</li>
+<li>Un spline o una elipse no se recortan ni se extienden; la elipse tampoco admite intersecciones ni tangencias.</li>
 <li>Una tangencia con un spline puede no converger si el punto de contacto arranca muy lejos de la solución (la app lo arranca en el punto más cercano).</li>
 <li>La división en partes iguales de arcos y círculos no deja restricción de igual ángulo.</li>
-<li>Las copias de las matrices y del espejo no quedan ligadas al original.</li>
+<li>Las cotas angulares de una matriz circular no se editan a mano (se rehace la matriz); la distancia de una matriz lineal sí.</li>
 <li>Si el solver no converge o hay restricciones en conflicto, la acción se deshace con un aviso.</li>
 </ul></details>
 `;

@@ -60,6 +60,16 @@ function conPrims(doc, id, k) {
       return [{ ...base, type: 'tangent_aa', a1_id: x, a2_id: y }];
     }
     case 'DIST': return [{ ...base, type: 'p2p_distance', p1_id: r[0], p2_id: r[1], distance: k.v }];
+    // restricciones de matrices y espejo: acimut de un segmento entre puntos, angulo entre dos segmentos de
+    // puntos, igualdad de dos distancias y simetria de dos puntos respecto de una linea
+    case 'AZ': return [{ ...base, type: 'p2p_angle', p1_id: r[0], p2_id: r[1], angle: (k.v * Math.PI) / 180 }];
+    case 'ANG4': return [{ ...base, type: 'l2l_angle_pppp', l1p1_id: r[0], l1p2_id: r[1], l2p1_id: r[2], l2p2_id: r[3], angle: (k.v * Math.PI) / 180 }];
+    case 'EQD': {
+      const name = `__eqd${id}`, A = doc.pts[r[0]], B = doc.pts[r[1]];
+      return [{ type: 'param', name, value: Math.hypot(B.x - A.x, B.y - A.y), fixed: false },
+        { id: `${id}_a`, type: 'p2p_distance', p1_id: r[0], p2_id: r[1], distance: name }, { id: `${id}_b`, type: 'p2p_distance', p1_id: r[2], p2_id: r[3], distance: name }];
+    }
+    case 'SYM': return [{ ...base, type: 'p2p_symmetric_ppl', p1_id: r[0], p2_id: r[1], l_id: r[2] }];
     case 'DISTPL': return [{ ...base, type: 'p2l_distance', p_id: r[0], l_id: r[1], distance: k.v }];
     case 'ANG': return [{ ...base, type: 'l2l_angle_ll', l1_id: r[0], l2_id: r[1], angle: (k.v * Math.PI) / 180 }];
     case 'RAD': return kd[0] === 'a'

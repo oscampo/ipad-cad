@@ -18,7 +18,7 @@ export const PALETTE = [
 ];
 
 export function newDoc() {
-  return { n: 0, pts: {}, lines: {}, circles: {}, arcs: {}, texts: {}, splines: {}, traces: {}, cons: {}, hatches: {}, ltypes: {} };
+  return { n: 0, pts: {}, lines: {}, circles: {}, arcs: {}, ellipses: {}, texts: {}, splines: {}, traces: {}, cons: {}, hatches: {}, ltypes: {}, cn: {} };
 }
 
 export function nextId(doc, prefix) {
@@ -59,6 +59,30 @@ export function arcOf(doc, arc) {
   return arcSweepOf(doc.pts[arc.c], doc.pts[arc.a], doc.pts[arc.b]);
 }
 
+// Elipse: centro c, extremo a del primer eje y un punto b que define el 2.o eje (su distancia al primer eje
+// es el semieje menor). Al crearla se agrega una restriccion oculta de 90 grados entre c-a y c-b, asi b queda
+// en el extremo del 2.o eje.
+export function addEllipse(doc, c, a, b, style) {
+  doc.ellipses ||= {};
+  const id = nextId(doc, 'e');
+  doc.ellipses[id] = { c, a, b, ...style };
+  return id;
+}
+export function ellipseOf(doc, e) {
+  const C = doc.pts[e.c], A = doc.pts[e.a], B = doc.pts[e.b];
+  const ra = Math.hypot(A.x - C.x, A.y - C.y) || 1e-9, ux = (A.x - C.x) / ra, uy = (A.y - C.y) / ra;
+  return { cx: C.x, cy: C.y, ra, rb: Math.abs((B.x - C.x) * uy - (B.y - C.y) * ux), ux, uy };
+}
+// Poligonal cerrada (el ultimo punto repite el primero).
+export function ellipsePolyline(doc, e, n = 96) {
+  const g = ellipseOf(doc, e), out = [];
+  for (let i = 0; i <= n; i++) {
+    const t = (TAU * i) / n, x = g.ra * Math.cos(t), y = g.rb * Math.sin(t);
+    out.push({ x: g.cx + x * g.ux - y * g.uy, y: g.cy + x * g.uy + y * g.ux });
+  }
+  return out;
+}
+
 // Spline que pasa por una lista de puntos reales del dibujo (se mueve con ellos).
 export function addSpline(doc, ptIds, style, closed = false) {
   const id = nextId(doc, 's');
@@ -91,10 +115,31 @@ export function addText(doc, pt, text, opts = {}) {
   return id;
 }
 
+// Numeracion de restricciones: cada tipo cuenta aparte (V1, V2, ⟂1, ∥1...). Las que involucran varios
+// elementos comparten un solo numero. "Punto sobre" y "coincidente" son la misma familia (●). Las ocultas
+// y las cotas no se numeran. El numero no se reutiliza al borrar.
+export const CON_GROUP = { H: 'H', V: 'V', PAR: 'PAR', PERP: 'PERP', EQL: 'EQ', EQR: 'EQ', COI: 'COI', PONL: 'COI', PONC: 'COI', PONS: 'COI', COL: 'COL', MID: 'MID', TANLC: 'TAN', TANCC: 'TAN', TANLS: 'TAN', TANCS: 'TAN' };
+export const CON_GLYPH = { H: 'H', V: 'V', PAR: '∥', PERP: '⟂', EQ: '=', COI: '●', COL: 'Col', MID: 'M', TAN: 'T' };
+export const conTag = (k) => (CON_GROUP[k.t] ? CON_GLYPH[CON_GROUP[k.t]] + (k.n ?? '') : '');
 export function addCon(doc, con) {
   const id = nextId(doc, 'k');
+  delete con.n;
+  const g = CON_GROUP[con.t];
+  if (g && !con.hidden) { doc.cn ||= {}; con.n = doc.cn[g] = (doc.cn[g] || 0) + 1; }
   doc.cons[id] = con;
   return id;
+}
+// Dibujos guardados antes de la numeracion: se numeran en el orden en que se crearon.
+export function ensureNumbers(doc) {
+  doc.cn ||= {};
+  const ids = Object.keys(doc.cons).sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
+  for (const g of new Set(Object.values(CON_GROUP))) {
+    for (const id of ids) {
+      const k = doc.cons[id];
+      if (CON_GROUP[k.t] !== g || k.hidden || k.n !== undefined) continue;
+      k.n = doc.cn[g] = (doc.cn[g] || 0) + 1;
+    }
+  }
 }
 
 // Identificadores de geometria que una restriccion referencia (para borrado).
@@ -107,6 +152,7 @@ function pointsUsed(doc) {
   for (const l of Object.values(doc.lines)) { used.add(l.a); used.add(l.b); }
   for (const c of Object.values(doc.circles)) used.add(c.c);
   for (const a of Object.values(doc.arcs)) { used.add(a.c); used.add(a.a); used.add(a.b); }
+  for (const e of Object.values(doc.ellipses || {})) { used.add(e.c); used.add(e.a); used.add(e.b); }
   for (const t of Object.values(doc.texts || {})) used.add(t.pt);
   for (const sp of Object.values(doc.splines || {})) for (const p of sp.pts) used.add(p);
   for (const k of Object.values(doc.cons)) for (const r of conRefs(k)) used.add(r);
@@ -116,7 +162,7 @@ function pointsUsed(doc) {
 // Elimina lo que quedo huerfano: restricciones con referencias muertas, rellenos sin
 // contorno y puntos automaticos sin uso.
 export function cleanup(doc) {
-  const exists = (id) => id in doc.pts || id in doc.lines || id in doc.circles || id in doc.arcs || id in (doc.splines || {});
+  const exists = (id) => id in doc.pts || id in doc.lines || id in doc.circles || id in doc.arcs || id in (doc.splines || {}) || id in (doc.ellipses || {});
   let changed = true;
   while (changed) {
     changed = false;
@@ -128,6 +174,7 @@ export function cleanup(doc) {
       if (keep.length !== sp.pts.length) { sp.pts = keep; changed = true; }
       if (sp.pts.length < 2) { delete doc.splines[id]; changed = true; }
     }
+    for (const [id, e] of Object.entries(doc.ellipses || {})) if (!(e.c in doc.pts && e.a in doc.pts && e.b in doc.pts)) { delete doc.ellipses[id]; changed = true; }
     // un spline sin relaciones no conserva parametros fijos
     for (const [id, sp] of Object.entries(doc.splines || {})) {
       if (sp.ts && !Object.values(doc.cons).some((k) => (k.t === 'PONS' || k.t === 'TANLS' || k.t === 'TANCS') && k.refs[1] === id)) delete sp.ts;
@@ -154,12 +201,14 @@ export function deleteItems(doc, items) {
       for (const [lid, l] of Object.entries(doc.lines)) if (l.a === id || l.b === id) delete doc.lines[lid];
       for (const [cid, c] of Object.entries(doc.circles)) if (c.c === id) delete doc.circles[cid];
       for (const [aid, a] of Object.entries(doc.arcs)) if (a.c === id || a.a === id || a.b === id) delete doc.arcs[aid];
+      for (const [eid, e] of Object.entries(doc.ellipses || {})) if (e.c === id || e.a === id || e.b === id) delete doc.ellipses[eid];
       delete doc.pts[id];
     } else if (k === 'ln') delete doc.lines[id];
     else if (k === 'ci') delete doc.circles[id];
     else if (k === 'ar') delete doc.arcs[id];
     else if (k === 'tx') delete doc.texts[id];
     else if (k === 'sp') delete doc.splines[id];
+    else if (k === 'el') delete doc.ellipses[id];
     else if (k === 'ha') delete doc.hatches[id];
     else if (k === 'co') delete doc.cons[id];
   }
