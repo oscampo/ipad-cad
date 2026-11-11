@@ -13,6 +13,7 @@ import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from '../src
 import { initSolver, solve, reparamSplines } from '../src/solver.js';
 import { bsplineThrough, bsplinePoint } from '../src/bspline.js';
 import { boxSelect } from '../src/boxsel.js';
+import { crossPoints } from '../src/snapx.js';
 import { lineLine, lineCircle, circleCircle, signedAngle, dashFromPattern, parsePattern, circumcircle, arcSweepOf, TAU, splineSamples, resamplePolyline, polylineLength, splineBezier, closestOnPolyline, polylineLine, polylineCircle, polylinePolyline } from '../src/geom.js';
 
 await initSolver();
@@ -1004,8 +1005,8 @@ t('bloqueo suave: horizontal, vertical y 45 grados solo cerca de la direccion', 
   assert.equal(h.kind, 'H'); near(h.y, 0); near(h.x, 10, 0.01);
   assert.equal(lineLock(d, S, none, free, { x: 0.2, y: 8 }, 10).kind, 'V');
   const dd = lineLock(d, S, none, free, { x: 7, y: 7.4 }, 10);
-  assert.equal(dd.kind, 'D45'); near(dd.x, dd.y, 1e-9);
-  assert.equal(lineLock(d, S, none, free, { x: 10, y: 3 }, 10), null, 'lejos de toda direccion: libre');
+  assert.equal(dd.kind, 'ANG'); assert.equal(dd.deg, 45); assert.equal(dd.label, '45°'); near(dd.x, dd.y, 1e-9);
+  assert.equal(lineLock(d, S, none, free, { x: 10, y: 4.5 }, 10), null, 'entre dos bloqueos de 15 grados: libre');
   assert.equal(lineLock(d, S, none, free, { x: 0.5, y: 0.1 }, 10), null, 'muy cerca del inicio no bloquea');
   assert.equal(lineLock(d, S, none, { type: 'pt', id: 'x' }, { x: 10, y: 0.3 }, 10), null, 'si cae sobre un punto, manda el punto');
   assert.deepEqual(lockConstraints(h, 'l1'), [{ t: 'H', refs: ['l1'] }]);
@@ -1042,7 +1043,7 @@ t('bloqueo suave: tangente desde un circulo y tangente al terminar sobre un circ
   assert.equal(t2.kind, 'TAN'); assert.deepEqual(t2.end, { type: 'ci', id: ci });
   near(Math.hypot(t2.x - 0, t2.y - 10), 10, 1e-9, 'sobre el circulo');
   near((t2.x - 0) * (t2.x - S.x) + (t2.y - 10) * (t2.y - S.y), 0, 1e-6, 'radio perpendicular a la linea');
-  assert.equal(lineLock(d, S, { lines: [], curves: [] }, { type: 'ci', id: ci }, { x: -9.9, y: 10 }, 10), null, 'lejos de las tangentes: sin bloqueo');
+  assert.notEqual(lineLock(d, S, { lines: [], curves: [] }, { type: 'ci', id: ci }, { x: -9.9, y: 10 }, 10)?.kind, 'TAN', 'lejos de las tangentes: no es tangente (queda el bloqueo H)');
 });
 t('dividir en n partes iguales: lineas, arcos y circulos', () => {
   // linea
@@ -1315,6 +1316,71 @@ t('seleccion por cuadro: ventana (dentro) y cruce (toca)', () => {
   assert.deepEqual(ids({ x0: 5, y0: 5, x1: 0, y1: 0 }, { cross: false }), win);
   assert.ok(!ids(box, { shown: new Set([a]) }).includes(b));
   assert.ok(!ids({ x0: 2.5, y0: 2.5, x1: 3.5, y1: 3.5 }, { cross: true }).includes(bigC));
+});
+
+
+t('bloqueo suave: cada 15 grados, con etiqueta, y paso configurable', () => {
+  const d = newDoc(), S = { x: 0, y: 0 }, none = { lines: [], curves: [] }, free = { type: 'free' };
+  for (const deg of [15, 30, 60, 75, 105, 120, 135, 165]) {
+    const r = (deg * Math.PI) / 180, k = lineLock(d, S, none, free, { x: 12 * Math.cos(r) + 0.05, y: 12 * Math.sin(r) - 0.04 }, 10);
+    assert.ok(k, deg + ' grados'); assert.equal(k.deg, deg); assert.equal(k.kind, 'ANG'); assert.equal(k.label, deg + '°');
+    near(Math.atan2(k.y, k.x), r, 1e-9);
+    assert.deepEqual(lockConstraints(k, 'n'), [], 'solo H y V llevan restriccion');
+  }
+  const k20 = lineLock(d, S, none, free, { x: 12 * Math.cos(0.35), y: 12 * Math.sin(0.35) }, 10, 9, { step: 10 });
+  assert.equal(k20.deg, 20, 'con paso de 10 grados, 20 existe');
+  assert.equal(lineLock(d, S, none, free, { x: 12 * Math.cos(0.35), y: 12 * Math.sin(0.35) }, 10), null, 'con 15 no');
+  assert.equal(lineLock(d, S, none, free, { x: 12, y: 0.02 }, 10).kind, 'H');
+  assert.equal(lineLock(d, S, none, free, { x: -12, y: 0.02 }, 10).kind, 'H', 'hacia el otro lado');
+});
+t('bloqueo suave: no se pierde cerca de otra linea; da perpendicular, paralela y termina en el cruce', () => {
+  const d = newDoc();
+  const a = addPoint(d, 20, -20), b = addPoint(d, 20, 40);
+  const wall = addLine(d, a, b, {}); // pared vertical en x = 20
+  const none = { lines: [], curves: [] }, S = { x: 0, y: 0 };
+  // el cursor cae sobre la pared (endSnap 'ln'): antes se perdia el bloqueo; ahora la linea a 30 grados sigue y termina en la pared
+  const r = (30 * Math.PI) / 180, X = 20, Y = X * Math.tan(r);
+  const k = lineLock(d, S, none, { type: 'ln', id: wall }, { x: X + 0.1, y: Y + 0.15 }, 10);
+  assert.ok(k && k.kind === 'ANG' && k.deg === 30);
+  assert.deepEqual(k.end, { type: 'ln', id: wall }); near(k.x, X, 1e-9); near(k.y, Y, 1e-9);
+  // perpendicular a la pared (horizontal): el final cae en el pie, sobre la pared
+  const p = lineLock(d, S, none, { type: 'ln', id: wall }, { x: 19.9, y: 0.2 }, 10);
+  assert.ok(p && (p.kind === 'PERP' || p.kind === 'H'));
+  assert.deepEqual(p.end, { type: 'ln', id: wall }); near(p.y, 0, 1e-9);
+  assert.equal(p.kind, 'PERP', 'a igual distancia gana la relacion con la linea'); assert.equal(p.ref, wall);
+  // paralela a una linea cercana al cursor (no es origen): 70 grados
+  const c = addPoint(d, 5, 20), e = addPoint(d, 5 + 6, 20 + 6 * Math.tan((70 * Math.PI) / 180));
+  const slope = addLine(d, c, e, {});
+  const q = lineLock(d, S, none, { type: 'free' }, { x: 6.89, y: 18.79 }, 10); // sobre la direccion de 70 grados y cerca de la linea
+  assert.ok(q && q.kind === 'PAR' && q.ref === slope, 'paralela a la linea cercana: ' + JSON.stringify(q));
+  assert.deepEqual(lockConstraints(q, 'n'), [{ t: 'PAR', refs: ['n', slope] }]);
+  // un punto existente sigue mandando
+  assert.equal(lineLock(d, S, none, { type: 'pt', id: a }, { x: 20, y: 11.5 }, 10), null);
+  assert.equal(lineLock(d, S, none, { type: 'int', refs: [] }, { x: 20, y: 11.5 }, 10), null);
+});
+t('bloqueo suave: tangente a un circulo cercano al cursor aunque el cursor no este sobre el', () => {
+  const d = newDoc(); const c = addPoint(d, 30, 10); const ci = addCircle(d, c, 10, {});
+  const S = { x: 0, y: 0 }, dd = Math.hypot(30, 10), al = Math.acos(10 / dd), base = Math.atan2(S.y - 10, S.x - 30);
+  const T = { x: 30 + 10 * Math.cos(base + al), y: 10 + 10 * Math.sin(base + al) };
+  const k = lineLock(d, S, { lines: [], curves: [] }, { type: 'free' }, { x: T.x + 0.3, y: T.y - 0.2 }, 10);
+  assert.ok(k && k.kind === 'TAN' && k.ref === ci);
+  assert.deepEqual(k.end, { type: 'ci', id: ci });
+});
+t('interseccion para iman: cruces dentro de cada elemento (linea, circulo, arco y spline)', () => {
+  const d = newDoc();
+  const l1 = addLine(d, addPoint(d, 0, 0), addPoint(d, 10, 10), {}), l2 = addLine(d, addPoint(d, 0, 10), addPoint(d, 10, 0), {});
+  const far = addLine(d, addPoint(d, 20, 0), addPoint(d, 20, 10), {});
+  const P = crossPoints(d, { k: 'ln', id: l1 }, { k: 'ln', id: l2 });
+  assert.equal(P.length, 1); near(P[0].x, 5); near(P[0].y, 5);
+  assert.equal(crossPoints(d, { k: 'ln', id: l1 }, { k: 'ln', id: far }).length, 0, 'las rectas se cortan fuera de los segmentos');
+  const c = addCircle(d, addPoint(d, 5, 5), 3, {});
+  assert.equal(crossPoints(d, { k: 'ci', id: c }, { k: 'ln', id: l1 }).length, 2);
+  assert.equal(crossPoints(d, { k: 'ln', id: l1 }, { k: 'ci', id: c }).length, 2, 'simetrico');
+  const arc = addArc(d, d.circles[c].c, addPoint(d, 8, 5), addPoint(d, 5, 8), 3, {}); // cuarto de arco superior derecho
+  assert.equal(crossPoints(d, { k: 'ar', id: arc }, { k: 'ln', id: l1 }).length, 1, 'solo el cruce dentro del tramo');
+  assert.equal(crossPoints(d, { k: 'ci', id: c }, { k: 'ci', id: c }).length, 0);
+  const sp = addSpline(d, [addPoint(d, 0, 5), addPoint(d, 5, 5), addPoint(d, 10, 5)], {}, false);
+  assert.ok(crossPoints(d, { k: 'sp', id: sp }, { k: 'ln', id: l1 }).length >= 1);
 });
 
 console.log(`\n${passed} pruebas pasaron`);

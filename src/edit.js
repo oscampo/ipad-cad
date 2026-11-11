@@ -15,7 +15,7 @@ function* others(doc, selfId) {
 }
 
 // Cruces de la recta infinita AB con el elemento o, limitados a lo que o realmente ocupa.
-function lineHits(doc, A, B, o) {
+export function lineHits(doc, A, B, o) {
   if (o.k === 'ln') {
     const l = doc.lines[o.id], C = doc.pts[l.a], D = doc.pts[l.b];
     const p = lineLine(A, B, C, D);
@@ -30,7 +30,7 @@ function lineHits(doc, A, B, o) {
 }
 
 // Cruces de la circunferencia (C, r) con el elemento o.
-function circleHits(doc, C, r, o) {
+export function circleHits(doc, C, r, o) {
   if (o.k === 'ln') {
     const l = doc.lines[o.id], P = doc.pts[l.a], Q = doc.pts[l.b];
     return lineCircle(P, Q, C, r).filter((p) => dist(p, closestOnSeg(p, P, Q)) <= TOL);

@@ -29,14 +29,17 @@ export const HELP_HTML = `
 <li>Deshacer, rehacer, borrar selección y ajustar vista están a la derecha de la barra.</li>
 </ul></details>
 
-<details><summary>Bloqueo suave al dibujar líneas</summary>
-<p>Al dibujar una línea, si el cursor queda cerca de una dirección notable, la línea se ajusta y se ve una guía con una etiqueta:</p>
+<details><summary>Bloqueo suave e imán a intersecciones al dibujar líneas</summary>
+<p>Al dibujar una línea, si el cursor queda cerca de una dirección notable, la línea se ajusta y se ve una guía punteada con una etiqueta:</p>
 <ul>
-<li><b>H, V y 45°</b>: siempre. H y V agregan la restricción; 45° no agrega ninguna.</li>
-<li>Si empiezas en una línea o en su extremo: <b>paralela (∥)</b> o <b>perpendicular (⟂)</b> a ella, con la restricción correspondiente.</li>
-<li>Si empiezas o terminas en un arco o círculo: <b>tangente (T)</b>.</li>
+<li><b>Cada 15°</b> (se puede cambiar en el panel Vista): la etiqueta muestra el ángulo (30°, 45°...). H y V agregan su restricción; los demás ángulos no agregan ninguna.</li>
+<li><b>Cerca de una línea existente</b> (a menos de unos 36 px del cursor): <b>paralela (∥)</b> o <b>perpendicular (⟂)</b> a ella, con la restricción correspondiente. Si la dirección bloqueada cruza una línea, un arco o un círculo cerca del cursor, la nueva línea <b>termina en ese cruce</b>, sobre ese elemento (la perpendicular termina en el pie de la perpendicular).</li>
+<li><b>Cerca de un arco o círculo</b>: <b>tangente (T)</b>, con el extremo sobre la curva. También si empiezas en una curva.</li>
+<li>Si empiezas en una línea o en su extremo, también da paralela y perpendicular a ella.</li>
+<li>Un <b>punto existente</b> o una <b>intersección</b> cerca del cursor mandan sobre el bloqueo.</li>
 </ul>
-<p>Si la restricción choca con las existentes, se quita y la línea queda tal cual. Se apaga con <i>Bloqueo suave</i> en el panel Vista.</p></details>
+<p><b>Imán a intersecciones</b>: si el inicio o el final de la línea está cerca de la intersección de dos elementos (líneas, arcos, círculos o splines), la línea empieza o termina ahí (∩) y el punto queda sobre ambos. Con el cursor, hay que quedarse cerca unos milisegundos (por defecto 80, configurable en Vista; 0 = al instante); un toque o el inicio de un arrastre la toman al instante.</p>
+<p>Si la restricción choca con las existentes, se quita y la línea queda tal cual. El bloqueo se apaga con <i>Bloqueo suave</i> en el panel Vista.</p></details>
 
 <details><summary>Restricciones</summary>
 <p>Selecciona los elementos y pulsa el botón. Cada botón indica qué selección necesita.</p>
@@ -93,7 +96,7 @@ export const HELP_HTML = `
 
 <details><summary>Vista y árbol de elementos</summary>
 <ul>
-<li><b>Vista</b>: cuadrícula, imán (a la cuadrícula), bloqueo suave, mostrar u ocultar restricciones, puntos, cotas y textos, dedo dibuja, etiquetas del panel y escala de los trazos.</li>
+<li><b>Vista</b>: cuadrícula, imán (a la cuadrícula), bloqueo suave (y cada cuántos grados), tiempo del imán a intersecciones, mostrar u ocultar restricciones, puntos, cotas y textos, dedo dibuja, etiquetas del panel y escala de los trazos.</li>
 <li><b>Árbol de elementos</b> (primer botón de la barra): lista líneas, círculos, arcos, splines, textos, rellenos, puntos y relaciones. Toca un elemento para seleccionarlo y ver sus puntos y restricciones.</li>
 </ul></details>
 
@@ -108,6 +111,7 @@ export const HELP_HTML = `
 <p>V seleccionar, P punto, L línea, C círculo, R arco por centro, A arco por 3 puntos, S spline, T texto, I intersección, X recortar, E extender. Ctrl/Cmd+Z deshacer, Ctrl/Cmd+Y (o Ctrl/Cmd+Mayús+Z) rehacer, Supr o Retroceso borra, Esc cancela o termina.</p></details>
 
 <details><summary>Historial de versiones</summary>
+<p><b>v1.0.1</b>: bloqueo suave cada 15°, que se mantiene cerca de otras líneas, con perpendicular, paralela y tangente al acercarse a elementos, y el imán a intersecciones.</p>
 <p><b>v1.0.0</b>: primera versión numerada. Incluye dibujo paramétrico con restricciones y cotas (fórmulas, grados o radianes, ANSI), splines B-spline nativos de PlaneGCS, recortar, extender, dividir, matrices lineal y circular, copia espejo, bloqueo suave, selección con cuadro, árbol de elementos, exportación PNG, SVG, DXF y SVG CUT, y esta ayuda. El detalle está en <a href="https://github.com/oscampo/ipad-cad/blob/main/CHANGELOG.md" target="_blank" rel="noopener">CHANGELOG.md</a>.</p></details>
 
 <details open><summary>Solver y créditos</summary>

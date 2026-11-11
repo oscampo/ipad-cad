@@ -11,6 +11,7 @@ import {
 import { startTrace, recordTraces, traceToSpline, offsetPolyline } from './curves.js';
 import { splitElement } from './split.js';
 import { boxSelect } from './boxsel.js';
+import { crossPoints } from './snapx.js';
 import { trimAt, extendEnd, linearArray, mirrorCopy, circularArray } from './edit.js';
 import { layoutDim, dragDim, dimValue, angSector, angTrue, DIAM } from './dims.js';
 import { textFrame, textHit, textPose, rawAngle, ANCHORS, ANCHOR_NAMES, LINE_SPACING } from './text.js';
@@ -22,7 +23,7 @@ import { parseValue, isPlainNumber } from './expr.js';
 import { HELP_HTML } from './help.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from './lock.js';
 
-const VERSION = '1.0.0';
+const VERSION = '1.0.1';
 const STORE = 'ipad-cad-v1';
 const $ = (id) => document.getElementById(id);
 const cv = $('cv');
@@ -34,7 +35,7 @@ let view = { ox: 200, oy: 300, s: 3 }; // px por unidad; y del modelo hacia arri
 let tool = 'select';
 let sel = []; // [{k:'pt'|'ln'|'ci'|'ha', id}]
 let cur = { color: 'auto', ltype: 'continua', w: 2, ls: 1, tx: { h: null, ang: 0, anchor: 'bl', readable: true } };
-const opts = { grid: true, snap: false, cons: true, pts: true, dims: true, texts: true, touch: false, ltScale: 1, labels: true, lock: true, sections: {} };
+const opts = { grid: true, snap: false, cons: true, pts: true, dims: true, texts: true, touch: false, ltScale: 1, labels: true, lock: true, lockStep: 15, intMs: 80, sections: {} };
 let undoStack = [], redoStack = [];
 let pending = null; // estado de la herramienta en curso
 let hover = null; // posicion del puntero en pantalla
@@ -317,6 +318,47 @@ function shownPoints() {
   return out;
 }
 
+// ---- iman a intersecciones: la interseccion de dos elementos cercanos al cursor se toma como punto, una vez
+// que el cursor se queda ahi opts.intMs milisegundos (un toque o el inicio de un arrastre la toman al instante).
+const DRAW_TOOLS = new Set(['point', 'line', 'circle', 'arcc', 'arc3', 'spline', 'text']);
+const intSeen = new Map();
+let intTimer = 0;
+function curvesNear(sx, sy, px) {
+  const m = toModel(sx, sy), out = [], r = px / view.s;
+  const here = { x: sx, y: sy };
+  for (const [id, l] of Object.entries(doc.lines)) if (dist(toScreen(closestOnSeg(m, doc.pts[l.a], doc.pts[l.b])), here) <= px) out.push({ k: 'ln', id });
+  for (const [id, c] of Object.entries(doc.circles)) if (Math.abs(dist(doc.pts[c.c], m) - c.r) <= r) out.push({ k: 'ci', id });
+  for (const [id, a] of Object.entries(doc.arcs)) {
+    const cp = doc.pts[a.c], g = arcOf(doc, a);
+    if (Math.abs(dist(cp, m) - a.r) <= r && inSweep(cp, g.a0, g.sweep, m, (px + 2) / Math.max(a.r * view.s, 1))) out.push({ k: 'ar', id });
+  }
+  for (const [id, sp] of Object.entries(doc.splines)) if (closestOnPolyline(splinePolyline(doc, sp, 16), m)?.d <= r) out.push({ k: 'sp', id });
+  return out;
+}
+function intersectionAt(sx, sy) {
+  const px = opts.touch ? 16 : 12;
+  const near = curvesNear(sx, sy, px + 6);
+  if (near.length < 2) return null;
+  let best = null;
+  for (let i = 0; i < near.length; i++) for (let j = i + 1; j < near.length; j++) {
+    for (const p of crossPoints(doc, near[i], near[j])) {
+      const d = dist(toScreen(p), { x: sx, y: sy });
+      if (d <= px && (!best || d < best.d)) best = { d, p, refs: [near[i], near[j]], key: `${near[i].id}|${near[j].id}|${p.x.toFixed(3)},${p.y.toFixed(3)}` };
+    }
+  }
+  return best;
+}
+const intReady = (key) => !(opts.intMs > 0) || (intSeen.has(key) && performance.now() - intSeen.get(key) >= opts.intMs);
+function trackIntersections(p) {
+  if (!DRAW_TOOLS.has(tool)) return;
+  const ix = intersectionAt(p.x, p.y);
+  if (!ix) { if (intSeen.size) intSeen.clear(); return; }
+  if (intSeen.has(ix.key)) return;
+  intSeen.clear(); intSeen.set(ix.key, performance.now());
+  clearTimeout(intTimer);
+  if (opts.intMs > 0) intTimer = setTimeout(draw, opts.intMs + 10);
+}
+
 function snapAt(sx, sy, o = {}) {
   const m = toModel(sx, sy);
   const textOnlyHidden = hiddenTextPoints();
@@ -327,6 +369,10 @@ function snapAt(sx, sy, o = {}) {
     if (d < bd) { bd = d; best = { type: 'pt', id, x: p.x, y: p.y }; }
   }
   if (best) return best;
+  if (DRAW_TOOLS.has(tool)) {
+    const ix = intersectionAt(sx, sy);
+    if (ix && (o.press || intReady(ix.key))) return { type: 'int', x: ix.p.x, y: ix.p.y, refs: ix.refs };
+  }
   bd = 9;
   for (const [id, l] of Object.entries(doc.lines)) {
     const a = doc.pts[l.a], b = doc.pts[l.b];
@@ -797,6 +843,7 @@ function drawPreview(c) {
     const lk = lref ? lockFor(lref, hover) : null;
     if (lk) s = { type: lk.end ? lk.end.type : 'free', x: lk.x, y: lk.y };
     const sp = toScreen(s);
+    if (s.type === 'int') label(c, '∩', sp.x + 14, sp.y - 14, null, theme.accent);
     if (tool !== 'select') {
       c.setLineDash([]); c.beginPath(); c.arc(sp.x * dpr, sp.y * dpr, 7 * dpr, 0, 7);
       c.strokeStyle = s.type === 'free' ? theme.muted : theme.accent; c.stroke();
@@ -876,14 +923,14 @@ const style = () => ({ color: cur.color, ltype: cur.ltype, w: cur.w, ls: cur.ls 
 // Inicio de la linea en curso: un punto ya creado (clic-clic) o lo que se toco al empezar a arrastrar.
 function lineStartRef() {
   if (pending?.start && doc.pts[pending.start]) return { id: pending.start };
-  if (!pending && drag?.moved && !drag.hit) return { snap: snapAt(drag.p0.x, drag.p0.y) };
+  if (!pending && drag?.moved && !drag.hit) return { snap: snapAt(drag.p0.x, drag.p0.y, { press: true }) };
   return null;
 }
-function lockFor(ref, scr) {
+function lockFor(ref, scr, press = false) {
   if (opts.lock === false || !ref) return null;
   const S = ref.id ? doc.pts[ref.id] : ref.snap;
   const origins = ref.id ? originsOfPoint(doc, ref.id) : originsOfSnap(doc, ref.snap);
-  return lineLock(doc, S, origins, snapAt(scr.x, scr.y), toModel(scr.x, scr.y), view.s, opts.touch ? 12 : 9);
+  return lineLock(doc, S, origins, snapAt(scr.x, scr.y, { press }), toModel(scr.x, scr.y), view.s, opts.touch ? 12 : 9, { step: opts.lockStep });
 }
 const lockEnd = (lk) => (lk.end ? { type: lk.end.type, id: lk.end.id, x: lk.x, y: lk.y } : { type: 'free', x: lk.x, y: lk.y });
 // Agrega las restricciones del bloqueo; si chocan con las existentes se quitan y la linea queda como esta.
@@ -896,6 +943,7 @@ function applyLock(lineId, lk) {
 function pointFrom(s) {
   if (s.type === 'pt') return s.id;
   const id = addPoint(doc, s.x, s.y, true);
+  if (s.type === 'int') for (const r of s.refs) addCon(doc, { t: r.k === 'ln' ? 'PONL' : r.k === 'sp' ? 'PONS' : 'PONC', refs: [id, r.id] });
   if (s.type === 'ln') addCon(doc, { t: 'PONL', refs: [id, s.id] });
   if (s.type === 'ci' || s.type === 'ar') addCon(doc, { t: 'PONC', refs: [id, s.id] });
   if (s.type === 'sp') addCon(doc, { t: 'PONS', refs: [id, s.id] });
@@ -916,6 +964,7 @@ cv.addEventListener('pointerdown', (e) => {
   if (touches.length >= 2) { startGesture(); return; }
   if (e.pointerType === 'touch' && !opts.touch) { gesture = { mode: 'pan', last: p, moved: false }; return; }
   if (e.pointerType === 'mouse' && (e.button === 1 || e.button === 2 || spaceDown)) { gesture = { mode: 'pan', last: p, moved: true }; return; }
+  trackIntersections(p);
   toolDown(p);
 });
 cv.addEventListener('pointermove', (e) => {
@@ -924,6 +973,7 @@ cv.addEventListener('pointermove', (e) => {
   if (q) { q.x = p.x; q.y = p.y; }
   if (gesture) { gestureMove(); return; }
   hover = p;
+  trackIntersections(p);
   if (q) toolMove(p);
   updateStatus(p);
   draw();
@@ -1122,7 +1172,7 @@ function toolUp(p, q) {
   if (tool === 'trim') { if (d?.trimmed) afterChange(); else draw(); return; }
   if (tool === 'extend') { extendAt(p); return; }
   const moved = d?.moved;
-  const sDown = snapAt(q.down.x, q.down.y), sUp = snapAt(p.x, p.y);
+  const sDown = snapAt(q.down.x, q.down.y, { press: true }), sUp = snapAt(p.x, p.y, { press: !moved });
   if (tool === 'point') {
     if (sUp.type === 'pt') { toast('Ya hay un punto aquí'); return; }
     pushUndo(); const id = pointFrom(sUp); doc.pts[id].auto = false; afterChange(); return;
@@ -1141,7 +1191,7 @@ function toolUp(p, q) {
     if (!pending) { pushUndo(); pending = { start: pointFrom(sUp) }; draw(); return; }
     if (sUp.type === 'pt' && sUp.id === pending.start) { cancelPending(); return; }
     pushUndo();
-    const lk = lockFor({ id: pending.start }, p);
+    const lk = lockFor({ id: pending.start }, p, !moved);
     const b = pointFrom(lk ? lockEnd(lk) : sUp);
     const lid = addLine(doc, pending.start, b, style());
     if (lk) applyLock(lid, lk);
@@ -2159,7 +2209,10 @@ function toggle(id, key) {
   b.setAttribute('aria-pressed', String(opts[key]));
 }
 toggle('tGrid', 'grid'); toggle('tSnap', 'snap'); toggle('tCons', 'cons'); toggle('tTouch', 'touch');
-toggle('tLock', 'lock'); toggle('tPts', 'pts'); toggle('tDims', 'dims'); toggle('tTexts', 'texts');
+toggle('tLock', 'lock');
+for (const [id, key, min, max, def] of [['intMs', 'intMs', 0, 2000, 80], ['lockStep', 'lockStep', 1, 90, 15]]) {
+  $(id).onchange = (e) => { const v = Number(String(e.target.value).replace(',', '.')); opts[key] = Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : def; e.target.value = String(opts[key]); persist(); draw(); };
+} toggle('tPts', 'pts'); toggle('tDims', 'dims'); toggle('tTexts', 'texts');
 $('tLabels').onclick = () => { opts.labels = !opts.labels; applyLabels(); persist(); };
 function applyLabels() {
   document.body.classList.toggle('nolabels', !opts.labels);
@@ -2243,6 +2296,7 @@ async function boot() {
     const s = JSON.parse(localStorage.getItem(STORE) || 'null');
     if (s?.doc) { loadDoc(s.doc); if (s.view) view = s.view; if (s.cur) cur = { ...cur, ...s.cur }; if (s.opts) Object.assign(opts, s.opts); }
   } catch { /* sin estado previo */ }
+  $('intMs').value = String(opts.intMs); $('lockStep').value = String(opts.lockStep);
   for (const [id, key] of [['tGrid', 'grid'], ['tSnap', 'snap'], ['tCons', 'cons'], ['tTouch', 'touch'], ['tPts', 'pts'], ['tDims', 'dims'], ['tTexts', 'texts'], ['tLock', 'lock']]) $(id).setAttribute('aria-pressed', String(opts[key]));
   $('ltScale').value = String(opts.ltScale);
   hydrateIcons(); wireLongPressHints(); wireSections(); applyLabels(); applyChrome(); updateEnabled();

@@ -1,5 +1,15 @@
 # Historial de cambios
 
+## v1.0.1 (2026-11-10)
+
+**Bloqueo suave rehecho al dibujar líneas**
+- Bloqueos cada 15° (incluye horizontal y vertical), con la etiqueta del ángulo. El paso se cambia en Vista.
+- Corrección: el bloqueo ya no se pierde cuando el final de la línea se acerca a otra línea, un arco o un círculo.
+- Cerca de una línea existente: paralela o perpendicular a ella; la perpendicular termina en el pie sobre esa línea.
+- Cerca de un arco o círculo: tangente, con el extremo sobre la curva.
+- Si la dirección bloqueada cruza un elemento cerca del cursor, la línea termina en ese cruce.
+- Imán a intersecciones: el inicio o el final de la línea se toman en la intersección de dos elementos (líneas, arcos, círculos, splines) cuando el cursor se queda cerca; el tiempo (ms) es configurable en Vista. Un toque o el inicio de un arrastre la toman al instante.
+
 ## v1.0.0 (2026-11-10)
 
 Primera versión numerada. Resume lo construido desde el prototipo del 2026-11-09.
