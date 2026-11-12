@@ -981,10 +981,10 @@ function drawPreview(c) {
     const sp = toScreen(s);
     if (s.type === 'int') label(c, '∩', sp.x + 14, sp.y - 14, null, theme.accent);
     if (s.type === 'mid') label(c, 'M', sp.x + 14, sp.y - 14, null, theme.accent);
-    if (tool !== 'select') {
-      c.setLineDash([]); c.beginPath(); c.arc(sp.x * dpr, sp.y * dpr, 7 * dpr, 0, 7);
-      c.strokeStyle = s.type === 'free' ? theme.muted : theme.accent; c.stroke();
-    }
+    c.setLineDash([]); c.beginPath();
+    if (tool === 'select') { c.arc(hover.x * dpr, hover.y * dpr, 7 * dpr, 0, 7); c.strokeStyle = theme.muted; } // seleccionar no usa iman: el aro marca el punto real
+    else { c.arc(sp.x * dpr, sp.y * dpr, 7 * dpr, 0, 7); c.strokeStyle = s.type === 'free' ? theme.muted : theme.accent; }
+    c.stroke();
     if (lref) {
       const S0 = lref.id ? doc.pts[lref.id] : lref.snap;
       const a = toScreen(S0);
@@ -1221,6 +1221,10 @@ cv.addEventListener('pointerdown', (e) => {
       const q = pointers.get(id);
       if (!q || pointers.size !== 1 || dist(q, q.down) > 10) return;
       if (gesture) { if (gesture.mode !== 'pan' || gesture.moved) return; gesture.mode = 'loupe'; }
+      else if (tool === 'select') { // dedo dibuja + Seleccionar: sostener es apuntar (suelta y selecciona), no mover ni hacer cuadro
+        if (drag?.started) return;
+        drag = { p0: q.down, hit: null, started: false };
+      }
       loupe = { x: q.x, y: q.y }; draw();
     }, LOUPE_MS);
   }
@@ -2503,6 +2507,8 @@ document.querySelectorAll('[data-tool]').forEach((b) => { b.onclick = () => setT
 // ---- botones desplegables: cada grupo muestra la ultima herramienta usada; toca de nuevo (con el grupo activo),
 // toca la esquina marcada o mantén presionado para ver las demás.
 const GROUPS = {
+  file: [['fNew', 'file-plus', 'Nuevo dibujo'], ['fSave', 'save', 'Guardar (.json)'], ['fLoad', 'folder-open', 'Abrir…'], ['fPng', 'image', 'Exportar PNG'], ['fSvg', 'svg', 'Exportar SVG'], ['fLaser', 'svg', 'SVG para corte láser…'], ['fDxf', 'dxf', 'Exportar DXF']],
+  spl: [['spline', 'spline', 'Spline por puntos (S)'], ['trTrace', 'trace', 'Trazar punto (activar o quitar)'], ['trClear', 'trash', 'Borrar trayectoria'], ['trSpline', 'spline', 'Trazado a spline…'], ['spClose', 'spline-closed', 'Cerrar o abrir el spline'], ['spOffset', 'spline', 'Equidistante…']],
   sel: [['select', 'select', 'Seleccionar y arrastrar (V)'], ['filter', 'filter', 'Filtrar la selección…']],
   line: [['line', 'line', 'Línea (L)'], ['mline', 'mline', 'Línea de punto medio (M)'], ['cline', 'cline', 'Línea constructiva (K)']],
   circle: [['circle', 'circle', 'Círculo (C)'], ['circle3', 'circle3', 'Círculo perimetral (3 puntos)'], ['ccircle', 'ccircle', 'Círculo constructivo']],
@@ -2512,27 +2518,32 @@ const GROUPS = {
   clip: [['copy', 'copy', 'Copiar la selección (Ctrl+C)'], ['paste', 'paste', 'Pegar: toca el punto donde va el centro de lo copiado (Ctrl+V)']],
 };
 // Cada elemento de un grupo es una herramienta, salvo Filtrar y Copiar, que son acciones.
+// Archivo y Spline: sus acciones viven en botones ocultos (#acts) que conservan su logica y su estado habilitado.
+const ACT_IDS = new Set(['fNew', 'fSave', 'fLoad', 'fPng', 'fSvg', 'fLaser', 'fDxf', 'trTrace', 'trClear', 'trSpline', 'spClose', 'spOffset']);
+const MENU_ONLY = new Set(['file']); // el boton solo abre el desplegable (nunca ejecuta algo, p. ej. "Nuevo")
+const isAct = (id) => id === 'filter' || ACT_IDS.has(id);
 function runGroupItem(id) {
-  if (id === 'filter') openFilter();
+  if (ACT_IDS.has(id)) { if (!$(id).disabled) $(id).click(); }
+  else if (id === 'filter') openFilter();
   else if (id === 'copy') copySel();
   else if (id === 'paste') pasteTool();
   else setTool(id);
 }
-const grpTool = (g) => { const c = (opts.grp || {})[g]; return GROUPS[g].some((x) => x[0] === c && x[0] !== 'filter') ? c : GROUPS[g][0][0]; };
+const grpTool = (g) => { const c = (opts.grp || {})[g]; return GROUPS[g].some((x) => x[0] === c && !isAct(x[0])) ? c : GROUPS[g][0][0]; };
 function refreshGroups() {
   const filtered = (opts.filtKinds || []).length > 0 || (opts.filtLt || []).length > 0;
   document.querySelectorAll('.grp').forEach((b) => {
-    const g = b.dataset.group, id = grpTool(g), it = GROUPS[g].find((x) => x[0] === id);
+    const g = b.dataset.group, id = grpTool(g), it = MENU_ONLY.has(g) ? ['', b.dataset.icon, 'Archivo: nuevo, guardar, abrir y exportar'] : GROUPS[g].find((x) => x[0] === id);
     b.querySelector(':scope > i').innerHTML = iconSvg(it[1]);
-    b.title = it[2] + ' · toca de nuevo o mantén presionado para ver más herramientas' + (g === 'sel' && filtered ? ' (filtro activo)' : '');
+    b.title = it[2] + (MENU_ONLY.has(g) ? '' : ' · toca de nuevo o mantén presionado para ver más herramientas') + (g === 'sel' && filtered ? ' (filtro activo)' : '');
     b.setAttribute('aria-label', it[2]);
-    b.classList.toggle('on', toolName === id);
+    b.classList.toggle('on', !MENU_ONLY.has(g) && toolName === id);
     b.classList.toggle('filtered', g === 'sel' && filtered);
   });
 }
 function syncGroups(t) {
   opts.grp = opts.grp || {};
-  for (const g of Object.keys(GROUPS)) if (GROUPS[g].some((x) => x[0] === t && x[0] !== 'filter')) opts.grp[g] = t;
+  for (const g of Object.keys(GROUPS)) if (GROUPS[g].some((x) => x[0] === t && !isAct(x[0]))) opts.grp[g] = t;
   refreshGroups(); persist();
 }
 let fly = null;
@@ -2544,7 +2555,8 @@ function openFly(b) {
   for (const [id, icon, label] of GROUPS[g]) {
     const x = document.createElement('button');
     x.innerHTML = `<i>${iconSvg(icon)}</i><span>${label}</span>`;
-    if (id === grpTool(g) && id !== 'filter') x.classList.add('on');
+    if (id === grpTool(g) && !isAct(id)) x.classList.add('on');
+    if (ACT_IDS.has(id) && $(id).disabled) x.disabled = true;
     x.onclick = () => { closeFly(); runGroupItem(id); };
     el.appendChild(x);
   }
@@ -2562,7 +2574,7 @@ function wireGroups() {
     b.addEventListener('click', (e) => {
       if (long) { long = false; return; }
       if (fly?.btn === b) { closeFly(); return; }
-      if (e.target.closest('.chev') || b.classList.contains('on')) { openFly(b); return; }
+      if (MENU_ONLY.has(b.dataset.group) || e.target.closest('.chev') || b.classList.contains('on')) { openFly(b); return; }
       runGroupItem(grpTool(b.dataset.group));
     });
   });
@@ -3027,11 +3039,13 @@ function newControlPoints(P, closed, N, c = { x: 0, y: 0 }) {
   const R = closed ? resamplePolyline([...P, P[0]], N + 1).slice(0, -1) : resamplePolyline(P, N);
   return R.map((q) => { const id = addPoint(doc, c.x + q.x, c.y + q.y, true); doc.pts[id].splOnly = true; return id; });
 }
-$('spOffset').onclick = () => {
+$('spOffset').onclick = async () => {
   const spId = sel.find((x) => x.k === 'sp')?.id;
   if (!spId) { toast('Selecciona un spline'); return; }
-  const d = Number(String($('spOffD').value).replace(',', '.'));
+  const d = await askNumber('Equidistante: distancia (positiva = hacia afuera en curvas cerradas)', opts.spOffD ?? 3, false, 'int');
+  if (d === null) return;
   if (!Number.isFinite(d) || d === 0) { toast('Escribe la distancia (positiva = hacia afuera en curvas cerradas)'); return; }
+  opts.spOffD = d;
   const sp = doc.splines[spId];
   const dense = splinePolyline(doc, sp, 24);
   const o = offsetPolyline(sp.closed ? dense.slice(0, -1) : dense, d, sp.closed);
@@ -3103,11 +3117,14 @@ $('trClear').onclick = () => {
   pts.forEach((id) => { doc.traces[id].pts = [{ x: doc.pts[id].x, y: doc.pts[id].y }]; });
   afterChange();
 };
-$('trSpline').onclick = () => {
+$('trSpline').onclick = async () => {
   const pid = sel.find((x) => x.k === 'pt' && doc.traces[x.id])?.id;
   if (!pid) { toast('Selecciona un punto con trazado'); return; }
+  const n = await askNumber('Puntos del spline', opts.trN ?? 16, false, 'int');
+  if (n === null) return;
+  opts.trN = Math.max(3, Math.min(200, Math.round(n) || 16));
   pushUndo();
-  const id = traceToSpline(doc, pid, Math.max(3, Math.round(Number($('trN').value) || 16)));
+  const id = traceToSpline(doc, pid, opts.trN);
   if (!id) { rollback(); toast('Aún no hay trayectoria: mueve el mecanismo con el trazado activado'); afterChange(); return; }
   sel = [{ k: 'sp', id }];
   toast(doc.splines[id].closed ? 'Spline cerrado creado a partir del trazado' : 'Spline creado a partir del trazado');

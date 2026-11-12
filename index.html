@@ -128,7 +128,7 @@ body.nopanel #panel { display: none; }
   <button class="grp" data-group="circle" data-icon="circle"><i></i><b class="chev"></b></button>
   <button class="grp" data-group="ellipse" data-icon="ellipse"><i></i><b class="chev"></b></button>
   <button class="grp" data-group="arc" data-icon="arc-c"><i></i><b class="chev"></b></button>
-  <button data-tool="spline" data-icon="spline" title="Spline por puntos (S)" aria-label="Spline por puntos"><i></i></button>
+  <button class="grp" data-group="spl" data-icon="spline"><i></i><b class="chev"></b></button>
   <button class="grp" data-group="rect" data-icon="rect"><i></i><b class="chev"></b></button>
   <button data-tool="polygon" data-icon="polygon" title="Polígono regular: centro, radio y número de lados (G)" aria-label="Polígono"><i></i></button>
   <button data-tool="text" data-icon="text" title="Texto (T)" aria-label="Texto"><i></i></button>
@@ -142,6 +142,7 @@ body.nopanel #panel { display: none; }
   <button id="fit" data-icon="fit" title="Ajustar vista" aria-label="Ajustar vista"><i></i></button>
   <span class="sep"></span>
   <button id="tPanel" data-icon="menu" title="Mostrar u ocultar el menú de herramientas" aria-label="Menú" aria-pressed="true"><i></i></button>
+  <button class="grp" data-group="file" data-icon="save"><i></i><b class="chev"></b></button>
   <button id="tHelp" data-icon="help" title="Ayuda y documentación" aria-label="Ayuda"><i></i></button>
 </header>
 <main>
@@ -196,20 +197,6 @@ body.nopanel #panel { display: none; }
     <div class="txa" id="txAnchors"></div>
     <small>Elige en qué punto de la caja del texto está el punto de inserción. Ese punto es un punto real: se puede acotar, fijar o relacionar con otros elementos.</small>
 </details>
-<details class="sec" data-sec="curves"><summary data-icon="trace"><i></i>Spline y trazado</summary>
-    <div class="grid2">
-      <button id="trTrace" data-icon="trace" title="Activar o quitar el trazado de los puntos seleccionados: dibujan su trayectoria al mover el mecanismo"><i></i><span>Trazar punto</span></button>
-      <button id="trClear" data-icon="trash" title="Borrar la trayectoria dibujada (el trazado sigue activo)"><i></i><span>Borrar trayectoria</span></button>
-      <button id="trSpline" data-icon="spline" title="Convertir la trayectoria de un punto en un spline editable"><i></i><span>Trazado a spline</span></button>
-      <button id="spClose" data-icon="spline-closed" title="Cerrar o abrir el spline seleccionado"><i></i><span>Cerrar / abrir</span></button>
-    </div>
-    <div class="row"><label for="spOffD">Equidistante (distancia)</label><input type="number" id="spOffD" value="3" step="any"></div>
-    <div class="grid2">
-      <button id="spOffset" data-icon="spline" title="Crear la curva paralela a la seleccionada a esa distancia (positiva = hacia afuera en curvas cerradas); sirve para el radio del rodillo de una leva"><i></i><span>Equidistante</span></button>
-    </div>
-    <div class="row"><label for="trN">Puntos del spline</label><input type="number" id="trN" value="16" min="3" max="200" step="1"></div>
-    <small>Selecciona un punto, pulsa "Trazar punto" y arrastra el mecanismo: el punto deja su trayectoria. Luego puedes convertirla en un spline.</small>
-</details>
 <details class="sec" data-sec="lt"><summary data-icon="linetype"><i></i>Nuevo tipo de línea</summary>
     <div class="row"><label for="ltName">Nombre</label><input type="text" id="ltName" placeholder="mi tipo"></div>
     <div class="row"><label for="ltPat">Patrón</label><input type="text" id="ltPat" placeholder="12 -3 2 -3"></div>
@@ -239,24 +226,17 @@ body.nopanel #panel { display: none; }
     <div class="row"><label for="ltScale">Escala de trazos</label><input type="range" id="ltScale" min="0.5" max="3" step="0.1" value="1"></div>
     <div class="row"><label for="lockDeg">Bloqueo suave cada (°)</label><input type="number" id="lockDeg" min="1" max="90" step="1"></div>
     <div class="row"><label for="intMs">Imán a intersecciones (ms)</label><input type="number" id="intMs" min="0" max="2000" step="10" title="Tiempo que el cursor debe quedarse cerca de una intersección para tomarla (0 = al instante)"></div>
-</details>
-<details class="sec" data-sec="file"><summary data-icon="save"><i></i>Archivo</summary>
-    <div class="grid2">
-      <button id="fNew" data-icon="file-plus"><i></i><span>Nuevo</span></button>
-      <button id="fSave" data-icon="save"><i></i><span>Guardar</span></button>
-      <button id="fLoad" data-icon="folder-open"><i></i><span>Abrir…</span></button>
-      <button id="fPng" data-icon="image"><i></i><span>PNG</span></button>
-    </div>
-    <div class="exp3">
-      <button id="fSvg" title="Exportar SVG del dibujo">SVG</button>
-      <button id="fLaser" title="SVG a escala real en mm para corte láser: eliges qué líneas se cortan y cuáles se marcan">SVG<br>CUT</button>
-      <button id="fDxf" title="Exportar DXF">DXF</button>
-    </div>
-    <input type="file" id="fileIn" accept=".json,application/json" hidden>
-    <p><small>Se guarda solo en este navegador. Guarda un .json para respaldar. v<span id="ver"></span></small></p>
+    <p><small>Se guarda solo en este navegador: usa Archivo → Guardar para respaldar en un .json. v<span id="ver"></span></small></p>
 </details>
   </aside>
 </main>
+<!-- Acciones de los desplegables Archivo y Spline: el menu las dispara con .click() y toma de aqui si estan habilitadas -->
+<div id="acts" hidden>
+  <button id="fNew"></button><button id="fSave"></button><button id="fLoad"></button><button id="fPng"></button>
+  <button id="fSvg"></button><button id="fLaser"></button><button id="fDxf"></button>
+  <input type="file" id="fileIn" accept=".json,application/json">
+  <button id="trTrace"></button><button id="trClear"></button><button id="trSpline"></button><button id="spClose"></button><button id="spOffset"></button>
+</div>
 <footer id="status">Listo</footer>
 <dialog id="dlgL"><form method="dialog">
   <p style="margin:0 0 8px"><b>SVG para corte láser</b></p>

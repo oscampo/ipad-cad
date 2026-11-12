@@ -4,6 +4,11 @@
 
 - **Lupa del dedo**: al tocar y sostener (unos 0,28 s sin mover) aparece un círculo con zoom 2x de lo que hay bajo el dedo, desplazado hacia arriba para no taparlo, con mira en el centro. Se desliza para afinar. Con «Dedo dibuja» activo funciona con cualquier herramienta; con «Dedo dibuja» apagado, en Selección: al soltar se selecciona lo que está bajo la mira.
 - **Capa actual** visible arriba a la derecha del lienzo (cuando existe alguna capa).
+- **Aro del cursor** (el circulito del lápiz o del ratón) también en Seleccionar, en la posición real del cursor.
+- Con «Dedo dibuja» y Selección, sostener el dedo apunta con la lupa y al soltar selecciona; ya no arrastra ni arma un cuadro (el cuadro sigue saliendo al arrastrar de una vez desde un lugar vacío).
+- **Botón Archivo** en la barra (entre el menú y la ayuda) con Nuevo, Guardar, Abrir, PNG, SVG, SVG para corte láser y DXF.
+- **Botón Spline** ahora es un desplegable: Spline por puntos, Trazar punto, Borrar trayectoria, Trazado a spline, Cerrar o abrir y Equidistante. Trazado a spline y Equidistante piden el número de puntos o la distancia en una ventana.
+- Se quitan del menú de herramientas las secciones «Spline y trazado» y «Archivo».
 
 ## v1.4.1 (2026-11-12)
 
