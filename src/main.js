@@ -16,6 +16,7 @@ import { trimAt, extendEnd, linearArray, mirrorCopy, circularArray, clipOf, past
 import { CLINE_STYLE, circleThrough3, addRectangle, polygonVertices, addPolygon, arcIsClockwise, constructionArcDash } from './shapes.js';
 import { layoutDim, dragDim, dimValue, angSector, angTrue, DIAM } from './dims.js';
 import { textFrame, textHit, textPose, rawAngle, ANCHORS, ANCHOR_NAMES, LINE_SPACING, FONTS, fontCss } from './text.js';
+import * as gh from './github.js';
 import { exportSVG, exportSVGLaser, exportDXF, extraExtents, laserClasses } from './export.js';
 import { iconSvg } from './icons.js';
 import { buildTree, kindOf, conLabel } from './tree.js';
@@ -2497,7 +2498,7 @@ document.querySelectorAll('[data-tool]').forEach((b) => { b.onclick = () => setT
 // ---- botones desplegables: cada grupo muestra la ultima herramienta usada; toca de nuevo (con el grupo activo),
 // toca la esquina marcada o mantén presionado para ver las demás.
 const GROUPS = {
-  file: [['fNew', 'file-plus', 'Nuevo dibujo'], ['fSave', 'save', 'Guardar (.json)'], ['fLoad', 'folder-open', 'Abrir…'], ['fPng', 'image', 'Exportar PNG'], ['fSvg', 'svg', 'Exportar SVG'], ['fLaser', 'svg', 'SVG para corte láser…'], ['fDxf', 'dxf', 'Exportar DXF']],
+  file: [['fNew', 'file-plus', 'Nuevo dibujo'], ['fSave', 'save', 'Guardar (.json)'], ['fLoad', 'folder-open', 'Abrir…'], ['ghSave', 'save', 'Guardar en GitHub…'], ['ghOpen', 'folder-open', 'Abrir de GitHub…'], ['ghCfg', 'props', 'Configurar GitHub…'], ['fPng', 'image', 'Exportar PNG'], ['fSvg', 'svg', 'Exportar SVG'], ['fLaser', 'svg', 'SVG para corte láser…'], ['fDxf', 'dxf', 'Exportar DXF']],
   spl: [['spline', 'spline', 'Spline por puntos (S)'], ['trTrace', 'trace', 'Trazar punto (activar o quitar)'], ['trClear', 'trash', 'Borrar trayectoria'], ['trSpline', 'spline', 'Trazado a spline…'], ['spClose', 'spline-closed', 'Cerrar o abrir el spline'], ['spOffset', 'spline', 'Equidistante…']],
   sel: [['select', 'select', 'Seleccionar y arrastrar (V)'], ['filter', 'filter', 'Filtrar la selección…']],
   line: [['line', 'line', 'Línea (L)'], ['mline', 'mline', 'Línea de punto medio (M)'], ['cline', 'cline', 'Línea constructiva (K)']],
@@ -2509,7 +2510,7 @@ const GROUPS = {
 };
 // Cada elemento de un grupo es una herramienta, salvo Filtrar y Copiar, que son acciones.
 // Archivo y Spline: sus acciones viven en botones ocultos (#acts) que conservan su logica y su estado habilitado.
-const ACT_IDS = new Set(['fNew', 'fSave', 'fLoad', 'fPng', 'fSvg', 'fLaser', 'fDxf', 'trTrace', 'trClear', 'trSpline', 'spClose', 'spOffset']);
+const ACT_IDS = new Set(['ghSave', 'ghOpen', 'ghCfg', 'fNew', 'fSave', 'fLoad', 'fPng', 'fSvg', 'fLaser', 'fDxf', 'trTrace', 'trClear', 'trSpline', 'spClose', 'spOffset']);
 const MENU_ONLY = new Set(['file']); // el boton solo abre el desplegable (nunca ejecuta algo, p. ej. "Nuevo")
 const isAct = (id) => id === 'filter' || ACT_IDS.has(id);
 function runGroupItem(id) {
@@ -3209,6 +3210,85 @@ $('fileIn').onchange = async (e) => {
   catch (err) { toast('No se pudo abrir: ' + err.message); }
 };
 $('fPng').onclick = exportPNG;
+
+// ---- GitHub: guardar y abrir los .json en un repositorio privado (ver github.js)
+function openGhCfg() {
+  const c = gh.loadCfg(), dlg = $('dlgGc');
+  $('ghRepo').value = c.repo; $('ghBranch').value = c.branch; $('ghDir').value = c.dir; $('ghToken').value = '';
+  $('ghToken').placeholder = c.token ? 'ya hay un token guardado (déjalo vacío para conservarlo)' : 'github_pat_…';
+  $('ghMsg').textContent = '';
+  let busy = false;
+  $('ghOk').onclick = async (ev) => {
+    ev.preventDefault();
+    if (busy) return;
+    const n = { repo: $('ghRepo').value.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '').replace(/\/$/, ''), branch: $('ghBranch').value.trim() || 'main', dir: gh.cleanDir($('ghDir').value), token: $('ghToken').value.trim() || c.token };
+    if (!gh.isReady(n)) { $('ghMsg').textContent = 'Escribe el repositorio como usuario/repositorio y el token'; return; }
+    busy = true; $('ghMsg').style.color = 'var(--muted)'; $('ghMsg').textContent = 'Probando la conexión…';
+    try {
+      const files = await gh.list(n);
+      if (!gh.saveCfg(n)) throw new Error('Este navegador no deja guardar la configuración');
+      dlg.close();
+      toast(`GitHub configurado: ${files.length} dibujo${files.length === 1 ? '' : 's'} en ${n.repo}/${n.dir || ''}`);
+    } catch (e) { $('ghMsg').style.color = 'var(--warn)'; $('ghMsg').textContent = e.message; }
+    busy = false;
+  };
+  $('ghForget').onclick = () => { if (confirm('¿Olvidar el repositorio y el token en este dispositivo?')) { gh.clearCfg(); dlg.close(); toast('Configuración de GitHub olvidada'); } };
+  $('ghCancel').onclick = () => dlg.close();
+  dlg.showModal();
+}
+async function ghSaveCmd() {
+  const c = gh.loadCfg();
+  if (!gh.isReady(c)) { toast('Primero configura GitHub'); openGhCfg(); return; }
+  const name = await askFileName('json');
+  if (!name) return;
+  const path = gh.filePath(c, name);
+  try {
+    toast('Guardando en GitHub…');
+    const cur = await gh.currentSha(c, path), known = gh.knownSha(c, path);
+    if (cur && cur !== known && !confirm(known
+      ? `«${name}» cambió en GitHub desde la última vez que lo abriste o guardaste en este dispositivo (quizá lo editaste en otro). ¿Sobrescribirlo con este dibujo?`
+      : `Ya existe «${name}» en GitHub. ¿Sobrescribirlo con este dibujo?`)) { toast('No se guardó'); return; }
+    const text = JSON.stringify({ app: 'ipad-cad', version: VERSION, doc }, null, 1);
+    const sha = await gh.write(c, path, text, `ipad-cad: ${name}`, cur);
+    if (sha) gh.rememberSha(c, path, sha);
+    toast(`Guardado en GitHub: ${path}`);
+  } catch (e) { toast('No se pudo guardar en GitHub: ' + e.message + (e.status === 409 || e.status === 422 ? '. Ábrelo de nuevo y reintenta.' : '')); }
+}
+async function ghOpenCmd() {
+  const c = gh.loadCfg();
+  if (!gh.isReady(c)) { toast('Primero configura GitHub'); openGhCfg(); return; }
+  const dlg = $('dlgGo'), box = $('goList');
+  $('goWhere').textContent = `${c.repo}/${c.dir || ''}`;
+  box.textContent = 'Cargando…';
+  $('goCfg').onclick = () => { dlg.close(); openGhCfg(); };
+  dlg.showModal();
+  let files;
+  try { files = await gh.list(c); } catch (e) { box.textContent = 'No se pudo leer GitHub: ' + e.message; return; }
+  box.textContent = '';
+  if (!files.length) { box.textContent = 'No hay dibujos .json en esa carpeta todavía. Guarda uno con «Guardar en GitHub».'; return; }
+  for (const f of files) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.style.cssText = 'display:flex;width:100%;justify-content:space-between;margin:2px 0';
+    b.innerHTML = '<span></span><small style="color:var(--muted)"></small>';
+    b.firstChild.textContent = f.name; b.lastChild.textContent = f.size >= 1024 ? Math.round(f.size / 1024) + ' KB' : f.size + ' B';
+    b.onclick = async () => {
+      dlg.close();
+      const path = gh.filePath(c, f.name);
+      try {
+        toast('Abriendo de GitHub…');
+        const j = JSON.parse(await gh.read(c, path));
+        loadDoc(j.doc || j);
+        gh.rememberSha(c, path, f.sha);
+        const base = cleanFileBase(f.name, 'json'); if (base) opts.fileBase = base;
+        fitView(); afterChange(); toast('Abierto de GitHub: ' + f.name);
+      } catch (e) { toast('No se pudo abrir: ' + e.message); }
+    };
+    box.appendChild(b);
+  }
+}
+$('ghSave').onclick = ghSaveCmd;
+$('ghOpen').onclick = ghOpenCmd;
+$('ghCfg').onclick = openGhCfg;
 $('fSvg').onclick = () => { const s = exportSVG(doc, opts.ltScale, { dims: opts.dims, texts: opts.texts }); if (s) saveFile('svg', '', () => new Blob([s], { type: 'image/svg+xml' })); else toast('No hay nada que exportar'); };
 $('fDxf').onclick = () => { const s = exportDXF(doc, view.s, { dims: opts.dims, texts: opts.texts }); if (s) saveFile('dxf', '', () => new Blob([s], { type: 'application/dxf' })); else toast('No hay nada que exportar'); };
 

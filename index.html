@@ -238,6 +238,7 @@ body.nopanel #panel { display: none; }
   <button id="fNew"></button><button id="fSave"></button><button id="fLoad"></button><button id="fPng"></button>
   <button id="fSvg"></button><button id="fLaser"></button><button id="fDxf"></button>
   <input type="file" id="fileIn" accept=".json,application/json">
+  <button id="ghSave"></button><button id="ghOpen"></button><button id="ghCfg"></button>
   <button id="trTrace"></button><button id="trClear"></button><button id="trSpline"></button><button id="spClose"></button><button id="spOffset"></button>
 </div>
 <footer id="status">Listo</footer>
@@ -297,6 +298,21 @@ body.nopanel #panel { display: none; }
   <div class="row"><label for="polK">Tipo</label><select id="polK"><option value="in">Inscrito (el radio llega a un vértice)</option><option value="ci">Circunscrito (el radio llega al medio de un lado)</option></select></div>
   <small>El ángulo del radio con la horizontal define la orientación del polígono.</small>
   <div class="actions"><button type="button" id="polCancel">Cancelar</button><button id="polOk" class="on">Crear</button></div>
+</form></dialog>
+<dialog id="dlgGc"><form method="dialog">
+  <p style="margin:0 0 6px"><b>GitHub: dónde se guardan los dibujos</b></p>
+  <div class="row"><label for="ghRepo">Repositorio</label><input type="text" id="ghRepo" placeholder="usuario/repositorio" autocomplete="off" autocapitalize="off" spellcheck="false" style="flex:1 1 160px"></div>
+  <div class="row"><label for="ghBranch">Rama</label><input type="text" id="ghBranch" placeholder="main" autocomplete="off" autocapitalize="off" spellcheck="false" style="flex:1 1 100px"></div>
+  <div class="row"><label for="ghDir">Carpeta</label><input type="text" id="ghDir" placeholder="dibujos" autocomplete="off" autocapitalize="off" spellcheck="false" style="flex:1 1 100px"></div>
+  <div class="row"><label for="ghToken">Token</label><input type="password" id="ghToken" placeholder="github_pat_…" autocomplete="off" autocapitalize="off" spellcheck="false" style="flex:1 1 160px"></div>
+  <small>Usa un repositorio <b>privado</b> y un <b>token de acceso personal de grano fino</b> (GitHub → Settings → Developer settings) limitado a ese repositorio, con el permiso «Contents: Read and write». El token se guarda solo en este navegador y nunca entra en los archivos. Repite esta configuración en cada dispositivo.</small>
+  <p id="ghMsg" style="margin:6px 0 0;font-size:13px;color:var(--warn);min-height:1em"></p>
+  <div class="actions"><button type="button" id="ghForget">Olvidar</button><button type="button" id="ghCancel">Cancelar</button><button id="ghOk" class="on">Probar y guardar</button></div>
+</form></dialog>
+<dialog id="dlgGo"><form method="dialog">
+  <p style="margin:0 0 6px"><b>Abrir de GitHub</b> <span id="goWhere" style="color:var(--muted);font-size:13px"></span></p>
+  <div id="goList" style="margin:6px 0;max-height:50vh;overflow:auto"></div>
+  <div class="actions"><button type="button" id="goCfg">Configurar</button><button id="goClose" class="on">Cerrar</button></div>
 </form></dialog>
 <dialog id="dlgY"><form method="dialog">
   <p style="margin:0 0 6px"><b>Capas</b></p>

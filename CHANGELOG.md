@@ -9,6 +9,7 @@
 - **Botón Archivo** en la barra (entre el menú y la ayuda) con Nuevo, Guardar, Abrir, PNG, SVG, SVG para corte láser y DXF.
 - **Botón Spline** ahora es un desplegable: Spline por puntos, Trazar punto, Borrar trayectoria, Trazado a spline, Cerrar o abrir y Equidistante. Trazado a spline y Equidistante piden el número de puntos o la distancia en una ventana.
 - Se quitan del menú de herramientas las secciones «Spline y trazado» y «Archivo».
+- **GitHub**: Archivo → Guardar en GitHub, Abrir de GitHub y Configurar GitHub. Guarda y abre los .json en un repositorio privado (API de contenidos, token de grano fino guardado solo en el navegador). Cada guardado es un commit; avisa antes de sobrescribir si el archivo cambió en GitHub desde la última vez que se abrió o guardó en ese dispositivo.
 - **Safari/iPad**: se bloquea el zoom de la página por doble toque (touch-action en toda la interfaz) y por pellizco fuera del lienzo.
 
 ## v1.4.1 (2026-11-12)
