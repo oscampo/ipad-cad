@@ -1,5 +1,9 @@
 # Historial de cambios
 
+## v1.4.1 (2026-11-12)
+
+- **Teléfono**: con el menú oculto, el lienzo ocupa todo el alto. Antes quedaba una franja vacía abajo (el 40% reservado al panel).
+
 ## v1.4.0 (2026-11-12)
 
 - **Ventana de propiedades**: con doble toque sobre un punto, línea, círculo, arco, elipse, spline, texto o relleno se abre una ventana para cambiar su capa, color, tipo de línea, grosor, escala del patrón (texto: contenido, fuente, altura y ángulo; punto: X, Y y fijo), ver y quitar sus restricciones y cotas, y agregar las que se aplican a ese elemento solo. En una cota, el doble toque sigue editando su valor.

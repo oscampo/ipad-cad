@@ -128,6 +128,7 @@ export const HELP_HTML = `
 <p>V seleccionar, P punto, L línea, K línea constructiva, C círculo, B rectángulo, G polígono, O elipse, Ctrl/Cmd+C copiar, Ctrl/Cmd+V pegar, R arco por centro, A arco por 3 puntos, S spline, T texto, D acotar, I intersección, X recortar, E extender. Ctrl/Cmd+Z deshacer, Ctrl/Cmd+Y (o Ctrl/Cmd+Mayús+Z) rehacer, Supr o Retroceso borra, Esc cancela o termina.</p></details>
 
 <details><summary>Historial de versiones</summary>
+<p><b>v1.4.1</b>: en pantallas angostas (teléfono), con el menú oculto el dibujo ocupa todo el alto en vez de dejar una franja vacía abajo.</p>
 <p><b>v1.4.0</b>: ventana de propiedades con doble toque, capas (crear, encender, apagar y borrar) y Copiar/Pegar en un solo botón desplegable.</p>
 <p><b>v1.3.1</b>: ayuda actualizada (atajo de Acotar y límites conocidos al día).</p>
 <p><b>v1.3.0</b>: herramienta Acotar única (reemplaza el botón de Intersección en la barra) y distancia de un elemento al centro de un arco o círculo.</p>

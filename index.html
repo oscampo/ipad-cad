@@ -111,7 +111,7 @@ body.treeopen #tree { display: flex; }
 #treeBody .ab { min-height: 34px; min-width: 34px; padding: 0; border: 0; background: transparent; }
 #treeBody .ab svg { width: 18px; height: 18px; }
 #treeBody .kids { margin-left: 14px; border-left: 1px solid var(--line); }
-body.nopanel main { grid-template-columns: 1fr; }
+body.nopanel main { grid-template-columns: 1fr; grid-template-rows: 1fr; } /* en pantallas angostas el panel ocupaba 40% de alto aunque estuviera oculto */
 body.nopanel #panel { display: none; }
 @media (max-width: 760px) { main { grid-template-columns: 1fr; grid-template-rows: 1fr 40%; } #panel { border-left: 0; border-top: 1px solid var(--line); } }
 </style>
