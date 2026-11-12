@@ -123,9 +123,10 @@ export const HELP_HTML = `
 </ul></details>
 
 <details><summary>Atajos de teclado</summary>
-<p>V seleccionar, P punto, L línea, K línea constructiva, C círculo, B rectángulo, G polígono, O elipse, Ctrl/Cmd+C copiar, Ctrl/Cmd+V pegar, R arco por centro, A arco por 3 puntos, S spline, T texto, I intersección, X recortar, E extender. Ctrl/Cmd+Z deshacer, Ctrl/Cmd+Y (o Ctrl/Cmd+Mayús+Z) rehacer, Supr o Retroceso borra, Esc cancela o termina.</p></details>
+<p>V seleccionar, P punto, L línea, K línea constructiva, C círculo, B rectángulo, G polígono, O elipse, Ctrl/Cmd+C copiar, Ctrl/Cmd+V pegar, R arco por centro, A arco por 3 puntos, S spline, T texto, D acotar, I intersección, X recortar, E extender. Ctrl/Cmd+Z deshacer, Ctrl/Cmd+Y (o Ctrl/Cmd+Mayús+Z) rehacer, Supr o Retroceso borra, Esc cancela o termina.</p></details>
 
 <details><summary>Historial de versiones</summary>
+<p><b>v1.3.1</b>: ayuda actualizada (atajo de Acotar y límites conocidos al día).</p>
 <p><b>v1.3.0</b>: herramienta Acotar única (reemplaza el botón de Intersección en la barra) y distancia de un elemento al centro de un arco o círculo.</p>
 <p><b>v1.2.1</b>: cota de distancia entre 2 líneas paralelas; un toque selecciona una cota y el doble toque la edita.</p>
 <p><b>v1.2.0</b>: la selección inteligente al dibujar engancha también al punto medio de las líneas.</p>
@@ -147,7 +148,10 @@ export const HELP_HTML = `
 
 <details><summary>Límites conocidos</summary>
 <ul>
-<li>Un spline o una elipse no se recortan ni se extienden; la elipse tampoco admite intersecciones ni tangencias.</li>
+<li>La elipse no admite intersecciones ni tangencia con splines; los cruces de una elipse con un spline u otra elipse, al recortar o extender, se calculan sobre la curva dibujada (aproximación muy cercana, no exacta).</li>
+<li>Un spline recortado queda como un spline nuevo con puntos extra tomados de la curva: se parece mucho al original, pero no es idéntico.</li>
+<li>El punto medio como imán de dibujo solo se ofrece en líneas (no en arcos, elipses ni splines) y no en líneas muy cortas en pantalla.</li>
+<li>Acotar: un spline no se puede acotar contra un arco o círculo (no tiene centro), y la distancia entre dos líneas paralelas no lleva signo.</li>
 <li>Una tangencia con un spline puede no converger si el punto de contacto arranca muy lejos de la solución (la app lo arranca en el punto más cercano).</li>
 <li>La división en partes iguales de arcos y círculos no deja restricción de igual ángulo.</li>
 <li>Las cotas angulares de una matriz circular no se editan a mano (se rehace la matriz); la distancia de una matriz lineal sí.</li>

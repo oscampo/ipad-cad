@@ -1,5 +1,9 @@
 # Historial de cambios
 
+## v1.3.1 (2026-11-11)
+
+- **Ayuda**: el atajo D de Acotar y la lista de límites conocidos quedan al día (ya se recortan y extienden elipses y splines).
+
 ## v1.3.0 (2026-11-11)
 
 - **Herramienta Acotar** (tecla D) después de Texto, en lugar del botón de Intersección: elige sola la cota según la selección. 2 puntos o punto y línea: distancia; 2 líneas paralelas: distancia; 2 líneas no paralelas: ángulo; un arco: radio; un círculo: diámetro; arco o círculo con otro elemento: distancia hasta el centro. Si ya había selección, acota esa; si no, se toca elemento por elemento.
