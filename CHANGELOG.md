@@ -1,5 +1,11 @@
 # Historial de cambios
 
+## v1.3.0 (2026-11-11)
+
+- **Herramienta Acotar** (tecla D) después de Texto, en lugar del botón de Intersección: elige sola la cota según la selección. 2 puntos o punto y línea: distancia; 2 líneas paralelas: distancia; 2 líneas no paralelas: ángulo; un arco: radio; un círculo: diámetro; arco o círculo con otro elemento: distancia hasta el centro. Si ya había selección, acota esa; si no, se toca elemento por elemento.
+- **Distancia al centro** de un arco o círculo (desde un punto, una línea, otro arco o círculo, o una elipse), también desde el botón Distancia del panel.
+- La intersección sigue disponible en el panel y con la tecla I.
+
 ## v1.2.1 (2026-11-11)
 
 - **Cota de distancia entre 2 líneas paralelas** (se seleccionan las dos y se pulsa Distancia): acota la distancia perpendicular y agrega la restricción Paralela si no la tenían (salvo en cotas de referencia). Si no son paralelas (más de 1°) avisa.

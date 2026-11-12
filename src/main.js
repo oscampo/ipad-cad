@@ -24,7 +24,7 @@ import { parseValue, isPlainNumber } from './expr.js';
 import { HELP_HTML } from './help.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from './lock.js';
 
-const VERSION = '1.2.1';
+const VERSION = '1.3.0';
 const STORE = 'ipad-cad-v1';
 const $ = (id) => document.getElementById(id);
 const cv = $('cv');
@@ -115,7 +115,7 @@ function updateEnabled() {
     CONC: crv >= 2 && !ln && !n.sp,
     TAN: (ln === 1 && crv === 1 && !n.sp && !n.el) || (crv === 2 && !ln && !n.sp && !n.el) || (n.sp === 1 && ln + crv === 1 && !n.el) || (n.el === 1 && ln + crv === 1 && !n.sp) || (n.el === 2 && !ln && !crv && !n.sp),
     FIX: pt + ln + crv > 0,
-    DIM: (pt === 2 && !ln) || (ln === 1 && !pt) || (pt === 1 && ln === 1) || (ln === 2 && !pt && !crv && !n.sp && !n.el),
+    DIM: (pt === 2 && !ln) || (ln === 1 && !pt) || (pt === 1 && ln === 1) || (ln === 2 && !pt && !crv && !n.sp && !n.el) || (crv >= 1 && pt + ln + crv + n.el === 2 && !n.sp),
     ANG: ln === 2,
     RAD: crv >= 1,
   };
@@ -1244,6 +1244,58 @@ function pickLine(msg, kind = 'ln') {
 }
 
 let lastCoTap = null;
+
+// ---- herramienta Acotar: una sola herramienta que elige la cota segun lo seleccionado
+const DIMMABLE = ['pt', 'ln', 'ci', 'ar', 'el', 'sp', 'tx'];
+const linesParallel = (l1, l2) => {
+  const [a, b] = lineEnds(l1).map((i) => doc.pts[i]), [c, d] = lineEnds(l2).map((i) => doc.pts[i]);
+  const L1 = dist(a, b), L2 = dist(c, d);
+  return L1 > 1e-9 && L2 > 1e-9 && Math.abs((b.x - a.x) * (d.y - c.y) - (b.y - a.y) * (d.x - c.x)) / (L1 * L2) <= 0.0175;
+};
+// Que cota corresponde a la seleccion: { kind } si ya se puede acotar, { wait } si falta tocar algo, { err } si no se puede.
+// pre: la seleccion ya estaba hecha al elegir la herramienta (una sola linea se acota por su longitud).
+function dimPlan(pre) {
+  const its = sel.filter((x) => DIMMABLE.includes(x.k));
+  const cls = its.map((x) => (x.k === 'pt' || x.k === 'tx' ? 'P' : x.k === 'ln' ? 'L' : x.k === 'ci' || x.k === 'ar' ? 'C' : x.k === 'el' ? 'E' : 'S'));
+  const has = (c) => cls.includes(c);
+  if (!its.length) return { wait: true };
+  if (its.length > 2) return { err: 'Acota de a uno o dos elementos' };
+  if (its.length === 1) {
+    if (cls[0] === 'C') return { kind: 'RAD' };
+    if (cls[0] === 'L' && pre) return { kind: 'DIM' };
+    return { wait: true };
+  }
+  if (has('C')) return has('S') ? { err: 'Un spline no tiene centro: no se puede acotar contra un arco o círculo' } : { kind: 'DIM' };
+  if (cls[0] === 'P' && cls[1] === 'P') return { kind: 'DIM' };
+  if (has('P') && has('L')) return { kind: 'DIM' };
+  if (cls[0] === 'L' && cls[1] === 'L') return { kind: linesParallel(its[0].id, its[1].id) ? 'DIM' : 'ANG' };
+  return { err: 'Con ese par de elementos no hay una cota: usa puntos, líneas, arcos o círculos' };
+}
+let dimBusy = false;
+async function runDim(kind) {
+  if (dimBusy) return;
+  dimBusy = true;
+  try { await applyCon(kind); } finally { dimBusy = false; }
+  sel = []; afterChange();
+}
+function dimTap(p) {
+  const h = hitTest(p.x, p.y);
+  if (!h || !DIMMABLE.includes(h.k)) { toast('Toca un punto o un elemento para acotarlo'); return; }
+  const i = sel.findIndex((x) => same(x, h));
+  if (i >= 0) { sel.splice(i, 1); afterChange(); return; }
+  sel.push(h);
+  const plan = dimPlan(false);
+  if (plan.err) { sel.pop(); toast(plan.err); afterChange(); return; }
+  if (plan.kind) { runDim(plan.kind); return; }
+  afterChange();
+}
+function startDimTool() {
+  sel = sel.filter((x) => DIMMABLE.includes(x.k));
+  const plan = dimPlan(true);
+  if (plan.err) { toast(plan.err); sel = []; afterChange(); return; }
+  if (plan.kind) { runDim(plan.kind); return; }
+  afterChange();
+}
 function selectAt(p) {
   if (pickResolve) {
     const r = pickResolve;
@@ -1552,6 +1604,7 @@ function toolUp(p, q) {
     pending = null; finishEdit();
     return;
   }
+  if (tool === 'dim') { if (!moved) dimTap(p); return; }
   if (tool === 'intersect') {
     const h = hitTest(p.x, p.y);
     if (!h || !['ln', 'ci', 'ar', 'sp'].includes(h.k)) { toast('Toca una línea, un arco, un círculo o un spline'); return; }
@@ -1922,7 +1975,20 @@ async function applyCon(kind) {
     }
     case 'DIM': {
       let refs, t, v, parallelPair = null;
-      if (pts.length === 2 && !lns.length) { refs = pts; t = 'DIST'; v = dist(doc.pts[pts[0]], doc.pts[pts[1]]); }
+      if (crv.length) {
+        // un arco o circulo con otro elemento: distancia desde ese elemento hasta el centro del arco o circulo
+        if (crv.length + pts.length + lns.length + els.length + sps.length !== 2) return bad('Con un arco o círculo, selecciona un solo elemento más');
+        if (sps.length) return bad('Un spline no tiene centro: no se puede acotar contra un arco o círculo');
+        const c0 = curveOf(crv[0]).c;
+        if (pts.length) { refs = [pts[0], c0]; t = 'DIST'; v = dist(doc.pts[pts[0]], doc.pts[c0]); }
+        else if (lns.length) {
+          const [a, b] = lineEnds(lns[0]).map((i) => doc.pts[i]), q = doc.pts[c0];
+          refs = [c0, lns[0]]; t = 'DISTPL'; v = Math.abs((b.x - a.x) * (a.y - q.y) - (a.x - q.x) * (b.y - a.y)) / (dist(a, b) || 1);
+        } else {
+          const c1 = crv.length === 2 ? curveOf(crv[1]).c : doc.ellipses[els[0]].c;
+          refs = [c0, c1]; t = 'DIST'; v = dist(doc.pts[c0], doc.pts[c1]);
+        }
+      } else if (pts.length === 2 && !lns.length) { refs = pts; t = 'DIST'; v = dist(doc.pts[pts[0]], doc.pts[pts[1]]); }
       else if (lns.length === 1 && !pts.length) { refs = lineEnds(lns[0]); t = 'DIST'; v = dist(doc.pts[refs[0]], doc.pts[refs[1]]); }
       else if (pts.length === 1 && lns.length === 1) {
         const [a, b] = lineEnds(lns[0]).map((i) => doc.pts[i]), p = doc.pts[pts[0]];
@@ -1941,7 +2007,7 @@ async function applyCon(kind) {
         v = Math.abs((b.x - a.x) * (a.y - p.y) - (a.x - p.x) * (b.y - a.y)) / L1;
         parallelPair = [lns[0], lns[1]];
       } else return bad('Selecciona 2 puntos, 1 línea, 1 punto + 1 línea, o 2 líneas paralelas');
-      if (v < 1e-9) return bad('Las dos líneas están sobre la misma recta: no hay distancia que acotar');
+      if (v < 1e-9) return bad('La distancia es cero (coinciden o comparten el centro): no hay nada que acotar');
       const val = await askNumber('Distancia', Math.round(v * 1000) / 1000);
       if (val === null || val <= 0) return;
       // para que sigan siendo paralelas (si ya no lo estaban por restriccion), se agrega la restriccion Paralela
@@ -2217,6 +2283,7 @@ const HINTS = {
   rectc: 'Rectángulo de centro: toca el centro y luego una esquina (o arrastra del centro a la esquina).',
   polygon: 'Polígono: toca el centro y el radio (el ángulo del radio da la orientación; hay bloqueo suave); luego eliges el número de lados.',
   paste: 'Pegar: toca el punto donde va el centro del cuadro de lo copiado. Esc o Seleccionar termina.',
+  dim: 'Acotar: toca 2 puntos (distancia), punto y línea (distancia), 2 líneas (paralelas: distancia; si no, ángulo), un arco (radio), un círculo (diámetro), o un arco/círculo y otro elemento (distancia al centro). Si ya había algo seleccionado, acota eso.',
   intersect: 'Toca dos elementos (línea, arco o círculo) para crear su punto de intersección.',
   text: 'Toca donde va el punto de insercion del texto (puede ser un punto existente).',
   spline: 'Spline por puntos: toca los puntos por donde pasa la curva. Tocar de nuevo el último (o Esc) termina; tocar el primero la cierra.',
@@ -2344,6 +2411,7 @@ function setTool(t) {
   $('tPaste').classList.toggle('on', t === 'paste');
   closeFly(); syncGroups(t);
   if (t !== 'intersect') pending = null;
+  if (t === 'dim') startDimTool();
   updateStatus(); draw();
 }
 document.querySelectorAll('[data-tool]').forEach((b) => { b.onclick = () => setTool(b.dataset.tool); });
@@ -2809,7 +2877,7 @@ window.addEventListener('keydown', (e) => {
   else if ((e.ctrlKey || e.metaKey) && k === 'v') { e.preventDefault(); $('tPaste').click(); }
   else if (k === 'escape') { if (pickResolve) { const r = pickResolve; pickResolve = null; r(null); } else if (pending) { if (tool === 'spline' && pending.ids?.length >= 2) finishSpline(false); else cancelPending(); } else { sel = []; afterChange(); } }
   else if (k === 'delete' || k === 'backspace') $('del').click();
-  else if (!e.ctrlKey && !e.metaKey) { const m = { v: 'select', p: 'point', l: 'line', c: 'circle', i: 'intersect', a: 'arc3', r: 'arcc', t: 'text', s: 'spline', x: 'trim', e: 'extend', o: 'ellipse', b: 'rect', g: 'polygon', k: 'cline', m: 'mline' }[k]; if (m) setTool(m); }
+  else if (!e.ctrlKey && !e.metaKey) { const m = { v: 'select', p: 'point', l: 'line', c: 'circle', i: 'intersect', d: 'dim', a: 'arc3', r: 'arcc', t: 'text', s: 'spline', x: 'trim', e: 'extend', o: 'ellipse', b: 'rect', g: 'polygon', k: 'cline', m: 'mline' }[k]; if (m) setTool(m); }
 });
 window.addEventListener('keyup', (e) => { if (e.code === 'Space') spaceDown = false; if (e.key === 'Shift') shiftDown = false; });
 // Area visible real (con teclado en pantalla): los dialogos se acomodan arriba de ella

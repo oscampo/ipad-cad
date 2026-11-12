@@ -35,7 +35,8 @@ export const HELP_HTML = `
 <li><b>Rectángulo de centro</b> (desplegable de Rectángulo): toca el centro y una esquina (o arrastra del centro a la esquina). El centro queda como punto medio de la diagonal.</li>
 <li><b>Polígono (G)</b>: toca el centro y el radio; luego eliges el número de lados (3 a 64) y si es <i>inscrito</i> (el radio llega a un vértice) o <i>circunscrito</i> (el radio llega al medio de un lado). El ángulo del radio con la horizontal da la orientación, con los mismos bloqueos suaves de las líneas. Queda regular al mover un vértice (vértices equidistantes del centro y lados iguales, restricciones ocultas).</li>
 <li><b>Texto (T)</b>: toca donde va el punto de inserción; en el cuadro eliges la fuente.</li>
-<li><b>Intersección (I)</b>: toca dos elementos (línea, arco, círculo o spline) para crear su punto de intersección con las relaciones correspondientes.</li>
+<li><b>Acotar (D)</b> (después de Texto): una sola herramienta para todas las cotas. Toca los elementos y la cota se crea sola cuando la selección está completa: <b>2 puntos</b> o <b>punto y línea</b> dan la distancia; <b>2 líneas paralelas</b> (menos de 1° de diferencia), la distancia entre ellas; <b>2 líneas no paralelas</b>, el ángulo; <b>un arco</b>, el radio; <b>un círculo</b>, el diámetro; y <b>un arco o círculo con otro elemento</b> (punto, línea, otro arco o círculo, o una elipse), la distancia desde ese elemento hasta el centro. Para acotar un elemento contra un arco o círculo, toca primero el otro elemento y después el arco o círculo (un arco solo, tocado primero, da su radio), o selecciónalos antes de elegir la herramienta. Si ya había una selección al elegir Acotar, acota esa selección (una sola línea da su longitud). Toca de nuevo un elemento para quitarlo de la selección; Esc la borra.</li>
+<li><b>Intersección</b>: ya no tiene botón en la barra; sigue disponible en el panel (selecciona 2 elementos y pulsa Intersección) y con la tecla I.</li>
 <li><b>Recortar (X)</b>: mantén presionado y arrastra sobre los tramos que quieres quitar (entre los cruces con otros elementos). Un toque recorta un tramo. Solo se quita ese tramo: el resto del elemento no se divide en los demás cruces. Sin cruces, borra el elemento completo. También recorta <b>elipses</b> (una elipse completa necesita 2 cruces y queda como arco elíptico; un arco elíptico se acorta o se parte en dos que comparten centro y ejes) y <b>splines</b> (cada trozo es un spline nuevo que pasa por el corte, por los puntos originales y por puntos extra tomados de la curva para conservar la forma; es una aproximación muy cercana, no exacta).</li>
 <li><b>Extender (E)</b>: toca un segmento o arco cerca del extremo que quieres alargar; llega hasta el primer elemento que encuentre, incluidas elipses, arcos elípticos y splines. Al extender de nuevo, el mismo extremo se desplaza al siguiente cruce (no deja puntos en los anteriores).</li>
 <li>Deshacer, rehacer, borrar selección y ajustar vista están a la derecha de la barra.</li>
@@ -71,7 +72,7 @@ export const HELP_HTML = `
 
 <details><summary>Cotas (dimensiones)</summary>
 <ul>
-<li><b>Distancia</b>: 2 puntos, 1 línea, punto + línea, o <b>2 líneas paralelas</b> (distancia perpendicular entre ellas; si no tenían la restricción Paralela, se agrega, salvo que la cota sea de referencia; se pide que estén paralelas con menos de 1° de diferencia).</li>
+<li><b>Distancia</b>: 2 puntos, 1 línea, punto + línea, <b>arco o círculo + otro elemento</b> (distancia desde ese elemento hasta el centro), o <b>2 líneas paralelas</b> (distancia perpendicular entre ellas; si no tenían la restricción Paralela, se agrega, salvo que la cota sea de referencia; se pide que estén paralelas con menos de 1° de diferencia).</li>
 <li><b>Ángulo</b>: 2 líneas. La cota siempre es positiva (0° a 180°). El lugar donde la coloques decide el sector que se acota (por ejemplo 20° o 160°). Arrastra la cota para reubicarla.</li>
 <li><b>Radio / ⌀</b>: arco (R) o círculo (diámetro con el símbolo ⌀). Siguen la norma ANSI: con el texto dentro, la línea de cota va por el interior; con el texto fuera, una llamada radial con la flecha tocando desde afuera.</li>
 <li><b>Fórmulas</b>: en cualquier cota se puede escribir una expresión: <code>3π/4</code>, <code>2π*5</code>, <code>10*sin(30)</code>, <code>10+1/3</code>, <code>√2</code>, <code>2^3</code>.</li>
@@ -125,6 +126,7 @@ export const HELP_HTML = `
 <p>V seleccionar, P punto, L línea, K línea constructiva, C círculo, B rectángulo, G polígono, O elipse, Ctrl/Cmd+C copiar, Ctrl/Cmd+V pegar, R arco por centro, A arco por 3 puntos, S spline, T texto, I intersección, X recortar, E extender. Ctrl/Cmd+Z deshacer, Ctrl/Cmd+Y (o Ctrl/Cmd+Mayús+Z) rehacer, Supr o Retroceso borra, Esc cancela o termina.</p></details>
 
 <details><summary>Historial de versiones</summary>
+<p><b>v1.3.0</b>: herramienta Acotar única (reemplaza el botón de Intersección en la barra) y distancia de un elemento al centro de un arco o círculo.</p>
 <p><b>v1.2.1</b>: cota de distancia entre 2 líneas paralelas; un toque selecciona una cota y el doble toque la edita.</p>
 <p><b>v1.2.0</b>: la selección inteligente al dibujar engancha también al punto medio de las líneas.</p>
 <p><b>v1.1.1</b>: la restricción coincidente entre puntos lejanos se resuelve por pasos cuando el solver no llega de golpe.</p>
