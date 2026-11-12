@@ -3,7 +3,7 @@
 ## v1.4.2 (2026-11-12)
 
 - **Lupa del dedo**: al tocar y sostener (unos 0,28 s sin mover) aparece un círculo con zoom 2x de lo que hay bajo el dedo, desplazado hacia arriba para no taparlo, con mira en el centro. Se desliza para afinar. Con «Dedo dibuja» activo funciona con cualquier herramienta; con «Dedo dibuja» apagado, en Selección: al soltar se selecciona lo que está bajo la mira.
-- **Capa actual** visible arriba a la derecha del lienzo (cuando existe alguna capa).
+- **Botón Capas** desacoplado de la barra: va en la esquina superior izquierda del dibujo, y cuando hay una capa actual su nombre aparece debajo.
 - **Aro del cursor** (el circulito del lápiz o del ratón) también en Seleccionar, en la posición real del cursor.
 - Con «Dedo dibuja» y Selección, sostener el dedo apunta con la lupa y al soltar selecciona; ya no arrastra ni arma un cuadro (el cuadro sigue saliendo al arrastrar de una vez desde un lugar vacío).
 - **Botón Archivo** en la barra (entre el menú y la ayuda) con Nuevo, Guardar, Abrir, PNG, SVG, SVG para corte láser y DXF.

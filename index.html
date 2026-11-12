@@ -83,6 +83,9 @@ dialog.help a { color: var(--accent); }
 #status { padding: 5px 10px; border-top: 1px solid var(--line); background: var(--panel); color: var(--muted); font-variant-numeric: tabular-nums; min-height: 28px; }
 #toast { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 8px 14px; border-radius: 10px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90%; z-index: 5; }
 #toast.show { opacity: .95; }
+#tLayers { position: absolute; left: 8px; top: 8px; z-index: 4; box-shadow: 0 1px 4px rgba(0,0,0,.15); }
+#tLayers.on { border-color: var(--accent); }
+#layerName { position: absolute; left: 8px; top: 58px; z-index: 4; max-width: min(60%, 260px); padding: 3px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--fg); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; opacity: .92; }
 dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--fg); padding: 16px; min-width: 260px; max-width: calc(100vw - 16px);
   /* arriba del todo y con la altura del area visible: el teclado (acoplado o flotante) no tapa el campo ni los botones */
   top: var(--vvt, 0px); margin: 8px auto auto; max-height: calc(var(--vvh, 100dvh) - 16px); overflow-y: auto; }
@@ -122,7 +125,6 @@ body.nopanel #panel { display: none; }
   <span class="sep"></span>
   <button class="grp" data-group="sel" data-icon="select"><i></i><b class="chev"></b></button>
   <button class="grp" data-group="clip" data-icon="copy"><i></i><b class="chev"></b></button>
-  <button id="tLayers" data-icon="layers" title="Capas: crear, encender, apagar y borrar" aria-label="Capas"><i></i></button>
   <button data-tool="point" data-icon="point" title="Punto (P)" aria-label="Punto"><i></i></button>
   <button class="grp" data-group="line" data-icon="line"><i></i><b class="chev"></b></button>
   <button class="grp" data-group="circle" data-icon="circle"><i></i><b class="chev"></b></button>
@@ -147,6 +149,7 @@ body.nopanel #panel { display: none; }
 </header>
 <main>
   <div id="stage"><canvas id="cv"></canvas><div id="toast"></div>
+  <button id="tLayers" data-icon="layers" title="Capas: crear, encender, apagar y borrar" aria-label="Capas"><i></i></button><div id="layerName" hidden></div>
     <nav id="tree" aria-label="Árbol de elementos"><div class="thead"><b>Elementos</b><button id="treeClose" aria-label="Cerrar">✕</button></div><div id="treeBody"></div></nav>
   </div>
   <aside id="panel">

@@ -645,24 +645,12 @@ function draw() {
   drawHud();
 }
 
-// ---- encima del dibujo (solo en pantalla, nunca en lo exportado): capa actual y lupa del dedo
+// ---- encima del dibujo (solo en pantalla, nunca en lo exportado): la lupa del dedo
 const LOUPE_R = 62, LOUPE_Z = 2, LOUPE_MS = 280;
 let loupe = null, loupeTimer = null; // loupe: { x, y } posicion real del dedo; el circulo se dibuja desplazado para no taparlo
 let loupeBuf = null;
 function drawHud() {
   const c = ctx, W = cv.width / dpr, H = cv.height / dpr;
-  // nombre de la capa actual, arriba a la derecha (solo si ya existe alguna capa)
-  if (Object.keys(doc.layers || {}).length) {
-    const cur = doc.layers[doc.curLayer], text = 'Capa: ' + (cur ? cur.name : 'ninguna');
-    c.save();
-    c.setLineDash([]); c.font = `${12 * dpr}px -apple-system, system-ui, sans-serif`; c.textBaseline = 'middle';
-    const w = Math.min(c.measureText(text).width / dpr + 16, W * 0.6), h = 24, x = W - 8 - w, y = 8;
-    c.globalAlpha = 0.85; c.fillStyle = theme.bg; c.beginPath(); c.roundRect(x * dpr, y * dpr, w * dpr, h * dpr, 6 * dpr); c.fill();
-    c.globalAlpha = 1; c.strokeStyle = theme.muted; c.lineWidth = dpr; c.stroke();
-    c.fillStyle = cur ? theme.fg : theme.muted;
-    c.fillText(text, (x + 8) * dpr, (y + h / 2) * dpr + dpr, (w - 16) * dpr);
-    c.restore();
-  }
   if (!loupe) return;
   const R = LOUPE_R, side = (2 * R) / LOUPE_Z;
   let cx = Math.min(Math.max(loupe.x, R + 4), W - R - 4), cy = loupe.y - R - 34;
@@ -2588,6 +2576,8 @@ function layerBtn() {
   const l = doc.layers?.[doc.curLayer], n = l ? l.name : 'ninguna';
   $('tLayers').title = 'Capas · capa actual: ' + n;
   $('tLayers').setAttribute('aria-label', 'Capas, capa actual: ' + n);
+  const tag = $('layerName'); // el nombre aparece bajo el boton solo cuando hay una capa actual
+  tag.hidden = !l; tag.textContent = l ? l.name : '';
 }
 function setCurLayer(id) {
   if (id && !doc.layers[id].on) { toast('Enciende la capa para dibujar en ella'); renderLayers(); return; }
