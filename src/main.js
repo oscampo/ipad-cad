@@ -24,7 +24,7 @@ import { parseValue, isPlainNumber } from './expr.js';
 import { HELP_HTML } from './help.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from './lock.js';
 
-const VERSION = '1.4.1';
+const VERSION = '1.4.2';
 const STORE = 'ipad-cad-v1';
 const $ = (id) => document.getElementById(id);
 const cv = $('cv');
@@ -640,7 +640,55 @@ function strokeArc(c, cx, cy, r, a0, sweep, dash) {
   c.stroke();
 }
 
-function draw() { render(ctx, cv.width, cv.height, view, { fg: theme.fg, bg: theme.bg, grid: opts.grid, cons: opts.cons, dims: opts.dims, texts: opts.texts, ui: true }); }
+function draw() {
+  render(ctx, cv.width, cv.height, view, { fg: theme.fg, bg: theme.bg, grid: opts.grid, cons: opts.cons, dims: opts.dims, texts: opts.texts, ui: true });
+  drawHud();
+}
+
+// ---- encima del dibujo (solo en pantalla, nunca en lo exportado): capa actual y lupa del dedo
+const LOUPE_R = 62, LOUPE_Z = 2, LOUPE_MS = 280;
+let loupe = null, loupeTimer = null; // loupe: { x, y } posicion real del dedo; el circulo se dibuja desplazado para no taparlo
+let loupeBuf = null;
+function drawHud() {
+  const c = ctx, W = cv.width / dpr, H = cv.height / dpr;
+  // nombre de la capa actual, arriba a la derecha (solo si ya existe alguna capa)
+  if (Object.keys(doc.layers || {}).length) {
+    const cur = doc.layers[doc.curLayer], text = 'Capa: ' + (cur ? cur.name : 'ninguna');
+    c.save();
+    c.setLineDash([]); c.font = `${12 * dpr}px -apple-system, system-ui, sans-serif`; c.textBaseline = 'middle';
+    const w = Math.min(c.measureText(text).width / dpr + 16, W * 0.6), h = 24, x = W - 8 - w, y = 8;
+    c.globalAlpha = 0.85; c.fillStyle = theme.bg; c.beginPath(); c.roundRect(x * dpr, y * dpr, w * dpr, h * dpr, 6 * dpr); c.fill();
+    c.globalAlpha = 1; c.strokeStyle = theme.muted; c.lineWidth = dpr; c.stroke();
+    c.fillStyle = cur ? theme.fg : theme.muted;
+    c.fillText(text, (x + 8) * dpr, (y + h / 2) * dpr + dpr, (w - 16) * dpr);
+    c.restore();
+  }
+  if (!loupe) return;
+  const R = LOUPE_R, side = (2 * R) / LOUPE_Z;
+  let cx = Math.min(Math.max(loupe.x, R + 4), W - R - 4), cy = loupe.y - R - 34;
+  if (cy < R + 4) cy = Math.min(loupe.y + R + 34, H - R - 4); // junto al borde de arriba: debajo del dedo
+  const n = Math.max(1, Math.round(side * dpr));
+  if (!loupeBuf) loupeBuf = document.createElement('canvas');
+  if (loupeBuf.width !== n) { loupeBuf.width = n; loupeBuf.height = n; }
+  const b = loupeBuf.getContext('2d');
+  b.clearRect(0, 0, n, n);
+  b.drawImage(cv, (loupe.x - side / 2) * dpr, (loupe.y - side / 2) * dpr, n, n, 0, 0, n, n); // copia limpia antes de pintar encima
+  c.save();
+  c.setLineDash([]);
+  c.beginPath(); c.arc(cx * dpr, cy * dpr, R * dpr, 0, Math.PI * 2); c.clip();
+  c.fillStyle = theme.bg; c.fillRect((cx - R) * dpr, (cy - R) * dpr, 2 * R * dpr, 2 * R * dpr);
+  c.drawImage(loupeBuf, 0, 0, n, n, (cx - R) * dpr, (cy - R) * dpr, 2 * R * dpr, 2 * R * dpr);
+  c.restore();
+  c.save();
+  c.setLineDash([]);
+  c.strokeStyle = theme.bg; c.lineWidth = 5 * dpr; c.beginPath(); c.arc(cx * dpr, cy * dpr, R * dpr, 0, Math.PI * 2); c.stroke();
+  c.strokeStyle = theme.accent; c.lineWidth = 2 * dpr; c.stroke();
+  c.lineWidth = dpr; c.beginPath(); // mira en el centro: ahi cae el toque
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { c.moveTo((cx + dx * 5) * dpr, (cy + dy * 5) * dpr); c.lineTo((cx + dx * 14) * dpr, (cy + dy * 14) * dpr); }
+  c.stroke();
+  c.restore();
+}
+function loupeCancel() { clearTimeout(loupeTimer); loupeTimer = null; if (loupe) { loupe = null; draw(); } }
 
 // ctx en pixeles de dispositivo. o: {fg,bg,grid,cons,ui}
 export function render(c, W, H, v, o) {
@@ -1163,7 +1211,19 @@ cv.addEventListener('pointerdown', (e) => {
   const p = pos(e);
   pointers.set(e.pointerId, { ...p, type: e.pointerType, button: e.button, down: p });
   const touches = [...pointers.values()].filter((q) => q.type === 'touch');
-  if (touches.length >= 2) { startGesture(); return; }
+  if (touches.length >= 2) { loupeCancel(); startGesture(); return; }
+  if (e.pointerType === 'touch' && (opts.touch || tool === 'select')) {
+    // tocar y sostener sin mover: aparece la lupa 2x (con el dedo en modo "mover" solo en Seleccion)
+    const id = e.pointerId;
+    clearTimeout(loupeTimer);
+    loupeTimer = setTimeout(() => {
+      loupeTimer = null;
+      const q = pointers.get(id);
+      if (!q || pointers.size !== 1 || dist(q, q.down) > 10) return;
+      if (gesture) { if (gesture.mode !== 'pan' || gesture.moved) return; gesture.mode = 'loupe'; }
+      loupe = { x: q.x, y: q.y }; draw();
+    }, LOUPE_MS);
+  }
   if (e.pointerType === 'touch' && !opts.touch) { gesture = { mode: 'pan', last: p, moved: false }; return; }
   if (e.pointerType === 'mouse' && (e.button === 1 || e.button === 2 || spaceDown)) { gesture = { mode: 'pan', last: p, moved: true }; return; }
   trackIntersections(p);
@@ -1173,6 +1233,8 @@ cv.addEventListener('pointermove', (e) => {
   const p = pos(e);
   const q = pointers.get(e.pointerId);
   if (q) { q.x = p.x; q.y = p.y; }
+  if (loupeTimer && q?.down && dist(p, q.down) > 10) { clearTimeout(loupeTimer); loupeTimer = null; } // se movio antes de tiempo: no es sostener
+  if (loupe && q) loupe = { x: p.x, y: p.y };
   if (gesture) { gestureMove(); return; }
   hover = p;
   trackIntersections(p);
@@ -1184,6 +1246,14 @@ cv.addEventListener('pointermove', (e) => {
 function endPointer(e) {
   const q = pointers.get(e.pointerId);
   pointers.delete(e.pointerId);
+  const hadLoupe = !!loupe;
+  clearTimeout(loupeTimer); loupeTimer = null; loupe = null;
+  if (gesture?.mode === 'loupe') { // el dedo apuntaba con la lupa: al soltar se selecciona lo que habia bajo la mira
+    if (!pointers.size) { gesture = null; if (e.type === 'pointerup') tapSelect(pos(e)); }
+    draw();
+    return;
+  }
+  if (hadLoupe) draw();
   if (gesture) {
     const wasTap = gesture.mode === 'pan' && !gesture.moved && e.pointerType === 'touch' && !opts.touch;
     if (!pointers.size) { gesture = null; if (wasTap && e.type === 'pointerup') tapSelect(pos(e)); }
@@ -1215,6 +1285,11 @@ function startGesture() {
   gesture = { mode: 'pinch', d0: dist(t[0], t[1]) || 1, s0: view.s, c0: { x: (t[0].x + t[1].x) / 2, y: (t[0].y + t[1].y) / 2 }, o0: { x: view.ox, y: view.oy } };
 }
 function gestureMove() {
+  if (gesture.mode === 'loupe') {
+    const q = [...pointers.values()][0];
+    if (q) { loupe = { x: q.x, y: q.y }; draw(); }
+    return;
+  }
   if (gesture.mode === 'pan') {
     const q = [...pointers.values()][0];
     if (!q) return;
@@ -2502,7 +2577,7 @@ function layerBtn() {
 }
 function setCurLayer(id) {
   if (id && !doc.layers[id].on) { toast('Enciende la capa para dibujar en ella'); renderLayers(); return; }
-  doc.curLayer = id; layerBtn(); persist(); renderLayers();
+  doc.curLayer = id; layerBtn(); persist(); renderLayers(); draw();
   toast(id ? `Capa actual: ${doc.layers[id].name}` : 'Sin capa actual: lo nuevo no pertenece a ninguna capa');
 }
 function toggleLayer(id) {

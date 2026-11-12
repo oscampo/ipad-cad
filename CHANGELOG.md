@@ -1,5 +1,10 @@
 # Historial de cambios
 
+## v1.4.2 (2026-11-12)
+
+- **Lupa del dedo**: al tocar y sostener (unos 0,28 s sin mover) aparece un círculo con zoom 2x de lo que hay bajo el dedo, desplazado hacia arriba para no taparlo, con mira en el centro. Se desliza para afinar. Con «Dedo dibuja» activo funciona con cualquier herramienta; con «Dedo dibuja» apagado, en Selección: al soltar se selecciona lo que está bajo la mira.
+- **Capa actual** visible arriba a la derecha del lienzo (cuando existe alguna capa).
+
 ## v1.4.1 (2026-11-12)
 
 - **Teléfono**: con el menú oculto, el lienzo ocupa todo el alto. Antes quedaba una franja vacía abajo (el 40% reservado al panel).
