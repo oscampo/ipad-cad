@@ -121,8 +121,8 @@ body.nopanel #panel { display: none; }
   <button id="tTree" data-icon="list-tree" title="Árbol de elementos" aria-label="Árbol de elementos" aria-pressed="false"><i></i></button>
   <span class="sep"></span>
   <button class="grp" data-group="sel" data-icon="select"><i></i><b class="chev"></b></button>
-  <button id="tCopy" data-icon="copy" title="Copiar la selección (Ctrl+C)" aria-label="Copiar"><i></i></button>
-  <button id="tPaste" data-icon="paste" title="Pegar: toca el punto donde va el centro de lo copiado (Ctrl+V)" aria-label="Pegar"><i></i></button>
+  <button class="grp" data-group="clip" data-icon="copy"><i></i><b class="chev"></b></button>
+  <button id="tLayers" data-icon="layers" title="Capas: crear, encender, apagar y borrar" aria-label="Capas"><i></i></button>
   <button data-tool="point" data-icon="point" title="Punto (P)" aria-label="Punto"><i></i></button>
   <button class="grp" data-group="line" data-icon="line"><i></i><b class="chev"></b></button>
   <button class="grp" data-group="circle" data-icon="circle"><i></i><b class="chev"></b></button>
@@ -314,6 +314,21 @@ body.nopanel #panel { display: none; }
   <div class="row"><label for="polK">Tipo</label><select id="polK"><option value="in">Inscrito (el radio llega a un vértice)</option><option value="ci">Circunscrito (el radio llega al medio de un lado)</option></select></div>
   <small>El ángulo del radio con la horizontal define la orientación del polígono.</small>
   <div class="actions"><button type="button" id="polCancel">Cancelar</button><button id="polOk" class="on">Crear</button></div>
+</form></dialog>
+<dialog id="dlgY"><form method="dialog">
+  <p style="margin:0 0 6px"><b>Capas</b></p>
+  <small>La capa marcada es la actual: lo que dibujes queda en ella. Apagar una capa oculta sus elementos; borrarla deja sus elementos sin capa.</small>
+  <div id="lyList" style="margin:8px 0"></div>
+  <div class="row"><input type="text" id="lyName" placeholder="Nombre de la nueva capa" autocomplete="off" style="flex:1 1 140px"><button type="button" id="lyAdd" class="on">Crear capa</button></div>
+  <div class="actions"><button id="lyOk" class="on">Cerrar</button></div>
+</form></dialog>
+<dialog id="dlgR"><form method="dialog">
+  <p style="margin:0 0 6px"><b>Propiedades</b> <span id="prTitle" style="color:var(--muted);font-size:13px"></span></p>
+  <div id="prBody"></div>
+  <p style="margin:10px 0 2px;font-size:13px" id="prConsH"><b>Restricciones y cotas</b></p>
+  <div id="prCons"></div>
+  <div id="prAdd" class="grid2"></div>
+  <div class="actions"><button id="prOk" class="on">Cerrar</button></div>
 </form></dialog>
 <dialog id="dlgF"><form method="dialog">
   <p style="margin:0 0 6px"><b>Filtrar la selección</b></p>

@@ -20,7 +20,7 @@ export const PALETTE = [
 ];
 
 export function newDoc() {
-  return { n: 0, pts: {}, lines: {}, circles: {}, arcs: {}, ellipses: {}, texts: {}, splines: {}, traces: {}, cons: {}, hatches: {}, ltypes: {}, cn: {} };
+  return { n: 0, pts: {}, lines: {}, circles: {}, arcs: {}, ellipses: {}, texts: {}, splines: {}, traces: {}, cons: {}, hatches: {}, ltypes: {}, cn: {}, layers: {}, curLayer: null };
 }
 
 export function nextId(doc, prefix) {
@@ -32,6 +32,72 @@ export function allLtypes(doc) {
   return { ...BUILTIN_LTYPES, ...Object.fromEntries(Object.entries(doc.ltypes || {}).map(([k, v]) => [k, { label: v.label || k, pattern: v.pattern, custom: true }])) };
 }
 
+// ---- capas: doc.layers = { id: { name, on } }, doc.curLayer = capa actual (null = ninguna). Cada elemento lleva
+// layer (id) si pertenece a una capa; sin esa propiedad es de la capa "ninguna". Una capa apagada oculta sus elementos.
+const stamp = (doc) => (doc.curLayer && doc.layers?.[doc.curLayer] ? { layer: doc.curLayer } : {});
+export const isHidden = (doc, o) => !!(o && o.layer && doc.layers?.[o.layer] && !doc.layers[o.layer].on);
+export const shownEntries = (doc, key) => Object.entries(doc[key] || {}).filter(([, o]) => !isHidden(doc, o));
+export const shownValues = (doc, key) => shownEntries(doc, key).map(([, o]) => o);
+const LAYERED = ['pts', 'lines', 'circles', 'arcs', 'ellipses', 'splines', 'texts', 'hatches'];
+export function addLayer(doc, name) {
+  doc.layers ||= {};
+  const id = nextId(doc, 'y');
+  doc.layers[id] = { name, on: true };
+  doc.curLayer = id; // al crearla queda como capa actual
+  return id;
+}
+export function layerCount(doc, id) {
+  let n = 0;
+  for (const key of LAYERED) for (const o of Object.values(doc[key] || {})) if (o.layer === id) n++;
+  return n;
+}
+// Borra la capa; sus elementos pasan a "ninguna". Devuelve cuantos elementos tenia.
+export function deleteLayer(doc, id) {
+  if (!doc.layers?.[id]) return 0;
+  let n = 0;
+  for (const key of LAYERED) for (const o of Object.values(doc[key] || {})) if (o.layer === id) { delete o.layer; n++; }
+  delete doc.layers[id];
+  if (doc.curLayer === id) doc.curLayer = null;
+  return n;
+}
+// Puntos que no se ven por capas apagadas: los de una capa apagada y los que solo usan elementos ocultos.
+export function layerHiddenPoints(doc) {
+  const out = new Set();
+  if (!Object.values(doc.layers || {}).some((l) => !l.on)) return out;
+  const used = {};
+  const mark = (ids, o) => { const h = isHidden(doc, o); for (const p of ids) { if (!p) continue; const u = (used[p] ||= { vis: false }); if (!h) u.vis = true; } };
+  for (const l of Object.values(doc.lines)) mark([l.a, l.b], l);
+  for (const c of Object.values(doc.circles)) mark([c.c], c);
+  for (const a of Object.values(doc.arcs)) mark([a.c, a.a, a.b], a);
+  for (const e of Object.values(doc.ellipses || {})) mark([e.c, e.a, e.b, e.p1, e.p2], e);
+  for (const sp of Object.values(doc.splines || {})) mark(sp.pts, sp);
+  for (const t of Object.values(doc.texts || {})) mark([t.pt], t);
+  for (const [id, p] of Object.entries(doc.pts)) if (isHidden(doc, p) || (used[id] && !used[id].vis)) out.add(id);
+  return out;
+}
+// Una restriccion o cota se oculta si alguno de sus elementos o puntos esta oculto.
+export function consHidden(doc, k, hp) {
+  for (const r of k.refs || []) {
+    if (typeof r !== 'string') continue;
+    if (hp.has(r)) return true;
+    for (const c of ['lines', 'circles', 'arcs', 'ellipses', 'splines', 'texts']) {
+      const o = doc[c]?.[r];
+      if (o) { if (isHidden(doc, o)) return true; break; }
+    }
+  }
+  return false;
+}
+// Copia del documento sin lo oculto por capas (para exportar y encuadrar). Sin capas apagadas devuelve el mismo doc.
+export function visibleDoc(doc) {
+  if (!Object.values(doc.layers || {}).some((l) => !l.on)) return doc;
+  const hp = layerHiddenPoints(doc), out = { ...doc };
+  for (const key of ['lines', 'circles', 'arcs', 'ellipses', 'splines', 'texts']) out[key] = Object.fromEntries(shownEntries(doc, key));
+  out.pts = Object.fromEntries(Object.entries(doc.pts).filter(([id]) => !hp.has(id)));
+  out.cons = Object.fromEntries(Object.entries(doc.cons).filter(([, k]) => !consHidden(doc, k, hp)));
+  out.hatches = Object.fromEntries(shownEntries(doc, 'hatches').filter(([, h]) => h.ids.every((i) => i in out.lines || i in out.circles || i in out.arcs || i in out.splines)));
+  return out;
+}
+
 export function addPoint(doc, x, y, auto = false) {
   const id = nextId(doc, 'p');
   doc.pts[id] = { x, y, fixed: false, auto };
@@ -40,20 +106,20 @@ export function addPoint(doc, x, y, auto = false) {
 
 export function addLine(doc, a, b, style) {
   const id = nextId(doc, 'l');
-  doc.lines[id] = { a, b, ...style };
+  doc.lines[id] = { a, b, ...stamp(doc), ...style };
   return id;
 }
 
 export function addCircle(doc, c, r, style) {
   const id = nextId(doc, 'c');
-  doc.circles[id] = { c, r, ...style };
+  doc.circles[id] = { c, r, ...stamp(doc), ...style };
   return id;
 }
 
 // Arco antihorario de centro c desde el punto a hasta el punto b (r = radio inicial).
 export function addArc(doc, c, a, b, r, style) {
   const id = nextId(doc, 'a');
-  doc.arcs[id] = { c, a, b, r, ...style };
+  doc.arcs[id] = { c, a, b, r, ...stamp(doc), ...style };
   return id;
 }
 
@@ -68,7 +134,7 @@ export function arcOf(doc, arc) {
 export function addEllipse(doc, c, a, b, style, p1 = null, p2 = null) {
   doc.ellipses ||= {};
   const id = nextId(doc, 'e');
-  doc.ellipses[id] = { c, a, b, ...style, ...(p1 && p2 ? { p1, p2 } : {}) };
+  doc.ellipses[id] = { c, a, b, ...stamp(doc), ...style, ...(p1 && p2 ? { p1, p2 } : {}) };
   return id;
 }
 export const isPartial = (e) => !!(e.p1 && e.p2);
@@ -106,7 +172,7 @@ export function ellipsePolyline(doc, e, n = 96) {
 // Spline que pasa por una lista de puntos reales del dibujo (se mueve con ellos).
 export function addSpline(doc, ptIds, style, closed = false) {
   const id = nextId(doc, 's');
-  doc.splines[id] = { pts: [...ptIds], closed, ...style };
+  doc.splines[id] = { pts: [...ptIds], closed, ...stamp(doc), ...style };
   return id;
 }
 
@@ -131,7 +197,8 @@ export function splinePolyline(doc, sp, per = 16) {
 // anchor: 'tl','tc','tr','ml','mc','mr','bl','bc','br' (vertical + horizontal); ang en grados.
 export function addText(doc, pt, text, opts = {}) {
   const id = nextId(doc, 't');
-  doc.texts[id] = { pt, text, h: opts.h ?? 4, ang: opts.ang ?? 0, anchor: opts.anchor ?? 'bl', color: opts.color ?? 'auto', readable: opts.readable ?? true, ...(opts.font ? { font: opts.font } : {}) };
+  doc.texts[id] = { ...stamp(doc), pt, text, h: opts.h ?? 4, ang: opts.ang ?? 0, anchor: opts.anchor ?? 'bl', color: opts.color ?? 'auto', readable: opts.readable ?? true, ...(opts.font ? { font: opts.font } : {}) };
+  if (opts.layer) doc.texts[id].layer = opts.layer;
   return id;
 }
 

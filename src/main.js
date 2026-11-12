@@ -1,7 +1,7 @@
 import wasmUrl from '@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url';
 import { initSolver, solve, reparamSplines, addConsSolved } from './solver.js';
 import {
-  newDoc, addPoint, addLine, addCircle, addArc, addText, addSpline, splinePolyline, addCon, cleanup, deleteItems, clone, hatchLoops,
+  newDoc, addLayer, deleteLayer, layerCount, shownEntries, shownValues, layerHiddenPoints, consHidden, visibleDoc, isHidden, addPoint, addLine, addCircle, addArc, addText, addSpline, splinePolyline, addCon, cleanup, deleteItems, clone, hatchLoops,
   allLtypes, PALETTE, arcOf, conTag, ensureNumbers, addEllipse, ellipsePolyline, ellipseOf, ellipsePoint, ellipseParam, ellipseRange, isPartial,
 } from './model.js';
 import {
@@ -18,13 +18,13 @@ import { layoutDim, dragDim, dimValue, angSector, angTrue, DIAM } from './dims.j
 import { textFrame, textHit, textPose, rawAngle, ANCHORS, ANCHOR_NAMES, LINE_SPACING, FONTS, fontCss } from './text.js';
 import { exportSVG, exportSVGLaser, exportDXF, extraExtents, laserClasses } from './export.js';
 import { iconSvg } from './icons.js';
-import { buildTree, kindOf } from './tree.js';
+import { buildTree, kindOf, conLabel } from './tree.js';
 import { cleanFileBase } from './files.js';
 import { parseValue, isPlainNumber } from './expr.js';
 import { HELP_HTML } from './help.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from './lock.js';
 
-const VERSION = '1.3.1';
+const VERSION = '1.4.0';
 const STORE = 'ipad-cad-v1';
 const $ = (id) => document.getElementById(id);
 const cv = $('cv');
@@ -32,6 +32,7 @@ const ctx = cv.getContext('2d');
 
 // ---------------------------------------------------------------- estado
 let doc = newDoc();
+const globalDoc = () => doc;
 let view = { ox: 200, oy: 300, s: 3 }; // px por unidad; y del modelo hacia arriba
 let tool = 'select';
 let toolName = 'select'; // nombre en la interfaz (incluye los constructivos, que usan la herramienta base)
@@ -76,14 +77,16 @@ const colorOf = (c, o) => (!c || c === 'auto' ? o.fg : c);
 function snapshot() { return JSON.stringify(doc); }
 function pushUndo() { undoStack.push(snapshot()); if (undoStack.length > 150) undoStack.shift(); redoStack = []; updateButtons(); }
 function rollback() { if (undoStack.length) { doc = JSON.parse(undoStack.pop()); } updateButtons(); }
+// la capa actual no se deshace: sigue siendo la que elegiste (si todavia existe y esta encendida)
+function keepLayer(cl) { doc.curLayer = cl && doc.layers?.[cl]?.on ? cl : null; }
 function undo() {
   if (!undoStack.length) return;
-  redoStack.push(snapshot()); doc = JSON.parse(undoStack.pop());
+  const cl = doc.curLayer; redoStack.push(snapshot()); doc = JSON.parse(undoStack.pop()); keepLayer(cl);
   pending = null; sel = sel.filter(exists); afterChange();
 }
 function redo() {
   if (!redoStack.length) return;
-  undoStack.push(snapshot()); doc = JSON.parse(redoStack.pop());
+  const cl = doc.curLayer; undoStack.push(snapshot()); doc = JSON.parse(redoStack.pop()); keepLayer(cl);
   pending = null; sel = sel.filter(exists); afterChange();
 }
 function exists(s) {
@@ -96,7 +99,7 @@ function persist() {
     try { localStorage.setItem(STORE, JSON.stringify({ doc, view, cur, opts })); } catch { /* sin almacenamiento */ }
   }, 300);
 }
-function afterChange() { updateButtons(); updateEnabled(); syncPanel(); persist(); draw(); renderTree(); }
+function afterChange() { layerBtn(); updateButtons(); updateEnabled(); syncPanel(); persist(); draw(); renderTree(); }
 
 // Un boton de restriccion solo se activa si la seleccion actual le sirve (mismas reglas que applyCon).
 function updateEnabled() {
@@ -120,8 +123,6 @@ function updateEnabled() {
     RAD: crv >= 1,
   };
   document.querySelectorAll('[data-con]').forEach((b) => { b.disabled = !rules[b.dataset.con]; });
-  $('tCopy').disabled = !sel.some((x) => ['pt', 'ln', 'ci', 'ar', 'sp', 'tx', 'el'].includes(x.k));
-  $('tPaste').disabled = !clip;
   $('mkint').disabled = ln + crv + n.sp !== 2;
   $('mksplit').disabled = !(ln + crv === 1 && !n.sp); // con puntos: divide en ellos; sin puntos: en n partes iguales
   $('mkhatch').disabled = ln + crv + n.sp < 1;
@@ -309,7 +310,7 @@ const selectedTextPoints = () => new Set(sel.filter((x) => x.k === 'tx').map((x)
 const selectedSplinePoints = () => new Set(sel.filter((x) => x.k === 'sp').flatMap((x) => doc.splines[x.id]?.pts || []));
 
 function hiddenTextPoints() {
-  const geom = geometryPoints(), selTx = selectedTextPoints(), selSp = selectedSplinePoints(), out = new Set();
+  const geom = geometryPoints(), selTx = selectedTextPoints(), selSp = selectedSplinePoints(), out = layerHiddenPoints(doc);
   for (const [id, p] of Object.entries(doc.pts)) {
     if (p.txOnly && !geom.has(id) && !selTx.has(id)) out.add(id);
     else if (p.splOnly && !geom.has(id) && !selSp.has(id)) out.add(id); // control de un spline trazado: se ve al seleccionar la curva
@@ -336,13 +337,13 @@ let intTimer = 0;
 function curvesNear(sx, sy, px) {
   const m = toModel(sx, sy), out = [], r = px / view.s;
   const here = { x: sx, y: sy };
-  for (const [id, l] of Object.entries(doc.lines)) if (dist(toScreen(closestOnSeg(m, doc.pts[l.a], doc.pts[l.b])), here) <= px) out.push({ k: 'ln', id });
-  for (const [id, c] of Object.entries(doc.circles)) if (Math.abs(dist(doc.pts[c.c], m) - c.r) <= r) out.push({ k: 'ci', id });
-  for (const [id, a] of Object.entries(doc.arcs)) {
+  for (const [id, l] of shownEntries(doc, 'lines')) if (dist(toScreen(closestOnSeg(m, doc.pts[l.a], doc.pts[l.b])), here) <= px) out.push({ k: 'ln', id });
+  for (const [id, c] of shownEntries(doc, 'circles')) if (Math.abs(dist(doc.pts[c.c], m) - c.r) <= r) out.push({ k: 'ci', id });
+  for (const [id, a] of shownEntries(doc, 'arcs')) {
     const cp = doc.pts[a.c], g = arcOf(doc, a);
     if (Math.abs(dist(cp, m) - a.r) <= r && inSweep(cp, g.a0, g.sweep, m, (px + 2) / Math.max(a.r * view.s, 1))) out.push({ k: 'ar', id });
   }
-  for (const [id, sp] of Object.entries(doc.splines)) if (closestOnPolyline(splinePolyline(doc, sp, 16), m)?.d <= r) out.push({ k: 'sp', id });
+  for (const [id, sp] of shownEntries(doc, 'splines')) if (closestOnPolyline(splinePolyline(doc, sp, 16), m)?.d <= r) out.push({ k: 'sp', id });
   return out;
 }
 function intersectionAt(sx, sy) {
@@ -385,7 +386,7 @@ function snapAt(sx, sy, o = {}) {
   }
   if (DRAW_TOOLS.has(tool)) { // punto medio de una linea (tiene prioridad sobre el resto de la linea)
     let mb = null, md = 14;
-    for (const [id, l] of Object.entries(doc.lines)) {
+    for (const [id, l] of shownEntries(doc, 'lines')) {
       const a = doc.pts[l.a], b = doc.pts[l.b], q = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
       const d = dist(toScreen(q), { x: sx, y: sy });
       if (d < md && dist(a, b) * view.s > 24) { md = d; mb = { type: 'mid', id, x: q.x, y: q.y }; } // en lineas diminutas estorba
@@ -393,20 +394,20 @@ function snapAt(sx, sy, o = {}) {
     if (mb) return mb;
   }
   bd = 9;
-  for (const [id, l] of Object.entries(doc.lines)) {
+  for (const [id, l] of shownEntries(doc, 'lines')) {
     const a = doc.pts[l.a], b = doc.pts[l.b];
     const c = closestOnSeg(m, a, b);
     const d = dist(toScreen(c), { x: sx, y: sy });
     if (d < bd) { bd = d; best = { type: 'ln', id, x: c.x, y: c.y }; }
   }
-  for (const [id, ci] of Object.entries(doc.circles)) {
+  for (const [id, ci] of shownEntries(doc, 'circles')) {
     const cp = doc.pts[ci.c];
     const dc = dist(cp, m);
     if (dc < 1e-9) continue;
     const d = Math.abs(dc - ci.r) * view.s;
     if (d < bd) { bd = d; best = { type: 'ci', id, x: cp.x + ((m.x - cp.x) / dc) * ci.r, y: cp.y + ((m.y - cp.y) / dc) * ci.r }; }
   }
-  for (const [id, ar] of Object.entries(doc.arcs)) {
+  for (const [id, ar] of shownEntries(doc, 'arcs')) {
     const cp = doc.pts[ar.c];
     const dc = dist(cp, m);
     if (dc < 1e-9) continue;
@@ -416,13 +417,13 @@ function snapAt(sx, sy, o = {}) {
       bd = d; best = { type: 'ar', id, x: cp.x + ((m.x - cp.x) / dc) * ar.r, y: cp.y + ((m.y - cp.y) / dc) * ar.r };
     }
   }
-  for (const [id, sp] of Object.entries(doc.splines)) {
+  for (const [id, sp] of shownEntries(doc, 'splines')) {
     const f = closestOnPolyline(splinePolyline(doc, sp, 16), m);
     if (!f) continue;
     const d = dist(toScreen(f), { x: sx, y: sy });
     if (d < bd) { bd = d; best = { type: 'sp', id, x: f.x, y: f.y }; }
   }
-  for (const [id, e] of Object.entries(doc.ellipses)) {
+  for (const [id, e] of shownEntries(doc, 'ellipses')) {
     const f = closestOnPolyline(ellipsePolyline(doc, e, 96), m);
     if (!f) continue;
     const d = dist(toScreen(f), { x: sx, y: sy });
@@ -453,12 +454,12 @@ function hitTest(sx, sy) {
   }
   if (best) return best;
   // un texto se toma por su caja (antes que las lineas que pasen por debajo)
-  for (const [id, t] of Object.entries(doc.texts)) {
+  for (const [id, t] of shownEntries(doc, 'texts')) {
     if (opts.texts && fkOn('tx') && doc.pts[t.pt] && textHit(doc, t, m, measureRel, 2 / view.s)) return { k: 'tx', id };
   }
   best = hitCurves(sx, sy, true);
   if (best) return best;
-  for (const [id, h] of Object.entries(doc.hatches)) {
+  for (const [id, h] of shownEntries(doc, 'hatches')) {
     const path = hatchPath(h);
     if (fkOn('ha') && path && ctx.isPointInPath(path, sx * dpr, sy * dpr, 'evenodd')) return { k: 'ha', id };
   }
@@ -469,26 +470,26 @@ function hitTest(sx, sy) {
 function hitCurves(sx, sy, filt = false) {
   const m = toModel(sx, sy);
   let best = null, bd = 11;
-  for (const [id, l] of Object.entries(doc.lines)) {
+  for (const [id, l] of shownEntries(doc, 'lines')) {
     const c = closestOnSeg(m, doc.pts[l.a], doc.pts[l.b]);
     const d = dist(toScreen(c), { x: sx, y: sy });
     if (d < bd && (!filt || (fkOn('ln') && fltOk(l)))) { bd = d; best = { k: 'ln', id }; }
   }
-  for (const [id, ci] of Object.entries(doc.circles)) {
+  for (const [id, ci] of shownEntries(doc, 'circles')) {
     const d = Math.abs(dist(doc.pts[ci.c], m) - ci.r) * view.s;
     if (d < bd && (!filt || (fkOn('ci') && fltOk(ci)))) { bd = d; best = { k: 'ci', id }; }
   }
-  for (const [id, ar] of Object.entries(doc.arcs)) {
+  for (const [id, ar] of shownEntries(doc, 'arcs')) {
     const cp = doc.pts[ar.c];
     const d = Math.abs(dist(cp, m) - ar.r) * view.s;
     const g = arcOf(doc, ar);
     if (d < bd && (!filt || (fkOn('ar') && fltOk(ar))) && inSweep(cp, g.a0, g.sweep, m, 8 / Math.max(ar.r * view.s, 1))) { bd = d; best = { k: 'ar', id }; }
   }
-  for (const [id, sp] of Object.entries(doc.splines)) {
+  for (const [id, sp] of shownEntries(doc, 'splines')) {
     const d = distToPolyline(splinePolyline(doc, sp, 12).map(toScreen), sx, sy);
     if (d < bd && (!filt || (fkOn('sp') && fltOk(sp)))) { bd = d; best = { k: 'sp', id }; }
   }
-  for (const [id, e] of Object.entries(doc.ellipses)) {
+  for (const [id, e] of shownEntries(doc, 'ellipses')) {
     const d = distToPolyline(ellipsePolyline(doc, e, 72).map(toScreen), sx, sy);
     if (d < bd && (!filt || (fkOn('el') && fltOk(e)))) { bd = d; best = { k: 'el', id }; }
   }
@@ -651,16 +652,16 @@ export function render(c, W, H, v, o) {
   if (o.grid) drawGrid(c, W, H);
   labelHits = [];
   // rellenos
-  for (const [id, h] of Object.entries(doc.hatches)) drawHatch(c, id, h, o);
+  for (const [id, h] of shownEntries(doc, 'hatches')) drawHatch(c, id, h, o);
   // circulos y lineas
-  for (const [id, ci] of Object.entries(doc.circles)) {
+  for (const [id, ci] of shownEntries(doc, 'circles')) {
     const p = doc.pts[ci.c];
     const s = toScreen(p);
     if (o.ui && isSel('ci', id)) { c.setLineDash([]); c.strokeStyle = theme.sel + '88'; c.lineWidth = (ci.w + 6) * dpr; c.beginPath(); c.arc(s.x * dpr, s.y * dpr, ci.r * v.s * dpr, 0, 7); c.stroke(); }
     const dsh = applyStroke(c, ci.color, ci.w, ci.ltype, o, ci.ls);
     strokeArc(c, s.x * dpr, s.y * dpr, ci.r * v.s * dpr, 0, Math.PI * 2, dsh);
   }
-  for (const [id, ar] of Object.entries(doc.arcs)) {
+  for (const [id, ar] of shownEntries(doc, 'arcs')) {
     const sc = toScreen(doc.pts[ar.c]);
     const { a0, sweep } = arcOf(doc, ar);
     const trace = () => { c.beginPath(); c.arc(sc.x * dpr, sc.y * dpr, ar.r * v.s * dpr, -a0, -(a0 + sweep), true); };
@@ -668,14 +669,14 @@ export function render(c, W, H, v, o) {
     const dsh = applyStroke(c, ar.color, ar.w, ar.ltype, o, ar.ls);
     strokeArc(c, sc.x * dpr, sc.y * dpr, ar.r * v.s * dpr, a0, sweep, ar.ltype === 'constructiva' ? constructionArcDash(ar.r * v.s * dpr * sweep, consDot(ar.ls), 3.5 * dpr) : dsh);
   }
-  for (const [id, l] of Object.entries(doc.lines)) {
+  for (const [id, l] of shownEntries(doc, 'lines')) {
     const a = toScreen(doc.pts[l.a]), b = toScreen(doc.pts[l.b]);
     if (o.ui && isSel('ln', id)) { c.setLineDash([]); c.strokeStyle = theme.sel + '88'; c.lineWidth = (l.w + 6) * dpr; c.beginPath(); c.moveTo(a.x * dpr, a.y * dpr); c.lineTo(b.x * dpr, b.y * dpr); c.stroke(); }
     const dsh = applyStroke(c, l.color, l.w, l.ltype, o, l.ls);
     if (l.ltype === 'constructiva') strokeConstruction(c, a.x * dpr, a.y * dpr, b.x * dpr, b.y * dpr, l.w, l.ls);
     else strokeLine(c, a.x * dpr, a.y * dpr, b.x * dpr, b.y * dpr, dsh);
   }
-  for (const [id, sp] of Object.entries(doc.splines)) {
+  for (const [id, sp] of shownEntries(doc, 'splines')) {
     const P = splinePolyline(doc, sp, 16).map((q) => { const s = toScreen(q); return { x: s.x * dpr, y: s.y * dpr }; });
     if (o.ui && isSel('sp', id)) {
       c.setLineDash([]); c.strokeStyle = theme.sel + '88'; c.lineWidth = (sp.w + 6) * dpr; c.lineJoin = 'round';
@@ -685,7 +686,7 @@ export function render(c, W, H, v, o) {
     c.lineJoin = 'round';
     strokePolyline(c, P, dsh);
   }
-  for (const [id, e] of Object.entries(doc.ellipses)) {
+  for (const [id, e] of shownEntries(doc, 'ellipses')) {
     const P = ellipsePolyline(doc, e, 96).map((q) => { const s = toScreen(q); return { x: s.x * dpr, y: s.y * dpr }; });
     if (o.ui && isSel('el', id)) {
       c.setLineDash([]); c.strokeStyle = theme.sel + '88'; c.lineWidth = (e.w + 6) * dpr; c.lineJoin = 'round';
@@ -828,7 +829,7 @@ function measureRel(line, font) {
 }
 
 function drawTexts(c, o) {
-  for (const [id, t] of Object.entries(doc.texts)) {
+  for (const [id, t] of shownEntries(doc, 'texts')) {
     const P = doc.pts[t.pt];
     if (!P) continue;
     const pose = textPose(doc, t);
@@ -871,9 +872,9 @@ function drawDim(c, id, k, col) {
 }
 
 function drawConstraints(c, o) {
-  const used = {};
+  const used = {}, hp = Object.values(doc.layers || {}).some((l) => !l.on) ? layerHiddenPoints(doc) : null;
   for (const [id, k] of Object.entries(doc.cons)) {
-    if (k.hidden) continue;
+    if (k.hidden || (hp && consHidden(doc, k, hp))) continue;
     // al exportar (sin interfaz) las cotas van en el color del dibujo y no se pintan los simbolos de relaciones
     const col = !o.ui ? o.fg : isSel('co', id) ? theme.sel : theme.accent;
     if (k.t === 'DIST' || k.t === 'DISTPL' || k.t === 'ANG' || k.t === 'ANG4' || k.t === 'RAD') { if (o.dims) drawDim(c, id, k, col); continue; }
@@ -1243,7 +1244,7 @@ function pickLine(msg, kind = 'ln') {
   return new Promise((res) => { pickResolve = res; });
 }
 
-let lastCoTap = null;
+let lastCoTap = null, lastTap = null;
 
 // ---- herramienta Acotar: una sola herramienta que elige la cota segun lo seleccionado
 const DIMMABLE = ['pt', 'ln', 'ci', 'ar', 'el', 'sp', 'tx'];
@@ -1312,6 +1313,14 @@ function selectAt(p) {
     lastCoTap = dbl ? null : { id: h.id, t: now, x: p.x, y: p.y };
     sel = [h]; afterChange();
     if (dbl) editDimension(h.id);
+    return;
+  }
+  // doble toque sobre un elemento: ventana de propiedades
+  const now = performance.now(), dbl = lastTap && same(lastTap, h) && now - lastTap.t < 450 && dist(lastTap, p) < 24;
+  lastTap = dbl ? null : { k: h.k, id: h.id, t: now, x: p.x, y: p.y };
+  if (dbl && PROP_NAMES[h.k]) {
+    if (!sel.some((s) => same(s, h))) sel.push(h);
+    afterChange(); openProps(h);
     return;
   }
   const i = sel.findIndex((s) => same(s, h));
@@ -1439,7 +1448,7 @@ function toolUp(p, q) {
   const sDown = snapAt(q.down.x, q.down.y, { press: true }), sUp = snapAt(p.x, p.y, { press: !moved });
   if (tool === 'point') {
     if (sUp.type === 'pt') { toast('Ya hay un punto aquí'); return; }
-    pushUndo(); const id = pointFrom(sUp); doc.pts[id].auto = false; afterChange(); return;
+    pushUndo(); const id = pointFrom(sUp); doc.pts[id].auto = false; if (doc.curLayer && doc.layers?.[doc.curLayer]) doc.pts[id].layer = doc.curLayer; afterChange(); return;
   }
   if (tool === 'line' || tool === 'cline') {
     if (moved && !pending) {
@@ -1677,6 +1686,7 @@ function copySel() {
   const c = clipOf(doc, sel);
   if (!c) { toast('Selecciona lo que quieres copiar (puntos, líneas, círculos, arcos, splines, elipses o textos)'); return; }
   clip = c; updateEnabled();
+  opts.grp = opts.grp || {}; opts.grp.clip = 'paste'; refreshGroups(); persist(); // lo siguiente es pegar
   toast(`Copiado: ${c.items.length} elemento${c.items.length === 1 ? '' : 's'}. Pulsa Pegar y toca el punto donde va su centro`);
 }
 function pasteAt(s) {
@@ -1688,8 +1698,7 @@ function pasteAt(s) {
   sel = r.made;
   afterChange();
 }
-$('tCopy').onclick = copySel;
-$('tPaste').onclick = () => { if (!clip) { toast('Primero copia algo (selecciona y pulsa Copiar)'); return; } setTool('paste'); };
+function pasteTool() { if (!clip) { toast('Primero copia algo (selecciona y usa Copiar)'); return; } setTool('paste'); }
 
 // Extender: toca un segmento o arco cerca del extremo que se alarga; llega hasta el primer elemento que encuentre.
 function extendAt(p) {
@@ -2261,7 +2270,7 @@ function updateHatchFromPanel() {
 function createHatch() {
   const ids = sel.filter((s) => s.k === 'ln' || s.k === 'ci' || s.k === 'ar' || s.k === 'sp').map((s) => s.id);
   if (!ids.length) { toast('Selecciona las líneas, arcos o círculos que forman el contorno'); return; }
-  const h = { ids, kind: $('hKind').value, angle: Number($('hAngle').value) || 0, spacing: Math.max(2, Number($('hSpace').value) || 8), alpha: Number($('hAlpha').value), color: cur.color };
+  const h = { ids, kind: $('hKind').value, angle: Number($('hAngle').value) || 0, spacing: Math.max(2, Number($('hSpace').value) || 8), alpha: Number($('hAlpha').value), color: cur.color, ...(doc.curLayer && doc.layers?.[doc.curLayer] ? { layer: doc.curLayer } : {}) };
   if (!hatchLoops(doc, h).length) { toast('El contorno debe ser cerrado (líneas y arcos encadenados) o un círculo'); return; }
   pushUndo();
   const id = 'h' + (++doc.n);
@@ -2352,6 +2361,7 @@ function download(name, blob) {
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
 function contentBounds() {
+  const doc = visibleDoc(globalDoc());
   const xs = [], ys = [];
   for (const p of Object.values(doc.pts)) { xs.push(p.x); ys.push(p.y); }
   for (const c of Object.values(doc.circles)) { const p = doc.pts[c.c]; xs.push(p.x - c.r, p.x + c.r); ys.push(p.y - c.r, p.y + c.r); }
@@ -2373,7 +2383,7 @@ function fitView() {
 }
 function loadDoc(d) {
   if (!d || typeof d !== 'object' || !d.pts || !d.lines || !d.circles) throw new Error('Archivo no válido');
-  doc = { n: 0, cons: {}, hatches: {}, ltypes: {}, arcs: {}, ellipses: {}, texts: {}, splines: {}, traces: {}, cn: {}, ...d };
+  doc = { n: 0, cons: {}, hatches: {}, ltypes: {}, arcs: {}, ellipses: {}, texts: {}, splines: {}, traces: {}, cn: {}, layers: {}, curLayer: null, ...d };
   ensureNumbers(doc);
   undoStack = []; redoStack = []; sel = []; pending = null;
 }
@@ -2408,7 +2418,6 @@ function setTool(t) {
   if (pending) { if (tool === 'spline' && pending.ids?.length >= 2) finishSpline(false); else { pending = null; cleanup(doc); } }
   toolName = t; consMode = t in CONS_TOOLS; tool = BASE_TOOL[t] || t;
   document.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === t));
-  $('tPaste').classList.toggle('on', t === 'paste');
   closeFly(); syncGroups(t);
   if (t !== 'intersect') pending = null;
   if (t === 'dim') startDimTool();
@@ -2425,7 +2434,15 @@ const GROUPS = {
   arc: [['arcc', 'arc-c', 'Arco por centro y extremos (R)'], ['arc3', 'arc-3', 'Arco por 3 puntos (A)'], ['carcc', 'carcc', 'Arco constructivo por centro y extremos'], ['carc3', 'carc3', 'Arco constructivo por 3 puntos']],
   ellipse: [['ellipse', 'ellipse', 'Elipse: centro y dos ejes (O)'], ['earc', 'earc', 'Elipse parcial (arco elíptico)']],
   rect: [['rect', 'rect', 'Rectángulo por diagonal (B)'], ['rectc', 'rect-c', 'Rectángulo de centro']],
+  clip: [['copy', 'copy', 'Copiar la selección (Ctrl+C)'], ['paste', 'paste', 'Pegar: toca el punto donde va el centro de lo copiado (Ctrl+V)']],
 };
+// Cada elemento de un grupo es una herramienta, salvo Filtrar y Copiar, que son acciones.
+function runGroupItem(id) {
+  if (id === 'filter') openFilter();
+  else if (id === 'copy') copySel();
+  else if (id === 'paste') pasteTool();
+  else setTool(id);
+}
 const grpTool = (g) => { const c = (opts.grp || {})[g]; return GROUPS[g].some((x) => x[0] === c && x[0] !== 'filter') ? c : GROUPS[g][0][0]; };
 function refreshGroups() {
   const filtered = (opts.filtKinds || []).length > 0 || (opts.filtLt || []).length > 0;
@@ -2453,7 +2470,7 @@ function openFly(b) {
     const x = document.createElement('button');
     x.innerHTML = `<i>${iconSvg(icon)}</i><span>${label}</span>`;
     if (id === grpTool(g) && id !== 'filter') x.classList.add('on');
-    x.onclick = () => { closeFly(); if (id === 'filter') openFilter(); else setTool(id); };
+    x.onclick = () => { closeFly(); runGroupItem(id); };
     el.appendChild(x);
   }
   document.body.appendChild(el);
@@ -2471,11 +2488,256 @@ function wireGroups() {
       if (long) { long = false; return; }
       if (fly?.btn === b) { closeFly(); return; }
       if (e.target.closest('.chev') || b.classList.contains('on')) { openFly(b); return; }
-      setTool(grpTool(b.dataset.group));
+      runGroupItem(grpTool(b.dataset.group));
     });
   });
   document.addEventListener('pointerdown', (e) => { if (fly && !e.target.closest('#fly') && !e.target.closest('.grp')) closeFly(); }, true);
 }
+
+// ---------------------------------------------------------------- capas
+function layerBtn() {
+  const l = doc.layers?.[doc.curLayer], n = l ? l.name : 'ninguna';
+  $('tLayers').title = 'Capas · capa actual: ' + n;
+  $('tLayers').setAttribute('aria-label', 'Capas, capa actual: ' + n);
+}
+function setCurLayer(id) {
+  if (id && !doc.layers[id].on) { toast('Enciende la capa para dibujar en ella'); renderLayers(); return; }
+  doc.curLayer = id; layerBtn(); persist(); renderLayers();
+  toast(id ? `Capa actual: ${doc.layers[id].name}` : 'Sin capa actual: lo nuevo no pertenece a ninguna capa');
+}
+function toggleLayer(id) {
+  pushUndo();
+  const l = doc.layers[id];
+  l.on = !l.on;
+  if (!l.on) {
+    sel = [];
+    if (doc.curLayer === id) { doc.curLayer = null; toast(`«${l.name}» apagada: ya no es la capa actual, dibujas sin capa`); }
+  }
+  afterChange(); renderLayers();
+}
+function removeLayer(id) {
+  const l = doc.layers[id], n = layerCount(doc, id);
+  if (!confirm(`¿Borrar la capa «${l.name}»?` + (n ? (n === 1 ? ' Su único elemento quedará sin capa («ninguna»).' : ` Sus ${n} elementos quedarán sin capa («ninguna»).`) : ''))) return;
+  pushUndo(); deleteLayer(doc, id);
+  afterChange(); renderLayers();
+}
+function renderLayers() {
+  layerBtn();
+  const box = $('lyList');
+  box.textContent = '';
+  const rows = [{ id: null, none: true }, ...Object.entries(doc.layers || {}).map(([id, l]) => ({ id, name: l.name, on: l.on }))];
+  for (const r of rows) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:6px;align-items:center;margin:4px 0';
+    const rd = document.createElement('input');
+    rd.type = 'radio'; rd.name = 'lyCur'; rd.checked = (doc.curLayer || null) === r.id;
+    rd.style.cssText = 'width:22px;height:22px;min-height:22px;margin:0;flex:none';
+    rd.title = 'Capa actual'; rd.setAttribute('aria-label', 'Capa actual: ' + (r.none ? 'ninguna' : r.name));
+    rd.onchange = () => setCurLayer(r.id);
+    row.appendChild(rd);
+    if (r.none) {
+      const sp = document.createElement('span');
+      sp.style.cssText = 'flex:1;color:var(--muted)'; sp.textContent = 'Ninguna (sin capa)';
+      row.appendChild(sp);
+    } else {
+      const nm = document.createElement('input');
+      nm.type = 'text'; nm.value = r.name; nm.style.cssText = 'flex:1;min-width:0;min-height:40px;font-size:16px;' + (r.on ? '' : 'opacity:.5');
+      nm.onchange = () => {
+        const v = nm.value.trim();
+        if (!v) { nm.value = doc.layers[r.id].name; return; }
+        pushUndo(); doc.layers[r.id].name = v; afterChange();
+      };
+      row.appendChild(nm);
+      const ct = document.createElement('small');
+      ct.textContent = String(layerCount(doc, r.id)); ct.title = 'Elementos en la capa';
+      row.appendChild(ct);
+      const eb = document.createElement('button');
+      eb.type = 'button'; eb.innerHTML = iconSvg(r.on ? 'eye' : 'eye-off');
+      eb.title = r.on ? 'Apagar la capa (ocultarla)' : 'Encender la capa'; eb.setAttribute('aria-label', eb.title); eb.setAttribute('aria-pressed', String(r.on));
+      eb.onclick = () => toggleLayer(r.id);
+      const db = document.createElement('button');
+      db.type = 'button'; db.innerHTML = iconSvg('trash'); db.title = 'Borrar la capa'; db.setAttribute('aria-label', 'Borrar la capa ' + r.name);
+      db.onclick = () => removeLayer(r.id);
+      row.append(eb, db);
+    }
+    box.appendChild(row);
+  }
+}
+$('lyAdd').onclick = () => {
+  let name = $('lyName').value.trim();
+  if (!name) {
+    const names = new Set(Object.values(doc.layers || {}).map((l) => l.name));
+    let i = names.size + 1;
+    while (names.has('Capa ' + i)) i++;
+    name = 'Capa ' + i;
+  }
+  pushUndo(); addLayer(doc, name);
+  $('lyName').value = '';
+  afterChange(); renderLayers();
+  toast(`Capa «${name}» creada y activa`);
+};
+$('dlgY').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || e.target.tagName !== 'INPUT') return;
+  e.preventDefault();
+  if (e.target.id === 'lyName') $('lyAdd').click(); else e.target.blur();
+});
+$('tLayers').onclick = () => { renderLayers(); $('dlgY').showModal(); };
+
+// ---------------------------------------------------------------- ventana de propiedades (doble toque)
+const PROP_NAMES = { pt: 'Punto', ln: 'Línea', ci: 'Círculo', ar: 'Arco', el: 'Elipse', sp: 'Spline', tx: 'Texto', ha: 'Relleno' };
+const PROP_COLL = { pt: 'pts', ln: 'lines', ci: 'circles', ar: 'arcs', el: 'ellipses', sp: 'splines', tx: 'texts', ha: 'hatches' };
+let propT = null;
+const propObj = () => (propT ? doc[PROP_COLL[propT.k]]?.[propT.id] : null);
+function pointOwned(id) {
+  return Object.values(doc.lines).some((l) => l.a === id || l.b === id) || Object.values(doc.circles).some((c) => c.c === id)
+    || Object.values(doc.arcs).some((a) => a.c === id || a.a === id || a.b === id)
+    || Object.values(doc.ellipses || {}).some((e) => [e.c, e.a, e.b, e.p1, e.p2].includes(id))
+    || Object.values(doc.splines || {}).some((sp) => sp.pts.includes(id)) || Object.values(doc.texts || {}).some((t) => t.pt === id);
+}
+function propRow(label, ...els) {
+  const r = document.createElement('div');
+  r.className = 'row';
+  const l = document.createElement('label');
+  l.textContent = label;
+  r.append(l, ...els);
+  return r;
+}
+// Cambia una propiedad del elemento abierto (con deshacer) y refresca el dibujo.
+function propSet(fn) {
+  const o = propObj();
+  if (!o) return;
+  pushUndo(); fn(o); afterChange();
+}
+function propSelect(options, value, onChange) {
+  const sl = document.createElement('select');
+  for (const [v, t] of options) { const o = document.createElement('option'); o.value = v; o.textContent = t; sl.appendChild(o); }
+  sl.value = value;
+  sl.onchange = () => onChange(sl.value);
+  return sl;
+}
+function propNumber(value, onChange, attrs = {}) {
+  const i = document.createElement('input');
+  i.type = 'number'; i.step = 'any'; i.value = value === '' || value === undefined ? '' : String(Math.round(value * 1000) / 1000);
+  Object.assign(i, attrs);
+  i.onchange = () => onChange(i.value, i);
+  return i;
+}
+function propColors(o, field) {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;align-items:center;flex:2 1 180px';
+  const mark = () => wrap.querySelectorAll('button').forEach((b) => { b.style.outline = b.dataset.val === (o[field] || 'auto') ? '3px solid var(--accent)' : ''; });
+  for (const [val, name] of PALETTE) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.title = name; b.dataset.val = val;
+    b.style.cssText = 'width:30px;height:30px;min-width:30px;min-height:30px;padding:0;border-radius:6px;background:' + (val === 'auto' ? 'linear-gradient(135deg,#fff 50%,#111 50%)' : val);
+    b.onclick = () => { propSet((x) => { x[field] = val; }); mark(); };
+    wrap.appendChild(b);
+  }
+  const cp = document.createElement('input');
+  cp.type = 'color'; cp.value = /^#[0-9a-f]{6}$/i.test(o[field] || '') ? o[field] : '#2563eb';
+  cp.style.cssText = 'width:44px;min-height:30px;height:30px;padding:0;flex:none';
+  cp.onchange = () => { propSet((x) => { x[field] = cp.value; }); mark(); };
+  wrap.appendChild(cp);
+  mark();
+  return wrap;
+}
+function renderPropCons() {
+  const box = $('prCons');
+  box.textContent = '';
+  if (!propT) return;
+  const list = Object.entries(doc.cons).filter(([, k]) => (k.refs || []).includes(propT.id));
+  $('prConsH').style.display = list.length ? '' : 'none';
+  for (const [kid, k] of list) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const lb = document.createElement('span');
+    lb.style.flex = '1 1 160px'; lb.textContent = conLabel(doc, k);
+    const del = document.createElement('button');
+    del.type = 'button'; del.textContent = 'Quitar'; del.title = 'Quitar esta restricción';
+    del.onclick = () => { pushUndo(); delete doc.cons[kid]; afterChange(); renderPropCons(); };
+    row.append(lb, del);
+    box.appendChild(row);
+  }
+}
+function openProps(h) {
+  propT = { k: h.k, id: h.id };
+  const o = propObj();
+  if (!o) { propT = null; return; }
+  $('prTitle').textContent = `${PROP_NAMES[h.k]}${h.k === 'el' && isPartial(o) ? ' (arco elíptico)' : ''} ${h.id}`;
+  const body = $('prBody');
+  body.textContent = '';
+  const k = h.k;
+  // capa (un punto que forma parte de un elemento sigue la capa de ese elemento)
+  if (k !== 'pt' || !pointOwned(h.id)) {
+    const lopts = [['', 'Ninguna'], ...Object.entries(doc.layers || {}).map(([id, l]) => [id, l.name + (l.on ? '' : ' (apagada)')])];
+    body.appendChild(propRow('Capa', propSelect(lopts, o.layer && doc.layers?.[o.layer] ? o.layer : '', (v) => {
+      propSet((x) => { if (v) x.layer = v; else delete x.layer; });
+      if (isHidden(doc, propObj())) { $('dlgR').close(); sel = []; afterChange(); toast('El elemento quedó en una capa apagada: se ocultó'); }
+    })));
+  }
+  if (['ln', 'ci', 'ar', 'el', 'sp'].includes(k)) {
+    body.appendChild(propRow('Color', propColors(o, 'color')));
+    body.appendChild(propRow('Tipo de línea', propSelect(Object.entries(allLtypes(doc)).map(([v, t]) => [v, t.label]), o.ltype in allLtypes(doc) ? o.ltype : 'continua', (v) => {
+      propSet((x) => { x.ltype = v; if (v === 'constructiva') { x.color = CLINE_STYLE.color; x.w = CLINE_STYLE.w; } });
+    })));
+    body.appendChild(propRow('Grosor', propSelect([['1', 'Fino'], ['2', 'Normal'], ['3.5', 'Grueso']], String([1, 2, 3.5].includes(o.w) ? o.w : 2), (v) => propSet((x) => { x.w = Number(v); }))));
+    const rg = document.createElement('input');
+    rg.type = 'range'; rg.min = '0.2'; rg.max = '3'; rg.step = '0.1'; rg.value = String(o.ls ?? 1);
+    rg.onchange = () => propSet((x) => { x.ls = Number(rg.value); });
+    body.appendChild(propRow('Escala del patrón', rg));
+  }
+  if (k === 'tx') {
+    body.appendChild(propRow('Color', propColors(o, 'color')));
+    const ta = document.createElement('textarea');
+    ta.rows = 2; ta.value = o.text; ta.style.cssText = 'flex:1 1 100%;min-height:56px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--btn);color:var(--fg);font:inherit';
+    ta.onchange = () => { if (ta.value.trim()) propSet((x) => { x.text = ta.value; }); else ta.value = propObj().text; };
+    body.appendChild(propRow('Texto', ta));
+    body.appendChild(propRow('Fuente', propSelect(FONTS.map((f) => [f[0], f[1]]), o.font || '', (v) => propSet((x) => { x.font = v; }))));
+    body.appendChild(propRow('Altura', propNumber(o.h, (v, i) => { const n = Number(v); if (n > 0) propSet((x) => { x.h = n; }); else i.value = String(propObj().h); }, { min: '0.01' })));
+    body.appendChild(propRow(o.ref ? 'Desfase °' : 'Ángulo °', propNumber(o.ang, (v) => propSet((x) => { x.ang = Number(v) || 0; }))));
+  }
+  if (k === 'pt') {
+    const fill = () => { xi.value = String(Math.round(propObj().x * 1000) / 1000); yi.value = String(Math.round(propObj().y * 1000) / 1000); };
+    const move = () => {
+      const x = Number(xi.value), y = Number(yi.value);
+      if (xi.value === '' || yi.value === '' || !Number.isFinite(x) || !Number.isFinite(y)) { fill(); return; }
+      pushUndo();
+      const p = doc.pts[h.id];
+      p.x = x; p.y = y;
+      const r = solve(doc, p.fixed ? [] : [{ id: h.id, x, y }]);
+      if (!r.ok) { rollback(); toast('Esa posición contradice las restricciones'); fill(); draw(); return; }
+      afterChange(); fill();
+    };
+    const xi = propNumber(o.x, move), yi = propNumber(o.y, move);
+    body.appendChild(propRow('X', xi));
+    body.appendChild(propRow('Y', yi));
+    const cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.checked = !!o.fixed; cb.style.cssText = 'width:22px;height:22px;min-height:22px;margin:0;flex:none';
+    cb.onchange = () => propSet((x) => { x.fixed = cb.checked; });
+    body.appendChild(propRow('Fijo (no se mueve al arrastrar)', cb));
+  }
+  if (k === 'ha') {
+    const sm = document.createElement('small');
+    sm.textContent = 'El patrón del relleno se cambia en el panel (sección Relleno) con el relleno seleccionado.';
+    body.appendChild(sm);
+  }
+  // restricciones que se pueden asignar a este elemento solo
+  const add = $('prAdd');
+  add.textContent = '';
+  const ADD = { ln: [['H', 'Horizontal'], ['V', 'Vertical'], ['DIM', 'Longitud'], ['FIX', 'Fijar / soltar']], ci: [['RAD', 'Diámetro'], ['FIX', 'Fijar / soltar']], ar: [['RAD', 'Radio']] }[k] || [];
+  const has = (t) => Object.values(doc.cons).some((c) => c.t === t && c.refs.length === 1 && c.refs[0] === h.id);
+  for (const [t, name] of ADD) {
+    if ((t === 'H' || t === 'V') && has(t)) continue; // ya la tiene: se quita desde la lista
+    const b = document.createElement('button');
+    b.type = 'button'; b.textContent = name; b.title = 'Agregar: ' + name;
+    b.onclick = () => { $('dlgR').close(); sel = [{ k, id: h.id }]; afterChange(); applyCon(t); };
+    add.appendChild(b);
+  }
+  renderPropCons();
+  if (!$('dlgR').open) $('dlgR').showModal();
+}
+$('dlgR').addEventListener('close', () => { if (!$('dlgR').open) propT = null; }); // el evento llega tarde: no pisar una ventana reabierta
+$('dlgR').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.tagName === 'INPUT') { e.preventDefault(); e.target.blur(); } });
 
 // ---- filtro de seleccion ----
 const FKINDS = [['pt', 'Puntos'], ['ln', 'Líneas'], ['ci', 'Círculos'], ['ar', 'Arcos'], ['el', 'Elipses'], ['sp', 'Splines'], ['tx', 'Textos'], ['ha', 'Rellenos'], ['co', 'Cotas y restricciones']];
@@ -2874,7 +3136,7 @@ window.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
   else if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); }
   else if ((e.ctrlKey || e.metaKey) && k === 'c') { e.preventDefault(); copySel(); }
-  else if ((e.ctrlKey || e.metaKey) && k === 'v') { e.preventDefault(); $('tPaste').click(); }
+  else if ((e.ctrlKey || e.metaKey) && k === 'v') { e.preventDefault(); pasteTool(); }
   else if (k === 'escape') { if (pickResolve) { const r = pickResolve; pickResolve = null; r(null); } else if (pending) { if (tool === 'spline' && pending.ids?.length >= 2) finishSpline(false); else cancelPending(); } else { sel = []; afterChange(); } }
   else if (k === 'delete' || k === 'backspace') $('del').click();
   else if (!e.ctrlKey && !e.metaKey) { const m = { v: 'select', p: 'point', l: 'line', c: 'circle', i: 'intersect', d: 'dim', a: 'arc3', r: 'arcc', t: 'text', s: 'spline', x: 'trim', e: 'extend', o: 'ellipse', b: 'rect', g: 'polygon', k: 'cline', m: 'mline' }[k]; if (m) setTool(m); }

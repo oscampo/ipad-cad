@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { newDoc, addPoint, addLine, addCircle, addArc, addCon, addText, addSpline, deleteItems, hatchLoops, arcOf, cleanup, splinePolyline, conTag, ensureNumbers, addEllipse, ellipseOf, ellipsePolyline, ellipsePoint, ellipseParam, ellipseRange, isPartial } from '../src/model.js';
+import { addLayer, deleteLayer, layerCount, isHidden, shownEntries, layerHiddenPoints, consHidden, visibleDoc, newDoc, addPoint, addLine, addCircle, addArc, addCon, addText, addSpline, deleteItems, hatchLoops, arcOf, cleanup, splinePolyline, conTag, ensureNumbers, addEllipse, ellipseOf, ellipsePolyline, ellipsePoint, ellipseParam, ellipseRange, isPartial } from '../src/model.js';
 import { startTrace, recordTraces, traceToSpline, offsetPolyline, firstLap } from '../src/curves.js';
 import { layoutDim, dragDim, dimValue, dimText, angSector, angTrue } from '../src/dims.js';
 import { textFrame, textCorners, textHit, textPose, rawAngle } from '../src/text.js';
@@ -1862,6 +1862,64 @@ t('coincidente entre dos puntos lejanos con arcos tangentes: se resuelve acercan
   e.pts.p1.fixed = e.pts.p9.fixed = true;
   const bad = addConsSolved(e, [{ t: 'COI', refs: ['p1', 'p2'] }, { t: 'COI', refs: ['p9', 'p3'] }]);
   assert.equal(bad.ok, false); assert.equal(Object.keys(e.cons).length, n, 'sin restricciones nuevas');
+});
+
+// ---- capas
+const mkLayerDoc = () => {
+  const d = newDoc();
+  const l0 = addLine(d, addPoint(d, 0, 0, true), addPoint(d, 10, 0, true), { color: 'auto', ltype: 'continua', w: 2, ls: 1 }); // sin capa
+  const A = addLayer(d, 'A'); // queda como capa actual
+  const l1 = addLine(d, addPoint(d, 0, 5, true), addPoint(d, 10, 5, true), { color: 'auto', ltype: 'continua', w: 2, ls: 1 });
+  const c1 = addCircle(d, addPoint(d, 20, 20, false), 3, { color: 'auto', ltype: 'continua', w: 2, ls: 1 });
+  const tx = addText(d, addPoint(d, 1, 1, true), 'hola');
+  return { d, l0, l1, c1, tx, A };
+};
+t('capas: por defecto no hay ninguna y lo nuevo no lleva capa', () => {
+  const d = newDoc();
+  assert.deepEqual(d.layers, {}); assert.equal(d.curLayer, null);
+  const l = addLine(d, addPoint(d, 0, 0, true), addPoint(d, 1, 0, true), { color: 'auto', ltype: 'continua', w: 2, ls: 1 });
+  assert.equal(d.lines[l].layer, undefined);
+});
+t('capas: al crearla queda activa y lo que se dibuja va a ella', () => {
+  const { d, l0, l1, c1, tx, A } = mkLayerDoc();
+  assert.equal(d.curLayer, A);
+  assert.equal(d.lines[l0].layer, undefined); assert.equal(d.lines[l1].layer, A); assert.equal(d.circles[c1].layer, A); assert.equal(d.texts[tx].layer, A);
+  assert.equal(layerCount(d, A), 3);
+  const B = addLayer(d, 'B'); assert.equal(d.curLayer, B);
+});
+t('capas: apagar oculta elementos, puntos, restricciones y exportacion', () => {
+  const { d, l0, l1, A } = mkLayerDoc();
+  addCon(d, { t: 'H', refs: [l1] }); addCon(d, { t: 'H', refs: [l0] });
+  d.layers[A].on = false;
+  assert.ok(isHidden(d, d.lines[l1])); assert.ok(!isHidden(d, d.lines[l0]));
+  assert.deepEqual(shownEntries(d, 'lines').map(([id]) => id), [l0]);
+  const hp = layerHiddenPoints(d);
+  assert.ok(hp.has(d.lines[l1].a) && hp.has(d.lines[l1].b) && !hp.has(d.lines[l0].a));
+  const cons = Object.values(d.cons);
+  assert.ok(consHidden(d, cons[0], hp)); assert.ok(!consHidden(d, cons[1], hp));
+  const v = visibleDoc(d);
+  assert.deepEqual(Object.keys(v.lines), [l0]); assert.equal(Object.keys(v.circles).length, 0); assert.equal(Object.keys(v.texts).length, 0);
+  assert.equal(Object.keys(v.cons).length, 1);
+  const svg = exportSVG(d);
+  assert.ok(svg && !svg.includes('<circle'), 'el circulo oculto no se exporta');
+  d.layers[A].on = true;
+  assert.equal(visibleDoc(d), d, 'sin capas apagadas es el mismo documento');
+});
+t('capas: borrar una capa deja sus elementos en ninguna', () => {
+  const { d, l1, c1, tx, A } = mkLayerDoc();
+  assert.equal(deleteLayer(d, A), 3);
+  assert.equal(d.layers[A], undefined); assert.equal(d.curLayer, null);
+  assert.equal(d.lines[l1].layer, undefined); assert.equal(d.circles[c1].layer, undefined); assert.equal(d.texts[tx].layer, undefined);
+  assert.equal(deleteLayer(d, A), 0);
+});
+t('capas: recortar y dividir conservan la capa de la linea', () => {
+  const d = newDoc(), A = addLayer(d, 'A');
+  const a = addPoint(d, 0, 0, true), b = addPoint(d, 10, 0, true), m = addPoint(d, 5, 0, false);
+  const l = addLine(d, a, b, { color: 'auto', ltype: 'continua', w: 2, ls: 1 });
+  d.curLayer = null;
+  const r = splitElement(d, l, [m]);
+  assert.ok(r.ok);
+  for (const id of r.pieces) assert.equal(d.lines[id].layer, A);
 });
 
 console.log(`\n${passed} pruebas pasaron`);

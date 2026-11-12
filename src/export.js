@@ -1,4 +1,4 @@
-import { hatchLoops, allLtypes, arcOf, arcSamples, splinePolyline, ellipsePolyline } from './model.js';
+import { visibleDoc, hatchLoops, allLtypes, arcOf, arcSamples, splinePolyline, ellipsePolyline } from './model.js';
 import { dashFromPattern, norm, splineBezier } from './geom.js';
 import { textFrame, textCorners, textPose, LINE_SPACING, fontCss } from './text.js';
 import { layoutDim } from './dims.js';
@@ -38,6 +38,7 @@ const labelBox = (l) => {
 
 // Extension (px segun view) que ocupan las cotas y los textos, para no recortarlos al exportar.
 export function extraExtents(doc, view, vis = {}) {
+  doc = visibleDoc(doc);
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   const add = (x, y) => { minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); };
   for (const L of vis.dims === false ? [] : dimLayouts(doc, view)) {
@@ -78,6 +79,7 @@ function dimSvg(L, color) {
 // unidades de papel (3 por unidad de patron), como en pantalla. Las cotas se dibujan con el
 // mismo layout que en pantalla (flechas y etiquetas de 12 px).
 export function exportSVG(doc, ltScale = 1, vis = {}) {
+  doc = visibleDoc(doc);
   const b = bounds(doc);
   if (!b) return null;
   const K = 6, pad = 20;
@@ -171,6 +173,7 @@ export function exportSVG(doc, ltScale = 1, vis = {}) {
 // viewScale: px por unidad del dibujo con que se ven las cotas (tamano de flechas y texto).
 // Los tipos de linea y colores se pierden.
 export function exportDXF(doc, viewScale = 5, vis = {}) {
+  doc = visibleDoc(doc);
   if (!bounds(doc)) return null;
   const rows = [];
   const g = (code, v) => rows.push(String(code), String(v));
@@ -264,6 +267,7 @@ export function laserClasses(doc) {
 // o: { unit (mm por unidad), stroke (mm), cutColor, markColor, modes: { claseKey: 'cut'|'mark'|'skip' },
 //      onlyContinuous (compatibilidad: sin modes, corta solo el trazo continuo) }
 export function exportSVGLaser(doc, o = {}) {
+  doc = visibleDoc(doc);
   const unit = Number(o.unit) > 0 ? Number(o.unit) : 1;
   const stroke = Number(o.stroke) > 0 ? Number(o.stroke) : 0.1;
   const cutColor = o.cutColor || o.color || '#ff0000', markColor = o.markColor || '#0000ff';

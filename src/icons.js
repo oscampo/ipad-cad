@@ -7,6 +7,9 @@ import fit from 'lucide-static/icons/maximize.svg?raw';
 import grid from 'lucide-static/icons/grid-3x3.svg?raw';
 import magnet from 'lucide-static/icons/magnet.svg?raw';
 import eye from 'lucide-static/icons/eye.svg?raw';
+import eyeOff from 'lucide-static/icons/eye-off.svg?raw';
+import layers from 'lucide-static/icons/layers.svg?raw';
+import settings2 from 'lucide-static/icons/sliders-horizontal.svg?raw';
 import hand from 'lucide-static/icons/hand.svg?raw';
 import save from 'lucide-static/icons/save.svg?raw';
 import folderOpen from 'lucide-static/icons/folder-open.svg?raw';
@@ -95,7 +98,7 @@ const custom = {
   labels: S('<path d="M4 7h16M4 12h10M4 17h16"/>'),
 };
 
-const generic = { undo, redo, trash, fit, grid, magnet, eye, hand, save, 'folder-open': folderOpen, 'file-plus': filePlus, image, download, lock, equal, select: pointer, circle, ruler, 'pencil-ruler': pencilRuler, menu, unlock, 'list-tree': listTree, help, copy, paste };
+const generic = { undo, redo, trash, fit, grid, magnet, eye, 'eye-off': eyeOff, layers, props: settings2, hand, save, 'folder-open': folderOpen, 'file-plus': filePlus, image, download, lock, equal, select: pointer, circle, ruler, 'pencil-ruler': pencilRuler, menu, unlock, 'list-tree': listTree, help, copy, paste };
 
 function clean(raw) {
   // quita comentarios de licencia y atributos de tamano; el CSS fija el tamano

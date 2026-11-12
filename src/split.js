@@ -3,7 +3,7 @@
 import { addLine, addArc, addCon, addPoint, cleanup } from './model.js';
 import { closestOnSeg, dist, arcSweepOf, angleFrom, norm, TAU } from './geom.js';
 
-const styleOf = (o) => ({ color: o.color, ltype: o.ltype, w: o.w, ls: o.ls });
+const styleOf = (o) => ({ color: o.color, ltype: o.ltype, w: o.w, ls: o.ls, ...(o.layer ? { layer: o.layer } : {}) });
 const replaceRef = (refs, from, to) => refs.map((r) => (r === from ? to : r));
 
 function retargetHatches(doc, elId, pieces) {

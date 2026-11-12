@@ -1,6 +1,6 @@
 // Recortar, extender y matriz lineal. Sin DOM (se prueba en Node). Mutan doc; quien llama hace undo/solve
 // y revierte si el solver falla.
-import { addPoint, addLine, addArc, addCircle, addEllipse, addSpline, addText, addCon, nextId, arcOf, splinePolyline, deleteItems, arcSamples, ellipsePolyline, ellipseOf, ellipseRange, ellipsePoint, ellipseParam, isPartial, cleanup } from './model.js';
+import { shownEntries, addPoint, addLine, addArc, addCircle, addEllipse, addSpline, addText, addCon, nextId, arcOf, splinePolyline, deleteItems, arcSamples, ellipsePolyline, ellipseOf, ellipseRange, ellipsePoint, ellipseParam, isPartial, cleanup } from './model.js';
 import { dist, closestOnSeg, lineLine, lineCircle, circleCircle, polylineLine, polylineCircle, polylinePolyline, closestOnPolyline, inSweep, angleFrom, norm, TAU } from './geom.js';
 import { splitElement } from './split.js';
 import { rawAngle } from './text.js';
@@ -9,11 +9,11 @@ const TOL = 1e-3; // tolerancia en unidades del dibujo
 
 // ---------------------------------------------------------------- intersecciones
 function* others(doc, selfId) {
-  for (const id of Object.keys(doc.lines)) if (id !== selfId) yield { k: 'ln', id };
-  for (const id of Object.keys(doc.circles)) if (id !== selfId) yield { k: 'ci', id };
-  for (const id of Object.keys(doc.arcs)) if (id !== selfId) yield { k: 'ar', id };
-  for (const id of Object.keys(doc.splines || {})) if (id !== selfId) yield { k: 'sp', id };
-  for (const id of Object.keys(doc.ellipses || {})) if (id !== selfId) yield { k: 'el', id };
+  for (const [id] of shownEntries(doc, 'lines')) if (id !== selfId) yield { k: 'ln', id };
+  for (const [id] of shownEntries(doc, 'circles')) if (id !== selfId) yield { k: 'ci', id };
+  for (const [id] of shownEntries(doc, 'arcs')) if (id !== selfId) yield { k: 'ar', id };
+  for (const [id] of shownEntries(doc, 'splines')) if (id !== selfId) yield { k: 'sp', id };
+  for (const [id] of shownEntries(doc, 'ellipses')) if (id !== selfId) yield { k: 'el', id };
 }
 
 // ---- elipses y splines como poligonales (lo que realmente ocupan)
@@ -443,7 +443,7 @@ function makeCopy(doc, col, tf, { mirror = false, reuse = null, axisAng = 0, hvA
   for (const id of Tx) {
     const t = S.texts[id];
     const ang0 = t.ref && !M[t.ref] ? rawAngle(S, t) : t.ang; // alineado con una linea que no viene en la copia: conserva su orientacion
-    M[id] = addText(doc, M[t.pt], t.text, { h: t.h, ang: mirror ? 2 * axisAng - ang0 : ang0 + rotDeg, anchor: t.anchor, color: t.color, readable: t.readable, font: t.font });
+    M[id] = addText(doc, M[t.pt], t.text, { h: t.h, ang: mirror ? 2 * axisAng - ang0 : ang0 + rotDeg, anchor: t.anchor, color: t.color, readable: t.readable, font: t.font, layer: t.layer });
     if (t.ref && M[t.ref]) doc.texts[M[id]].ref = M[t.ref];
     made.push({ k: 'tx', id: M[id] });
   }

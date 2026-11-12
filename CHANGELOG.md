@@ -1,5 +1,11 @@
 # Historial de cambios
 
+## v1.4.0 (2026-11-12)
+
+- **Ventana de propiedades**: con doble toque sobre un punto, línea, círculo, arco, elipse, spline, texto o relleno se abre una ventana para cambiar su capa, color, tipo de línea, grosor, escala del patrón (texto: contenido, fuente, altura y ángulo; punto: X, Y y fijo), ver y quitar sus restricciones y cotas, y agregar las que se aplican a ese elemento solo. En una cota, el doble toque sigue editando su valor.
+- **Capas**: botón Capas entre Pegar y Punto. Crear, renombrar, encender, apagar y borrar; por defecto no hay ninguna. Una capa nueva queda como capa actual y lo que se dibuja va en ella. Al apagarla se ocultan sus elementos, puntos, restricciones y cotas (no se seleccionan, no cortan al recortar o extender y no se exportan). Al borrarla, sus elementos pasan a «ninguna». Se guardan en el archivo .json.
+- **Copiar y Pegar** en un solo botón desplegable. Tras copiar, el botón pasa a mostrar Pegar.
+
 ## v1.3.1 (2026-11-11)
 
 - **Ayuda**: el atajo D de Acotar y la lista de límites conocidos quedan al día (ya se recortan y extienden elipses y splines).
