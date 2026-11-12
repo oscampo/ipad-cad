@@ -24,7 +24,7 @@ import { parseValue, isPlainNumber } from './expr.js';
 import { HELP_HTML } from './help.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from './lock.js';
 
-const VERSION = '1.2.0';
+const VERSION = '1.2.1';
 const STORE = 'ipad-cad-v1';
 const $ = (id) => document.getElementById(id);
 const cv = $('cv');
@@ -115,7 +115,7 @@ function updateEnabled() {
     CONC: crv >= 2 && !ln && !n.sp,
     TAN: (ln === 1 && crv === 1 && !n.sp && !n.el) || (crv === 2 && !ln && !n.sp && !n.el) || (n.sp === 1 && ln + crv === 1 && !n.el) || (n.el === 1 && ln + crv === 1 && !n.sp) || (n.el === 2 && !ln && !crv && !n.sp),
     FIX: pt + ln + crv > 0,
-    DIM: (pt === 2 && !ln) || (ln === 1 && !pt) || (pt === 1 && ln === 1),
+    DIM: (pt === 2 && !ln) || (ln === 1 && !pt) || (pt === 1 && ln === 1) || (ln === 2 && !pt && !crv && !n.sp && !n.el),
     ANG: ln === 2,
     RAD: crv >= 1,
   };
@@ -1243,6 +1243,7 @@ function pickLine(msg, kind = 'ln') {
   return new Promise((res) => { pickResolve = res; });
 }
 
+let lastCoTap = null;
 function selectAt(p) {
   if (pickResolve) {
     const r = pickResolve;
@@ -1254,7 +1255,13 @@ function selectAt(p) {
   }
   const h = hitTest(p.x, p.y);
   if (!h) { sel = []; afterChange(); return; }
-  if (h.k === 'co') { sel = [h]; afterChange(); editDimension(h.id); return; }
+  if (h.k === 'co') { // un toque selecciona la cota (para borrarla, por ejemplo); doble toque la edita
+    const now = performance.now(), dbl = lastCoTap && lastCoTap.id === h.id && now - lastCoTap.t < 450 && dist(lastCoTap, p) < 24;
+    lastCoTap = dbl ? null : { id: h.id, t: now, x: p.x, y: p.y };
+    sel = [h]; afterChange();
+    if (dbl) editDimension(h.id);
+    return;
+  }
   const i = sel.findIndex((s) => same(s, h));
   if (i >= 0) sel.splice(i, 1); else sel.push(h);
   afterChange();
@@ -1914,16 +1921,34 @@ async function applyCon(kind) {
       return;
     }
     case 'DIM': {
-      let refs, t, v;
+      let refs, t, v, parallelPair = null;
       if (pts.length === 2 && !lns.length) { refs = pts; t = 'DIST'; v = dist(doc.pts[pts[0]], doc.pts[pts[1]]); }
       else if (lns.length === 1 && !pts.length) { refs = lineEnds(lns[0]); t = 'DIST'; v = dist(doc.pts[refs[0]], doc.pts[refs[1]]); }
       else if (pts.length === 1 && lns.length === 1) {
         const [a, b] = lineEnds(lns[0]).map((i) => doc.pts[i]), p = doc.pts[pts[0]];
         refs = [pts[0], lns[0]]; t = 'DISTPL';
         v = Math.abs((b.x - a.x) * (a.y - p.y) - (a.x - p.x) * (b.y - a.y)) / (dist(a, b) || 1);
-      } else return bad('Selecciona 2 puntos, 1 línea, o 1 punto + 1 línea');
+      } else if (lns.length === 2 && !pts.length && !crv.length && !sps.length && !els.length) {
+        // distancia entre dos lineas paralelas: la de un extremo de la 2.a a la recta de la 1.a
+        const [a, b] = lineEnds(lns[0]).map((i) => doc.pts[i]), [c, d] = lineEnds(lns[1]).map((i) => doc.pts[i]);
+        const L1 = dist(a, b), L2 = dist(c, d);
+        if (L1 < 1e-9 || L2 < 1e-9) return bad('Hay una línea sin longitud');
+        const sin = Math.abs((b.x - a.x) * (d.y - c.y) - (b.y - a.y) * (d.x - c.x)) / (L1 * L2);
+        if (sin > 0.0175) return bad('Las dos líneas no son paralelas (más de 1° de diferencia). Hazlas paralelas con la restricción Paralela');
+        const tOf = (q) => ((q.x - a.x) * (b.x - a.x) + (q.y - a.y) * (b.y - a.y)) / (L1 * L1);
+        const [e0, e1] = lineEnds(lns[1]), pick = Math.abs(tOf(c) - 0.5) <= Math.abs(tOf(d) - 0.5) ? e0 : e1, p = doc.pts[pick];
+        refs = [pick, lns[0]]; t = 'DISTPL';
+        v = Math.abs((b.x - a.x) * (a.y - p.y) - (a.x - p.x) * (b.y - a.y)) / L1;
+        parallelPair = [lns[0], lns[1]];
+      } else return bad('Selecciona 2 puntos, 1 línea, 1 punto + 1 línea, o 2 líneas paralelas');
+      if (v < 1e-9) return bad('Las dos líneas están sobre la misma recta: no hay distancia que acotar');
       const val = await askNumber('Distancia', Math.round(v * 1000) / 1000);
       if (val === null || val <= 0) return;
+      // para que sigan siendo paralelas (si ya no lo estaban por restriccion), se agrega la restriccion Paralela
+      if (parallelPair && !dlgRef && !Object.values(doc.cons).some((k) => k.t === 'PAR' && parallelPair.every((x) => k.refs.includes(x)))) {
+        list.push({ t: 'PAR', refs: parallelPair });
+        toast('Se agregó también la restricción Paralela entre las dos líneas');
+      }
       list.push({ t, refs, v: val, ...(dlgExpr ? { expr: dlgExpr } : {}), ...(dlgRef ? { ref: true } : {}) });
       break;
     }

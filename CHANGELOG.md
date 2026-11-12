@@ -1,5 +1,10 @@
 # Historial de cambios
 
+## v1.2.1 (2026-11-11)
+
+- **Cota de distancia entre 2 líneas paralelas** (se seleccionan las dos y se pulsa Distancia): acota la distancia perpendicular y agrega la restricción Paralela si no la tenían (salvo en cotas de referencia). Si no son paralelas (más de 1°) avisa.
+- **Cotas**: un toque las selecciona (para borrarlas, por ejemplo), arrastrar las reposiciona y el doble toque edita su valor. Antes un toque abría directamente la edición.
+
 ## v1.2.0 (2026-11-11)
 
 - **Enganche al punto medio de las líneas** al dibujar (marca M): el punto nuevo queda con una restricción oculta de punto medio. No se ofrece en líneas muy cortas en pantalla.

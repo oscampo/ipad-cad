@@ -71,13 +71,13 @@ export const HELP_HTML = `
 
 <details><summary>Cotas (dimensiones)</summary>
 <ul>
-<li><b>Distancia</b>: 2 puntos, 1 línea, o punto + línea.</li>
+<li><b>Distancia</b>: 2 puntos, 1 línea, punto + línea, o <b>2 líneas paralelas</b> (distancia perpendicular entre ellas; si no tenían la restricción Paralela, se agrega, salvo que la cota sea de referencia; se pide que estén paralelas con menos de 1° de diferencia).</li>
 <li><b>Ángulo</b>: 2 líneas. La cota siempre es positiva (0° a 180°). El lugar donde la coloques decide el sector que se acota (por ejemplo 20° o 160°). Arrastra la cota para reubicarla.</li>
 <li><b>Radio / ⌀</b>: arco (R) o círculo (diámetro con el símbolo ⌀). Siguen la norma ANSI: con el texto dentro, la línea de cota va por el interior; con el texto fuera, una llamada radial con la flecha tocando desde afuera.</li>
 <li><b>Fórmulas</b>: en cualquier cota se puede escribir una expresión: <code>3π/4</code>, <code>2π*5</code>, <code>10*sin(30)</code>, <code>10+1/3</code>, <code>√2</code>, <code>2^3</code>.</li>
 <li><b>Grados o radianes</b>: en cotas angulares hay un selector de unidad. En grados, sin/cos/tan usan grados (radianes si el argumento lleva π); en radianes, todo va en radianes.</li>
 <li><b>Solo lectura (referencia)</b>: mide y muestra el valor en cursiva sin restringir la geometría.</li>
-<li>Toca una cota para editar su valor.</li>
+<li>Toca una cota una vez para <b>seleccionarla</b> (por ejemplo para borrarla), <b>arrástrala</b> para reposicionarla, y <b>toca dos veces</b> para editar su valor.</li>
 </ul></details>
 
 <details><summary>Dividir, copiar y repetir</summary>
@@ -125,6 +125,7 @@ export const HELP_HTML = `
 <p>V seleccionar, P punto, L línea, K línea constructiva, C círculo, B rectángulo, G polígono, O elipse, Ctrl/Cmd+C copiar, Ctrl/Cmd+V pegar, R arco por centro, A arco por 3 puntos, S spline, T texto, I intersección, X recortar, E extender. Ctrl/Cmd+Z deshacer, Ctrl/Cmd+Y (o Ctrl/Cmd+Mayús+Z) rehacer, Supr o Retroceso borra, Esc cancela o termina.</p></details>
 
 <details><summary>Historial de versiones</summary>
+<p><b>v1.2.1</b>: cota de distancia entre 2 líneas paralelas; un toque selecciona una cota y el doble toque la edita.</p>
 <p><b>v1.2.0</b>: la selección inteligente al dibujar engancha también al punto medio de las líneas.</p>
 <p><b>v1.1.1</b>: la restricción coincidente entre puntos lejanos se resuelve por pasos cuando el solver no llega de golpe.</p>
 <p><b>v1.1.0</b>: elipse parcial (arco elíptico), recorte de elipses y splines, extensión hasta elipses y splines, y restricciones coincidente y tangente con elipses.</p>
