@@ -27,7 +27,7 @@
   --bg: #111827; --fg: #f3f4f6; --muted: #9ca3af; --grid: #1f2937; --grid2: #374151;
   --panel: #1f2937; --line: #374151; --accent: #3b82f6; --btn: #111827; --sel: #fbbf24;
 }
-* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; touch-action: manipulation; } /* sin zoom por doble toque en ninguna zona (el lienzo lo reduce a none) */
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 14px/1.3 -apple-system, system-ui, "Segoe UI", sans-serif; overflow: hidden; overscroll-behavior: none; }
 body { display: grid; grid-template-rows: auto 1fr auto; height: 100dvh; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 #bar { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 8px; background: var(--panel); border-bottom: 1px solid var(--line); align-items: center; }

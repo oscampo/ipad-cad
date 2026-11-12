@@ -1206,6 +1206,8 @@ function cancelPending() {
 }
 
 cv.addEventListener('contextmenu', (e) => e.preventDefault());
+// Safari ignora user-scalable=no: el pellizco sobre la pagina (fuera del lienzo, que usa sus propios eventos) la agranda; se bloquea
+for (const ev of ['gesturestart', 'gesturechange']) document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
 cv.addEventListener('pointerdown', (e) => {
   cv.setPointerCapture(e.pointerId);
   const p = pos(e);
