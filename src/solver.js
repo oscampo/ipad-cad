@@ -311,7 +311,7 @@ function build(doc, pos, extra) {
   const P = (id) => pos?.pts?.[id] || doc.pts[id];
   for (const [id, p] of Object.entries(doc.pts)) {
     const q = P(id);
-    out.push({ id, type: 'point', x: q.x, y: q.y, fixed: !!p.fixed });
+    out.push({ id, type: 'point', x: q.x, y: q.y, fixed: !!p.fixed || isMark(doc, id) }); // la marca de referencia no la mueve el solver
   }
   for (const [id, l] of Object.entries(doc.lines)) out.push({ id, type: 'line', p1_id: l.a, p2_id: l.b });
   for (const [id, c] of Object.entries(doc.circles)) {
@@ -348,6 +348,23 @@ function runSolve(prims) {
   return { status, conflicts, pts, circles, arcs, params };
 }
 
+// Marca de referencia: un punto con p.mark = id de una linea. El solver la trata como fija mientras resuelve; despues de cada
+// resolucion se proyecta sobre su linea (que ya esta en su nueva posicion y orientacion). Asi la marca se desliza solo a lo
+// largo de la linea, arrastrada por ella, y recuerda lo recorrido: la distancia de la marca a un punto de la linea acumula
+// el camino, algo que ninguna cota que dependa solo de la posicion actual puede dar (rieles, ruedas, planimetros).
+export const isMark = (doc, id) => { const p = doc.pts[id]; return !!(p && p.mark && doc.lines[p.mark] && doc.lines[p.mark].a !== id && doc.lines[p.mark].b !== id); };
+export function projectMarks(doc) {
+  for (const [id, p] of Object.entries(doc.pts)) {
+    if (!isMark(doc, id)) continue;
+    const l = doc.lines[p.mark], a = doc.pts[l.a], b = doc.pts[l.b];
+    if (!a || !b) continue;
+    const L2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
+    if (L2 < 1e-18) continue;
+    const s = ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / L2;
+    p.x = a.x + s * (b.x - a.x); p.y = a.y + s * (b.y - a.y);
+  }
+}
+
 function commit(doc, res) {
   for (const [id, q] of Object.entries(res.pts)) {
     if (doc.pts[id] && !id.startsWith('__')) { doc.pts[id].x = q.x; doc.pts[id].y = q.y; }
@@ -364,7 +381,7 @@ function commit(doc, res) {
 export function solve(doc, targets = []) {
   if (!g) return { ok: true, conflicts: [] };
   let pos = null;
-  const live = targets.filter((t) => doc.pts[t.id] && !doc.pts[t.id].fixed);
+  const live = targets.filter((t) => doc.pts[t.id] && !doc.pts[t.id].fixed && !isMark(doc, t.id));
   if (live.length) {
     const extra = [];
     live.forEach((t, i) => {
@@ -378,7 +395,7 @@ export function solve(doc, targets = []) {
   }
   const res = solveLoop(doc, pos, null);
   const ok = (res.status === 0 || res.status === 1) && res.conflicts.length === 0 && (!hasSpl(doc) || splineResidual(doc, res) < 1e-3);
-  if (ok) commit(doc, res);
+  if (ok) { commit(doc, res); projectMarks(doc); }
   return { ok, conflicts: res.conflicts, status: res.status };
 }
 
@@ -387,7 +404,7 @@ export function solve(doc, targets = []) {
 // como estaba. Sirve para arrastres rapidos de mecanismos con cotas que leen medidas.
 export function solveSteps(doc, targets = []) {
   const r = solve(doc, targets);
-  const live = targets.filter((t) => doc.pts[t.id] && !doc.pts[t.id].fixed);
+  const live = targets.filter((t) => doc.pts[t.id] && !doc.pts[t.id].fixed && !isMark(doc, t.id));
   if (r.ok || !live.length) return r;
   const before = JSON.stringify(doc), from = live.map((t) => ({ x: doc.pts[t.id].x, y: doc.pts[t.id].y }));
   const restore = () => { const d = JSON.parse(before); for (const k of Object.keys(doc)) delete doc[k]; Object.assign(doc, d); };

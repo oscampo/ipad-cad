@@ -427,12 +427,13 @@ function makeCopy(doc, col, tf, { mirror = false, reuse = null, axisAng = 0, hvA
     if (vecMids.has(pid)) continue;
     if (reuse && reuse(pid)) { M[pid] = pid; continue; }
     const o = S.pts[pid], q = tf(o), np = addPoint(doc, q.x, q.y, !!o.auto);
-    const { x, y, ...flags } = o;
+    const { x, y, mark, ...flags } = o; // la marca de referencia se reasigna a la copia de su linea mas abajo
     Object.assign(doc.pts[np], flags);
     if (linked) doc.pts[np].fixed = false; // la copia sigue al original
     M[pid] = np;
   }
   for (const id of L) { const { a, b, vec, ...st } = S.lines[id]; M[id] = addLine(doc, M[a], M[b], st); made.push({ k: 'ln', id: M[id] }); if (vec) vecLines.push([M[id], vec, S.texts?.[vec.t]]); }
+  for (const pid of P) { const mk = S.pts[pid].mark; if (mk && M[mk] && M[pid] && M[pid] !== pid && doc.pts[M[pid]]) doc.pts[M[pid]].mark = M[mk]; }
   for (const id of Ci) { const { c, r, ...st } = S.circles[id]; M[id] = addCircle(doc, M[c], r, st); made.push({ k: 'ci', id: M[id] }); }
   for (const id of Ar) {
     const { c, a, b, r, ...st } = S.arcs[id];

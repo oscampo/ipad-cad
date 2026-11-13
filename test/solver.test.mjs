@@ -15,7 +15,7 @@ import { trimAt, extendEnd, cutsOf, curveCuts, linearArray, mirrorCopy, circular
 import { CLINE_STYLE, circleThrough3, addRectangle, polygonVertices, addPolygon, arcIsClockwise, constructionArcDash } from '../src/shapes.js';
 import { FONTS, fontCss } from '../src/text.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from '../src/lock.js';
-import { initSolver, solve, solveSteps, reparamSplines, addConsSolved } from '../src/solver.js';
+import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark } from '../src/solver.js';
 import { readFileSync } from 'node:fs';
 import { bsplineThrough, bsplinePoint } from '../src/bspline.js';
 import { boxSelect } from '../src/boxsel.js';
@@ -2253,6 +2253,70 @@ t('vector: la flecha sale en el SVG y en el DXF, y el texto con su valor', () =>
   const dxf = exportDXF(d, 5, { dims: false, texts: true });
   assert.ok(dxf.split(/\r?\n/).filter((v) => v === 'LINE').length >= 3, 'la linea y dos trazos de la cabeza');
   assert.match(dxf, /\r?\n1\r?\n10\r?\n/);
+});
+
+t('marca de referencia: el solver no la mueve, se desliza por su linea y se limpia sola', () => {
+  const d = newDoc();
+  const A = addPoint(d, 0, 0, false), B = addPoint(d, 10, 0, false), M = addPoint(d, 4, 3, false);
+  const L = addLine(d, A, B, {}); d.pts[A].fixed = true; d.pts[M].mark = L;
+  assert.ok(isMark(d, M));
+  addCon(d, { t: 'DIST', refs: [A, B], v: 10 });
+  assert.ok(solve(d, []).ok);
+  near(d.pts[M].x, 4); near(d.pts[M].y, 0);                                       // se proyecta sobre la linea
+  assert.ok(solve(d, [{ id: B, x: 6, y: 8 }]).ok);                                 // al girar la linea la marca la sigue (proyeccion de (4,0))
+  near(d.pts[B].x, 6, 1e-3); near(d.pts[B].y, 8, 1e-3);
+  near(d.pts[M].x, 1.44, 1e-3); near(d.pts[M].y, 1.92, 1e-3);
+  assert.ok(solve(d, [{ id: M, x: 50, y: 50 }]).ok);                              // arrastrarla no la saca de la linea
+  near(d.pts[M].x, 1.44, 1e-3); near(d.pts[M].y, 1.92, 1e-3);
+  d.lines[L].a = M;
+  assert.ok(!isMark(d, M), 'si es extremo de su linea no es marca');
+  d.lines[L].a = A;
+  deleteItems(d, [{ k: 'ln', id: L }]); cleanup(d);
+  assert.equal(d.pts[M].mark, undefined, 'sin su linea deja de ser marca');
+});
+t('marca de referencia: las copias reasignan la marca a la copia de su linea', () => {
+  const d = newDoc();
+  const a = addPoint(d, 0, 0, false), b = addPoint(d, 10, 0, false), m = addPoint(d, 3, 0, false);
+  const l = addLine(d, a, b, {}); d.pts[m].mark = l;
+  const r = linearArray(d, [{ k: 'ln', id: l }, { k: 'pt', id: m }], [{ u: { x: 0, y: 1 }, s: 5, n: 1 }]);
+  assert.ok(r.ok);
+  const marks = Object.entries(d.pts).filter(([, p]) => p.mark);
+  assert.equal(marks.length, 2);
+  assert.notEqual(marks[0][1].mark, marks[1][1].mark, 'cada copia con su propia linea');
+  for (const [id] of marks) assert.ok(isMark(d, id));
+});
+t('planimetro: una marca en el riel acumula el recorrido y la lectura da el area del cuadrado', () => {
+  const d = newDoc();
+  const O = addPoint(d, 0, 0, false), E = addPoint(d, 60, 80, false), P = addPoint(d, 60, -20, false), Q = addPoint(d, -240, -20, false), M = addPoint(d, 160, -20, false);
+  d.pts[O].fixed = true;
+  addLine(d, O, E, {});
+  const l2 = addLine(d, E, P, {}), rail = addLine(d, P, Q, {});
+  d.pts[M].mark = rail;
+  addCon(d, { t: 'DIST', refs: [O, E], v: 100 });
+  addCon(d, { t: 'DIST', refs: [E, P], v: 100 });
+  addCon(d, { t: 'DIST', refs: [P, Q], v: 300 });
+  addCon(d, { t: 'PERP', refs: [l2, rail] });
+  const kD = addCon(d, { t: 'DIST', refs: [M, P], v: 100, ref: true });
+  assert.ok(solve(d, []).ok);
+  const tvec = () => { const ux = d.pts[P].x - d.pts[E].x, uy = d.pts[P].y - d.pts[E].y, L = Math.hypot(ux, uy); return { x: uy / L, y: -ux / L }; };
+  const D0 = dimValue(d, d.cons[kD]);
+  let W = 0, area = 0, prev = { ...d.pts[P] }, tp = tvec(), cur = { ...prev };
+  for (const [dx, dy] of [[30, 0], [0, 30], [-30, 0], [0, -30]]) {
+    const a = { ...cur }, N = 60;
+    for (let i = 1; i <= N; i++) {
+      assert.ok(solveSteps(d, [{ id: P, x: a.x + (dx * i) / N, y: a.y + (dy * i) / N }]).ok);
+      const now = { ...d.pts[P] }, tn = tvec();
+      W += ((now.x - prev.x) * (tn.x + tp.x)) / 2 + ((now.y - prev.y) * (tn.y + tp.y)) / 2;
+      area += (prev.x * now.y - now.x * prev.y) / 2;
+      prev = now; tp = tn;
+    }
+    cur = { ...d.pts[P] };
+  }
+  const dD = dimValue(d, d.cons[kD]) - D0;
+  assert.ok(Math.abs(W) > 7, 'el brazo da una integral no nula: ' + W);
+  assert.ok(Math.abs(dD - W) < 0.06 * Math.abs(W), `la marca lee lo que debe (${dD.toFixed(3)} vs ${W.toFixed(3)})`);
+  assert.ok(Math.abs(Math.abs(area) - 900) < 45, 'el recorrido es el cuadrado de 30: ' + area);
+  assert.ok(Math.abs(Math.abs(100 * dD) - Math.abs(area)) < 0.08 * Math.abs(area), `area leida ${Math.abs(100 * dD).toFixed(0)} vs real ${Math.abs(area).toFixed(0)}`);
 });
 
 console.log(`\n${passed} pruebas pasaron`);

@@ -1,5 +1,5 @@
 import wasmUrl from '@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url';
-import { initSolver, solve, solveSteps, reparamSplines, addConsSolved } from './solver.js';
+import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark } from './solver.js';
 import {
   newDoc, addLayer, deleteLayer, layerCount, shownEntries, shownValues, layerHiddenPoints, consHidden, visibleDoc, isHidden, addPoint, addLine, addCircle, addArc, addText, addSpline, splinePolyline, addCon, cleanup, deleteItems, clone, hatchLoops,
   allLtypes, PALETTE, arcOf, conTag, ensureNumbers, addEllipse, ellipsePolyline, ellipseOf, ellipsePoint, ellipseParam, ellipseRange, isPartial,
@@ -761,7 +761,10 @@ export function render(c, W, H, v, o) {
       const s = toScreen(p);
       const selp = isSel('pt', id) || sel.some((x) => x.k === 'tx' && doc.texts[x.id]?.pt === id);
       c.fillStyle = selp ? theme.sel : p.color && p.color !== 'auto' ? p.color : o.fg;
-      if (p.fixed) c.fillRect((s.x - 4) * dpr, (s.y - 4) * dpr, 8 * dpr, 8 * dpr);
+      if (isMark(doc, id)) { // marca de referencia: rombo
+        const r = (selp ? 6 : 4.5) * dpr;
+        c.beginPath(); c.moveTo(s.x * dpr, s.y * dpr - r); c.lineTo(s.x * dpr + r, s.y * dpr); c.lineTo(s.x * dpr, s.y * dpr + r); c.lineTo(s.x * dpr - r, s.y * dpr); c.closePath(); c.fill();
+      } else if (p.fixed) c.fillRect((s.x - 4) * dpr, (s.y - 4) * dpr, 8 * dpr, 8 * dpr);
       else { c.beginPath(); c.arc(s.x * dpr, s.y * dpr, (selp ? 5 : 3.2) * dpr, 0, 7); c.fill(); }
     }
     drawPreview(c);
@@ -2413,7 +2416,7 @@ function updateStatus(p) {
   let txt = (toolName === 'earc' && (pending?.g ? 'Elipse parcial: arrastra sobre la elipse punteada desde donde empieza el tramo hasta donde termina (o toca el inicio y luego el fin). Esc cancela.' : HINTS.earc)) || HINTS[tool];
   if (sel.length === 1) {
     const s = sel[0];
-    if (s.k === 'pt') { const q = doc.pts[s.id]; txt = `Punto (${fmt(q.x)}, ${fmt(q.y)})${q.fixed ? ' fijo' : ''}`; }
+    if (s.k === 'pt') { const q = doc.pts[s.id]; txt = `Punto (${fmt(q.x)}, ${fmt(q.y)})${q.fixed ? ' fijo' : ''}${isMark(doc, s.id) ? ' · marca de referencia en ' + q.mark : ''}`; }
     else if (s.k === 'ln') { const [a, b] = lineEnds(s.id).map((i) => doc.pts[i]); txt = `${doc.lines[s.id].vec ? 'Vector' : 'Línea'}: ${doc.lines[s.id].vec ? 'magnitud' : 'longitud'} ${fmt(dist(a, b))}, ángulo ${fmt((Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI)}°, ${ltLabel(doc.lines[s.id])}`; }
     else if (s.k === 'ci') txt = `Círculo: radio ${fmt(doc.circles[s.id].r)}, ${ltLabel(doc.circles[s.id])}`;
     else if (s.k === 'tx') { const t = doc.texts[s.id]; txt = `Texto: “${t.text.split('\n')[0].slice(0, 24)}”, ${fmt(t.ang)}°, insercion ${t.anchor}${t.ref ? ', alineado con una línea' : ''}`; }
@@ -2883,6 +2886,15 @@ function openProps(h) {
     cb.type = 'checkbox'; cb.checked = !!o.fixed; cb.style.cssText = 'width:22px;height:22px;min-height:22px;margin:0;flex:none';
     cb.onchange = () => propSet((x) => { x.fixed = cb.checked; });
     body.appendChild(propRow('Fijo (no se mueve al arrastrar)', cb));
+    // Marca de referencia: se desliza solo a lo largo de una linea y recuerda lo recorrido
+    const lines = Object.entries(doc.lines).filter(([, l]) => l.a !== h.id && l.b !== h.id);
+    const opts = [['', 'Ninguna'], ...lines.map(([id, l]) => [id, `${l.vec ? 'Vector' : 'Línea'} ${id} · L = ${fmt(dist(doc.pts[l.a], doc.pts[l.b]))}`])];
+    body.appendChild(propRow('Marca de referencia en', propSelect(opts, isMark(doc, h.id) ? o.mark : '', (v) => propSet((x) => {
+      if (v) { x.mark = v; x.fixed = false; projectMarks(doc); } else delete x.mark;
+    }))));
+    const sm = document.createElement('small');
+    sm.textContent = 'Una marca de referencia no la mueve el solver: tras cada cambio se proyecta sobre la línea elegida. Así se desliza a lo largo de ella, arrastrada por la línea, y recuerda lo recorrido (un riel, una rueda, un planímetro). Se dibuja como un rombo.';
+    body.appendChild(sm);
   }
   if (k === 'ha') {
     const sm = document.createElement('small');
