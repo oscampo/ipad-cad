@@ -2,6 +2,7 @@
 
 ## Sin publicar
 
+- **Copias vinculadas y simetrías en dibujos grandes**: un punto que solo es copia de otro (matriz circular: EQD + ANG4, o una simetría) ya no es incógnita del solver: queda fijo mientras se resuelve y se calcula de su fuente al terminar. El resultado es el mismo, pero un engranaje con 17 dientes copiados (unos 1650 restricciones) pasaba de agotar la memoria del solver (WASM de memoria fija, tope de unos 220 puntos copiados) a resolverse en menos de 0,4 s. Arrastrar una copia sigue arrastrando su fuente. Un punto copia con otra restricción propia, o que pertenece a una curva con relaciones (PONS, tangencias, cotas de un arco), sigue siendo incógnita.
 - **Recortar spline**: ya no multiplica los puntos de control. El trozo conserva los puntos originales que le quedan y agrega solo unos pocos junto al corte (un spline de 16 puntos pasa de 64 a unos 13), con desviación de forma menor a 0,05 % del tamaño.
 
 ## v1.6.0 (2026-11-13)

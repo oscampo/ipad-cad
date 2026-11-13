@@ -1833,6 +1833,39 @@ t('recortar spline: no multiplica los puntos de control (conserva los que quedan
   assert.ok(dev < 0.1, 'desviacion ' + dev);
 });
 
+t('copias vinculadas: cientos de puntos copiados no agotan el solver y siguen a su fuente (giro y reflejo)', () => {
+  const d = newDoc();
+  const C = addPoint(d, 0, 0, false); d.pts[C].fixed = true;
+  const A = addPoint(d, 10, 0, false);
+  addCon(d, { t: 'DIST', refs: [C, A], v: 10, hidden: true });
+  const copies = [];
+  for (let k = 1; k <= 320; k++) { // 320 copias: con 2 restricciones e incognitas cada una superaba la memoria del solver
+    const a = (k * 1.1 * Math.PI) / 180, q = addPoint(d, 10 * Math.cos(a), 10 * Math.sin(a), false);
+    addCon(d, { t: 'EQD', refs: [C, A, C, q], hidden: true }); addCon(d, { t: 'ANG4', refs: [C, A, C, q], v: k * 1.1, hidden: true });
+    copies.push(q);
+  }
+  const ax = addLine(d, addPoint(d, 0, -5, false), addPoint(d, 0, 20, false), {}); d.pts[d.lines[ax].a].fixed = true; d.pts[d.lines[ax].b].fixed = true;
+  const M = addPoint(d, -10, 0, false); // reflejo de A respecto al eje vertical
+  addCon(d, { t: 'SYM', refs: [A, M, ax], hidden: true });
+  assert.ok(solve(d, []).ok);
+  const r = solveSteps(d, [{ id: A, x: 0, y: 10 }]); // se arrastra la fuente: A pasa a 90°
+  assert.ok(r.ok);
+  near(d.pts[A].x, 0, 1e-4); near(d.pts[A].y, 10, 1e-4);
+  copies.forEach((q, i) => { const a = Math.PI / 2 + ((i + 1) * 1.1 * Math.PI) / 180; near(d.pts[q].x, 10 * Math.cos(a), 1e-4); near(d.pts[q].y, 10 * Math.sin(a), 1e-4); });
+  near(d.pts[M].x, 0, 1e-4); near(d.pts[M].y, 10, 1e-4, 'el reflejo de un punto sobre el eje es el mismo punto');
+  // arrastrar una copia arrastra la fuente (como hacian las restricciones)
+  const q = copies[9], rot = (10 * 1.1 * Math.PI) / 180;
+  assert.ok(solveSteps(d, [{ id: q, x: 10 * Math.cos(rot + 0.2), y: 10 * Math.sin(rot + 0.2) }]).ok);
+  near(Math.atan2(d.pts[A].y, d.pts[A].x), 0.2, 1e-3);
+  // una copia con otra restriccion propia no es seguidora: la respeta
+  const E = addPoint(d, 3, 0, false), F2 = addPoint(d, 3, 1, false);
+  addCon(d, { t: 'DIST', refs: [C, E], v: 3, hidden: true });
+  addCon(d, { t: 'EQD', refs: [C, E, C, F2], hidden: true }); addCon(d, { t: 'ANG4', refs: [C, E, C, F2], v: 30, hidden: true });
+  addCon(d, { t: 'DIST', refs: [F2, A], v: 8, hidden: true });
+  assert.ok(solve(d, []).ok);
+  near(Math.hypot(d.pts[F2].x - d.pts[A].x, d.pts[F2].y - d.pts[A].y), 8, 1e-4, 'F2 sigue sujeta a su cota');
+});
+
 t('extender hasta elipses y splines: la linea y el arco llegan a la curva y quedan sobre ella', () => {
   const d = newDoc(); const { e } = mkEll(d);
   const l = addLine(d, addPoint(d, -30, 2), addPoint(d, -20, 2), ST);

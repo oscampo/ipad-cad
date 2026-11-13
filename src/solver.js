@@ -289,12 +289,12 @@ function splineResidual(doc, res) {
 
 // Una pasada del solver; con splines se repite si un punto de contacto se salio del dominio de la curva
 // (el solver habia extrapolado) para resolver de nuevo desde el parametro corregido.
-function solveLoop(doc, pos, extra) {
+function solveLoop(doc, pos, extra, F) {
   const spl = hasSpl(doc);
   const memo = {};
   let cur = pos, res = null;
   for (let i = 0; i < (spl ? 4 : 1); i++) {
-    res = runSolve(build(doc, cur, [...(spl ? nativeSplinePrims(doc, cur, memo) : []), ...(extra || [])]));
+    res = runSolve(build(doc, cur, [...(spl ? nativeSplinePrims(doc, cur, memo) : []), ...(extra || [])], F));
     res.ts = memo;
     if (!spl) break;
     const redo = fixParams(doc, res, memo);
@@ -306,12 +306,107 @@ function solveLoop(doc, pos, extra) {
   return res;
 }
 
-function build(doc, pos, extra) {
+// ---------------------------------------------------------------- seguidores
+// Una copia vinculada (matriz circular) o un reflejo (simetria) agrega 2 restricciones y 2 incognitas por punto. En un
+// dibujo con cientos de puntos copiados eso agota la memoria del solver (WASM de memoria fija: ~220 puntos con 2
+// restricciones cada uno). Un punto que SOLO existe para ser copia de otro no necesita ser incognita: queda fijo durante
+// la resolucion y, una vez resuelto el resto, se calcula de su fuente. Resultado identico, sin cargar al solver.
+//  - giro: EQD + ANG4 con refs [c, s, c, t]  ->  t es s girado v grados alrededor de c
+//  - reflejo: SYM [s, t, recta]               ->  t es s reflejado en la recta
+// t es seguidor solo si ninguna otra restriccion lo menciona ni menciona una curva que lo use como punto (si no, el
+// solver necesita su posicion real mientras resuelve).
+function findFollowers(doc) {
+  const cons = Object.entries(doc.cons).filter(([, k]) => !k.ref);
+  const defs = new Map(), byKey = new Map();
+  for (const [id, k] of cons) {
+    if (k.t === 'SYM' && kindOf(doc, k.refs[0]) === 'p' && kindOf(doc, k.refs[1]) === 'p' && kindOf(doc, k.refs[2]) === 'l') {
+      if (!defs.has(k.refs[1])) defs.set(k.refs[1], { kind: 'sym', s: k.refs[0], l: k.refs[2], ids: [id] });
+      else defs.get(k.refs[1]).bad = true;
+    } else if ((k.t === 'EQD' || k.t === 'ANG4') && k.refs.length === 4 && k.refs[0] === k.refs[2]) {
+      const key = k.refs.join('|'), e = byKey.get(key) || {};
+      e[k.t] = [id, k]; byKey.set(key, e);
+    }
+  }
+  for (const e of byKey.values()) {
+    if (!e.EQD || !e.ANG4) continue;
+    const [c, s, , t] = e.ANG4[1].refs;
+    if (!defs.has(t)) defs.set(t, { kind: 'rot', c, s, v: e.ANG4[1].v, ids: [e.EQD[0], e.ANG4[0]] });
+    else defs.get(t).bad = true;
+  }
+  if (!defs.size) return null;
+  const defCons = new Set();
+  for (const d of defs.values()) for (const i of d.ids) defCons.add(i);
+  const mention = new Set(), blocked = new Set();
+  const block = (r) => {
+    if (r in doc.lines) { blocked.add(doc.lines[r].a); blocked.add(doc.lines[r].b); }
+    else if (r in doc.circles) blocked.add(doc.circles[r].c);
+    else if (r in doc.arcs) { const a = doc.arcs[r]; blocked.add(a.c); blocked.add(a.a); blocked.add(a.b); }
+    else if (doc.splines?.[r]) for (const q of doc.splines[r].pts) blocked.add(q);
+    else if (doc.ellipses?.[r]) { const e = doc.ellipses[r]; for (const q of [e.c, e.a, e.b, e.p1, e.p2]) if (q) blocked.add(q); }
+  };
+  for (const [id, k] of cons) {
+    if (defCons.has(id)) continue;
+    for (const r of k.refs) { mention.add(r); block(r); }
+  }
+  const cand = new Map();
+  for (const [t, d] of defs) {
+    const p = doc.pts[t];
+    if (!d.bad && p && !p.fixed && !p.mark && !mention.has(t) && !blocked.has(t)) cand.set(t, d);
+  }
+  // orden de calculo: una fuente que tambien es seguidora se resuelve antes; los ciclos vuelven a ser incognitas
+  const order = [], done = new Set();
+  const inputs = (d) => (d.kind === 'rot' ? [d.c, d.s] : [d.s, doc.lines[d.l].a, doc.lines[d.l].b]);
+  for (let progress = true; progress;) {
+    progress = false;
+    for (const [t, d] of cand) {
+      if (done.has(t) || !inputs(d).every((q) => !cand.has(q) || done.has(q))) continue;
+      done.add(t); order.push([t, d]); progress = true;
+    }
+  }
+  if (!order.length) return null;
+  const skip = new Set();
+  for (const [, d] of order) for (const i of d.ids) skip.add(i);
+  return { order, skip, map: new Map(order) };
+}
+// Calcula las posiciones de los seguidores a partir de P (id -> punto) y las escribe en out (id -> {x, y}).
+function applyFollowers(doc, F, P, out) {
+  const get = (id) => out[id] || P(id);
+  for (const [t, d] of F.order) {
+    if (d.kind === 'rot') {
+      const c = get(d.c), s = get(d.s), a = ((d.v || 0) * Math.PI) / 180, dx = s.x - c.x, dy = s.y - c.y;
+      out[t] = { x: c.x + dx * Math.cos(a) - dy * Math.sin(a), y: c.y + dx * Math.sin(a) + dy * Math.cos(a) };
+    } else {
+      const s = get(d.s), l = doc.lines[d.l], A = get(l.a), B = get(l.b), ux = B.x - A.x, uy = B.y - A.y, L2 = ux * ux + uy * uy || 1;
+      const f = ((s.x - A.x) * ux + (s.y - A.y) * uy) / L2, fx = A.x + f * ux, fy = A.y + f * uy;
+      out[t] = { x: 2 * fx - s.x, y: 2 * fy - s.y };
+    }
+  }
+}
+// Un punto que el usuario arrastra y es seguidor: se arrastra su fuente (lo mismo que hacian las restricciones).
+function retarget(doc, F, targets) {
+  if (!F || !targets.some((t) => F.map.has(t.id))) return targets;
+  return targets.map((t) => {
+    for (let i = 0; i < 50 && F.map.has(t.id); i++) {
+      const d = F.map.get(t.id);
+      if (d.kind === 'rot') {
+        const c = doc.pts[d.c], a = (-(d.v || 0) * Math.PI) / 180, dx = t.x - c.x, dy = t.y - c.y;
+        t = { id: d.s, x: c.x + dx * Math.cos(a) - dy * Math.sin(a), y: c.y + dx * Math.sin(a) + dy * Math.cos(a) };
+      } else {
+        const l = doc.lines[d.l], A = doc.pts[l.a], B = doc.pts[l.b], ux = B.x - A.x, uy = B.y - A.y, L2 = ux * ux + uy * uy || 1;
+        const f = ((t.x - A.x) * ux + (t.y - A.y) * uy) / L2, fx = A.x + f * ux, fy = A.y + f * uy;
+        t = { id: d.s, x: 2 * fx - t.x, y: 2 * fy - t.y };
+      }
+    }
+    return t;
+  });
+}
+
+function build(doc, pos, extra, F) {
   const out = [];
   const P = (id) => pos?.pts?.[id] || doc.pts[id];
   for (const [id, p] of Object.entries(doc.pts)) {
     const q = P(id);
-    out.push({ id, type: 'point', x: q.x, y: q.y, fixed: !!p.fixed || isMark(doc, id) }); // la marca de referencia no la mueve el solver
+    out.push({ id, type: 'point', x: q.x, y: q.y, fixed: !!p.fixed || isMark(doc, id) || !!F?.map.has(id) }); // la marca de referencia no la mueve el solver; el seguidor se calcula despues
   }
   for (const [id, l] of Object.entries(doc.lines)) out.push({ id, type: 'line', p1_id: l.a, p2_id: l.b });
   for (const [id, c] of Object.entries(doc.circles)) {
@@ -324,7 +419,7 @@ function build(doc, pos, extra) {
   }
   const ell = nativeEllipses(doc);
   if (ell.size) out.push(...nativeEllipsePrims(doc, pos, ell));
-  for (const [id, k] of Object.entries(doc.cons)) out.push(...conPrims(doc, id, k));
+  for (const [id, k] of Object.entries(doc.cons)) if (!F?.skip.has(id)) out.push(...conPrims(doc, id, k));
   if (extra) out.push(...extra);
   return out;
 }
@@ -418,6 +513,8 @@ function commit(doc, res) {
 // resultado sea siempre factible. No modifica doc si falla.
 export function solve(doc, targets = []) {
   if (!g) return { ok: true, conflicts: [] };
+  const F = findFollowers(doc);
+  targets = retarget(doc, F, targets);
   let pos = null;
   const live = targets.filter((t) => doc.pts[t.id] && !doc.pts[t.id].fixed && !isMark(doc, t.id));
   if (live.length) {
@@ -426,12 +523,13 @@ export function solve(doc, targets = []) {
       extra.push({ id: `__t${i}`, type: 'point', x: t.x, y: t.y, fixed: true });
       extra.push({ id: `__d${i}`, type: 'p2p_distance', p1_id: t.id, p2_id: `__t${i}`, distance: 0, scale: 0.02 });
     });
-    const r1 = solveLoop(doc, ellipseFlipStart(doc, live), extra);
+    const r1 = solveLoop(doc, ellipseFlipStart(doc, live), extra, F);
     const u = {};
     for (const [name, v] of Object.entries(r1.params || {})) if (name.startsWith('__u:')) u[name.slice(4)] = v;
     pos = { pts: r1.pts, circles: r1.circles, arcs: r1.arcs, u };
   }
-  const res = solveLoop(doc, pos, null);
+  const res = solveLoop(doc, pos, null, F);
+  if (F) applyFollowers(doc, F, (id) => doc.pts[id], res.pts);
   const ok = (res.status === 0 || res.status === 1) && res.conflicts.length === 0 && (!hasSpl(doc) || splineResidual(doc, res) < 1e-3);
   if (ok) { commit(doc, res); projectMarks(doc); }
   return { ok, conflicts: res.conflicts, status: res.status };
