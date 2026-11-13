@@ -171,7 +171,7 @@ export const HELP_HTML = `
 <details><summary>Límites conocidos</summary>
 <ul>
 <li>La elipse no admite intersecciones ni tangencia con splines; los cruces de una elipse con un spline u otra elipse, al recortar o extender, se calculan sobre la curva dibujada (aproximación muy cercana, no exacta).</li>
-<li>Un spline recortado queda como un spline nuevo con puntos extra tomados de la curva: se parece mucho al original, pero no es idéntico.</li>
+<li>Un spline recortado conserva los puntos que le quedan y agrega solo unos pocos junto al corte, tomados de la curva: se parece mucho al original, pero no es idéntico.</li>
 <li>El punto medio como imán de dibujo solo se ofrece en líneas (no en arcos, elipses ni splines) y no en líneas muy cortas en pantalla.</li>
 <li>Acotar: un spline no se puede acotar contra un arco o círculo (no tiene centro), y la distancia entre dos líneas paralelas no lleva signo.</li>
 <li>Una tangencia con un spline puede no converger si el punto de contacto arranca muy lejos de la solución (la app lo arranca en el punto más cercano).</li>

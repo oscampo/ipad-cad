@@ -1819,6 +1819,20 @@ t('recortar spline: los trozos conservan la forma y las relaciones pasan al troz
   assert.ok(trimAt(d3, 'sp', s2, { x: 0, y: 10 }).deleted);
 });
 
+t('recortar spline: no multiplica los puntos de control (conserva los que quedan y agrega pocos junto al corte)', () => {
+  const d = newDoc();
+  const ids = Array.from({ length: 16 }, (_, i) => { const a = (i * Math.PI) / 30; return addPoint(d, 100 * Math.cos(a), 100 * Math.sin(a)); });
+  const s = addSpline(d, ids, ST, false);
+  const orig = splinePolyline(d, d.splines[s], 24).map((q) => ({ ...q }));
+  addLine(d, addPoint(d, -10, 60), addPoint(d, 110, 60), ST);
+  const r = trimAt(d, 'sp', s, { x: 50, y: 86 });
+  assert.ok(r.ok); const sp = d.splines[r.pieces[0]];
+  const kept = ids.filter((i) => sp.pts.includes(i)).length;
+  assert.ok(kept >= 6 && sp.pts.length <= kept + 8, `${sp.pts.length} puntos, ${kept} originales`);
+  let dev = 0; for (const q of splinePolyline(d, sp, 24)) dev = Math.max(dev, closestOnPolyline(orig, q).d);
+  assert.ok(dev < 0.1, 'desviacion ' + dev);
+});
+
 t('extender hasta elipses y splines: la linea y el arco llegan a la curva y quedan sobre ella', () => {
   const d = newDoc(); const { e } = mkEll(d);
   const l = addLine(d, addPoint(d, -30, 2), addPoint(d, -20, 2), ST);

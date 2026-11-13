@@ -1,5 +1,9 @@
 # Historial de cambios
 
+## Sin publicar
+
+- **Recortar spline**: ya no multiplica los puntos de control. El trozo conserva los puntos originales que le quedan y agrega solo unos pocos junto al corte (un spline de 16 puntos pasa de 64 a unos 13), con desviación de forma menor a 0,05 % del tamaño.
+
 ## v1.6.0 (2026-11-13)
 
 - **Reiniciar marcas**: cada marca guarda una referencia (su distancia sobre la línea desde el primer extremo, tomada al asignarla). El botón «Reiniciar marcas» del grupo Spline (con marcas seleccionadas, solo esas) y «Reiniciar» en las propiedades del punto las devuelven a ella, en cualquier lugar donde esté el mecanismo, para empezar de cero otra lectura. «Tomar la actual» redefine la referencia. Los archivos anteriores toman como referencia la posición al abrirlos.

@@ -235,15 +235,25 @@ function trimSpline(doc, id, m) {
   };
   const { pts: _p, closed: _c, ts: _t, ...st } = sp;
   const step = total / ((closed ? n : n - 1) * SPL_FILL); // separacion de los puntos de cada trozo
-  const piece = (s0, id0, s1, id1) => {
+  // Solo los dos tramos junto a un corte reciben puntos extra (ahi la curva original dependia del punto quitado); entre los
+  // puntos que quedan no se agrega nada, para no multiplicar los puntos de control. cut0/cut1: ese extremo es un corte.
+  const piece = (s0, id0, s1, id1, cut0, cut1) => {
     const mid = [];
     sp.pts.forEach((pid, j) => { for (const w of closed ? [0, total] : [0]) { const sv = sd[j] + w; if (sv > s0 + tol && sv < s1 - tol) mid.push({ s: sv, id: pid }); } });
     mid.sort((u, v) => u.s - v.s);
     const chain = [{ s: s0, id: id0 }, ...mid, { s: s1, id: id1 }], out = [];
+    const ks = chain.slice(0, -1).map((c, i) => (((i <= 1 && cut0) || (i >= chain.length - 3 && cut1))
+      ? Math.max(0, Math.ceil((chain[i + 1].s - c.s) / step - 0.25) - 1) : 0));
+    // un spline necesita al menos 3 puntos: si quedan menos, se reparten extras en el tramo mas largo
+    while (chain.length + ks.reduce((a, b) => a + b, 0) < 3) {
+      let bi = 0, bl = -1;
+      ks.forEach((k, i) => { const l = (chain[i + 1].s - chain[i].s) / (k + 1); if (l > bl) { bl = l; bi = i; } });
+      ks[bi]++;
+    }
     for (let i = 0; i < chain.length - 1; i++) {
       out.push(chain[i].id);
       // puntos extra tomados de la curva original, a paso parejo, para que el trozo conserve la forma
-      const k = Math.max(0, Math.ceil((chain[i + 1].s - chain[i].s) / step - 0.25) - 1);
+      const k = ks[i];
       const fr = Array.from({ length: k }, (_, j) => (j + 1) / (k + 1));
       for (const f of fr) {
         const q = at(chain[i].s + f * (chain[i + 1].s - chain[i].s)), nid = addPoint(doc, q.x, q.y, true);
@@ -256,10 +266,10 @@ function trimSpline(doc, id, m) {
     return ids.length >= 2 && new Set(ids).size === ids.length ? addSpline(doc, ids, st, false) : null;
   };
   const pieces = [];
-  if (closed) pieces.push(piece(hi.s, pointAt(doc, hi, tol), lo.s > hi.s ? lo.s : lo.s + total, pointAt(doc, lo, tol)));
+  if (closed) pieces.push(piece(hi.s, pointAt(doc, hi, tol), lo.s > hi.s ? lo.s : lo.s + total, pointAt(doc, lo, tol), true, true));
   else {
-    if (lo) pieces.push(piece(0, sp.pts[0], lo.s, pointAt(doc, lo, tol)));
-    if (hi) pieces.push(piece(hi.s, pointAt(doc, hi, tol), total, sp.pts[n - 1]));
+    if (lo) pieces.push(piece(0, sp.pts[0], lo.s, pointAt(doc, lo, tol), false, true));
+    if (hi) pieces.push(piece(hi.s, pointAt(doc, hi, tol), total, sp.pts[n - 1], true, false));
   }
   const made = pieces.filter(Boolean);
   if (!made.length) return { ok: false, msg: 'No se pudo recortar el spline en ese tramo' };
