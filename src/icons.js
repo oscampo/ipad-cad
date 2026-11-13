@@ -78,6 +78,7 @@ const custom = {
   spline: S('<path d="M3 16C3 9 5 6 8 6c5 0 3 12 8 12 3 0 5-6 5-10"/><circle cx="3" cy="16" r="1.6" fill="currentColor"/><circle cx="8" cy="6" r="1.6" fill="currentColor"/><circle cx="16" cy="18" r="1.6" fill="currentColor"/><circle cx="21" cy="8" r="1.6" fill="currentColor"/>'),
   // abrir/cerrar spline: triangulo de lados curvos con uno discontinuo
   'spline-closed': S('<path d="M12 4C7 9 4.5 14 4 19c5 2.6 11 2.6 16 0"/><path d="M20 19c0-5-3-11-8-15" stroke-dasharray="2.4 3.2"/><circle cx="12" cy="4" r="1.9" fill="currentColor"/><circle cx="4" cy="19" r="1.9" fill="currentColor"/><circle cx="20" cy="19" r="1.9" fill="currentColor"/>'),
+  'mark-reset': S('<path d="M3 3l6 6M9 3 3 9"/><path d="M13 12a7 7 0 1 1-2.2 5.1"/><path d="M11 21v-4h4"/>'),
   trace: S('<path d="M3 19C6 19 8 12 12 11s5-4 6-5" stroke-dasharray="1.5 3"/><circle cx="19.5" cy="5" r="2.4" fill="currentColor"/>'),
   text: S('<path d="M5 7V5h14v2M12 5v14M9 19h6"/>'),
   'con-mid': S('<path d="M3 12h18"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/><path d="M3 8v8M21 8v8M8 9.5v5M16 9.5v5" opacity=".45"/>'),

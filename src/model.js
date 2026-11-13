@@ -297,7 +297,7 @@ export function cleanup(doc) {
       if (sp.ts && !Object.values(doc.cons).some((k) => (k.t === 'PONS' || k.t === 'TANLS' || k.t === 'TANCS') && k.refs[1] === id)) delete sp.ts;
     }
     for (const id of Object.keys(doc.traces || {})) if (!(id in doc.pts)) { delete doc.traces[id]; changed = true; }
-    for (const [id, p] of Object.entries(doc.pts)) if (p.mark && !(p.mark in doc.lines)) { delete p.mark; changed = true; } // marca de referencia cuya linea ya no existe
+    for (const [id, p] of Object.entries(doc.pts)) if (p.mark && !(p.mark in doc.lines)) { delete p.mark; delete p.mark0; changed = true; } // marca de referencia cuya linea ya no existe
     for (const [id, t] of Object.entries(doc.texts || {})) {
       if (!(t.pt in doc.pts) || (t.vecOf && !(t.vecOf in doc.lines))) { delete doc.texts[id]; changed = true; }
       else if (t.ref && !(t.ref in doc.lines)) delete t.ref; // la linea de referencia ya no existe: queda con su desfase

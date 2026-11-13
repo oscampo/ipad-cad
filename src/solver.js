@@ -365,6 +365,44 @@ export function projectMarks(doc) {
   }
 }
 
+// Referencia de una marca (mark0): su distancia con signo a lo largo de la linea, medida desde el extremo a. «Reiniciar» la
+// devuelve ahi, sea cual sea la pose del mecanismo: asi la lectura vuelve a su valor de partida en cualquier lugar del dibujo.
+function markDist(doc, id) {
+  const p = doc.pts[id], l = doc.lines[p.mark], a = doc.pts[l.a], b = doc.pts[l.b], L = Math.hypot(b.x - a.x, b.y - a.y);
+  return L < 1e-9 ? null : ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / L;
+}
+export function setMarkRef(doc, id) {
+  if (!isMark(doc, id)) return false;
+  const d = markDist(doc, id);
+  if (d === null) return false;
+  doc.pts[id].mark0 = d;
+  return true;
+}
+// Vuelve el punto una marca de la linea lid, con la posicion actual (proyectada sobre la linea) como referencia.
+export function assignMark(doc, id, lid) {
+  const p = doc.pts[id];
+  p.mark = lid; p.fixed = false;
+  projectMarks(doc);
+  setMarkRef(doc, id);
+}
+export function ensureMarkRefs(doc) { // archivos hechos antes de que existiera la referencia: la de partida es donde estan al abrirlos
+  for (const id of Object.keys(doc.pts)) if (isMark(doc, id) && doc.pts[id].mark0 === undefined) setMarkRef(doc, id);
+}
+// Devuelve las marcas (todas, o las de ids) a su referencia. Cuenta las que movio.
+export function resetMarks(doc, ids) {
+  let n = 0;
+  for (const id of ids ?? Object.keys(doc.pts)) {
+    if (!isMark(doc, id)) continue;
+    const p = doc.pts[id];
+    if (p.mark0 === undefined) { setMarkRef(doc, id); continue; }
+    const l = doc.lines[p.mark], a = doc.pts[l.a], b = doc.pts[l.b], L = Math.hypot(b.x - a.x, b.y - a.y);
+    if (L < 1e-9) continue;
+    p.x = a.x + ((b.x - a.x) / L) * p.mark0; p.y = a.y + ((b.y - a.y) / L) * p.mark0;
+    n++;
+  }
+  return n;
+}
+
 function commit(doc, res) {
   for (const [id, q] of Object.entries(res.pts)) {
     if (doc.pts[id] && !id.startsWith('__')) { doc.pts[id].x = q.x; doc.pts[id].y = q.y; }

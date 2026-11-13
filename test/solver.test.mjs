@@ -15,7 +15,7 @@ import { trimAt, extendEnd, cutsOf, curveCuts, linearArray, mirrorCopy, circular
 import { CLINE_STYLE, circleThrough3, addRectangle, polygonVertices, addPolygon, arcIsClockwise, constructionArcDash } from '../src/shapes.js';
 import { FONTS, fontCss } from '../src/text.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from '../src/lock.js';
-import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark } from '../src/solver.js';
+import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark, assignMark, setMarkRef, resetMarks, ensureMarkRefs } from '../src/solver.js';
 import { readFileSync } from 'node:fs';
 import { bsplineThrough, bsplinePoint } from '../src/bspline.js';
 import { boxSelect } from '../src/boxsel.js';
@@ -2317,6 +2317,60 @@ t('planimetro: una marca en el riel acumula el recorrido y la lectura da el area
   assert.ok(Math.abs(dD - W) < 0.06 * Math.abs(W), `la marca lee lo que debe (${dD.toFixed(3)} vs ${W.toFixed(3)})`);
   assert.ok(Math.abs(Math.abs(area) - 900) < 45, 'el recorrido es el cuadrado de 30: ' + area);
   assert.ok(Math.abs(Math.abs(100 * dD) - Math.abs(area)) < 0.08 * Math.abs(area), `area leida ${Math.abs(100 * dD).toFixed(0)} vs real ${Math.abs(area).toFixed(0)}`);
+});
+
+t('marca: la referencia se guarda al asignar y reiniciar la devuelve, en cualquier pose del mecanismo', () => {
+  const d = newDoc();
+  const A = addPoint(d, 0, 0, false), B = addPoint(d, 10, 0, false), M = addPoint(d, 4, 3, false);
+  const ln = addLine(d, A, B, {});
+  assignMark(d, M, ln);
+  near(d.pts[M].x, 4); near(d.pts[M].y, 0); near(d.pts[M].mark0, 4);
+  // el mecanismo se pone en otro lugar y gira: la marca queda donde la deje la linea
+  Object.assign(d.pts[A], { x: 20, y: 5 }); Object.assign(d.pts[B], { x: 20, y: 15 });
+  projectMarks(d);
+  near(d.pts[M].x, 20); near(d.pts[M].y, 0);
+  assert.equal(resetMarks(d, [M]), 1);
+  near(d.pts[M].x, 20); near(d.pts[M].y, 9, 1e-9, 'vuelve a 4 de A, sobre la linea nueva');
+  // tomar la actual como referencia
+  Object.assign(d.pts[M], { y: 12 }); assert.ok(setMarkRef(d, M)); near(d.pts[M].mark0, 7);
+  Object.assign(d.pts[M], { y: 6 }); resetMarks(d); near(d.pts[M].y, 12);
+  // sin linea, deja de ser marca y pierde la referencia
+  delete d.lines[ln]; cleanup(d);
+  assert.equal(d.pts[M].mark, undefined); assert.equal(d.pts[M].mark0, undefined);
+});
+t('marca: un archivo sin referencia la toma de donde esta al abrirlo', () => {
+  const d = newDoc();
+  const A = addPoint(d, 0, 0, false), B = addPoint(d, 10, 0, false), M = addPoint(d, 6, 0, false);
+  const ln = addLine(d, A, B, {});
+  d.pts[M].mark = ln;
+  assert.equal(resetMarks(d, [M]), 0, 'sin referencia no mueve nada');
+  assert.equal(d.pts[M].mark0, 6);
+  d.pts[M].x = 9; ensureMarkRefs(d); near(d.pts[M].mark0, 6, 1e-9, 'ya tenia: no se pisa');
+  d.pts[M].mark0 = undefined; delete d.pts[M].mark0; ensureMarkRefs(d); near(d.pts[M].mark0, 9);
+});
+t('planimetro: reiniciar la marca en otro lugar del dibujo deja la lectura en cero', () => {
+  const d = newDoc();
+  const O = addPoint(d, 0, 0, false), E = addPoint(d, 60, 80, false), P = addPoint(d, 60, -20, false), Q = addPoint(d, -240, -20, false), M = addPoint(d, 160, -20, false);
+  d.pts[O].fixed = true;
+  addLine(d, O, E, {});
+  const l2 = addLine(d, E, P, {}), rail = addLine(d, P, Q, {});
+  assignMark(d, M, rail);
+  addCon(d, { t: 'DIST', refs: [O, E], v: 100 });
+  addCon(d, { t: 'DIST', refs: [E, P], v: 100 });
+  addCon(d, { t: 'DIST', refs: [P, Q], v: 300 });
+  addCon(d, { t: 'PERP', refs: [l2, rail] });
+  const kD = addCon(d, { t: 'DIST', refs: [M, P], v: 100, ref: true });
+  assert.ok(solve(d, []).ok);
+  const D0 = dimValue(d, d.cons[kD]);
+  near(D0, 100, 1e-6);
+  const drag = (dx, dy, N = 60) => { const a = { ...d.pts[P] }; for (let i = 1; i <= N; i++) assert.ok(solveSteps(d, [{ id: P, x: a.x + (dx * i) / N, y: a.y + (dy * i) / N }]).ok); };
+  drag(30, 0); drag(0, 30); drag(-30, 0); drag(0, -30); // recorre un cuadrado
+  assert.ok(Math.abs(dimValue(d, d.cons[kD]) - D0) > 1, 'la marca acumulo lectura');
+  drag(40, 25); // se lleva el planimetro a otra area
+  resetMarks(d, [M]);
+  assert.ok(solve(d, []).ok);
+  near(dimValue(d, d.cons[kD]), D0, 1e-6, 'la lectura vuelve a su valor de partida');
+  drag(30, 0); assert.ok(Math.abs(dimValue(d, d.cons[kD]) - D0) > 1, 'y desde ahi vuelve a acumular');
 });
 
 console.log(`\n${passed} pruebas pasaron`);

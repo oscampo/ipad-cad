@@ -1,5 +1,5 @@
 import wasmUrl from '@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url';
-import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark } from './solver.js';
+import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark, assignMark, setMarkRef, resetMarks, ensureMarkRefs } from './solver.js';
 import {
   newDoc, addLayer, deleteLayer, layerCount, shownEntries, shownValues, layerHiddenPoints, consHidden, visibleDoc, isHidden, addPoint, addLine, addCircle, addArc, addText, addSpline, splinePolyline, addCon, cleanup, deleteItems, clone, hatchLoops,
   allLtypes, PALETTE, arcOf, conTag, ensureNumbers, addEllipse, ellipsePolyline, ellipseOf, ellipsePoint, ellipseParam, ellipseRange, isPartial,
@@ -135,6 +135,7 @@ function updateEnabled() {
   $('mkcir').disabled = $('mkarr').disabled;
   const selPts = sel.filter((x) => x.k === 'pt').map((x) => x.id);
   $('trTrace').disabled = !selPts.length;
+  $('mkReset').disabled = !Object.keys(doc.pts).some((id) => isMark(doc, id));
   $('trClear').disabled = !selPts.some((id) => doc.traces[id]?.pts.length > 1);
   $('trSpline').disabled = !(selPts.length === 1 && doc.traces[selPts[0]]?.pts.length >= 3);
   $('spClose').disabled = !n.sp;
@@ -1420,11 +1421,12 @@ function toolDown(p) {
     const h = hitTest(p.x, p.y);
     drag = { p0: p, hit: h, started: false };
     if (!h || h.k === 'ha') drag.box = true; // arrastrar desde un lugar vacio: cuadro de seleccion
-    if (h && (h.k === 'pt' || h.k === 'ln' || h.k === 'ci' || h.k === 'ar')) {
+    if (h && (h.k === 'pt' || h.k === 'ln' || h.k === 'ci' || h.k === 'ar' || h.k === 'sp')) {
       const m = toModel(p.x, p.y);
       drag.m0 = m;
       drag.orig = h.k === 'pt' ? { [h.id]: { ...doc.pts[h.id] } }
         : h.k === 'ln' ? { [doc.lines[h.id].a]: { ...doc.pts[doc.lines[h.id].a] }, [doc.lines[h.id].b]: { ...doc.pts[doc.lines[h.id].b] } } : {};
+      if (h.k === 'sp') for (const id of doc.splines[h.id].pts) drag.orig[id] = { ...doc.pts[id] }; // tocar la curva: se mueve el spline entero
       if (h.k === 'ci') drag.r0 = doc.circles[h.id].r;
       if (h.k === 'ar') drag.r0 = doc.arcs[h.id].r;
     }
@@ -2490,7 +2492,7 @@ function fitView() {
 function loadDoc(d) {
   if (!d || typeof d !== 'object' || !d.pts || !d.lines || !d.circles) throw new Error('Archivo no válido');
   doc = { n: 0, cons: {}, hatches: {}, ltypes: {}, arcs: {}, ellipses: {}, texts: {}, splines: {}, traces: {}, cn: {}, layers: {}, curLayer: null, ...d };
-  ensureNumbers(doc);
+  ensureNumbers(doc); ensureMarkRefs(doc);
   undoStack = []; redoStack = []; sel = []; pending = null;
 }
 async function exportPNG() {
@@ -2535,7 +2537,7 @@ document.querySelectorAll('[data-tool]').forEach((b) => { b.onclick = () => setT
 // toca la esquina marcada o mantén presionado para ver las demás.
 const GROUPS = {
   file: [['fNew', 'file-plus', 'Nuevo dibujo'], ['fSave', 'save', 'Guardar (.json)'], ['fLoad', 'folder-open', 'Abrir…'], ['ghSave', 'save', 'Guardar en GitHub…'], ['ghOpen', 'folder-open', 'Abrir de GitHub…'], ['ghCfg', 'props', 'Configurar GitHub…'], ['fPng', 'image', 'Exportar PNG'], ['fSvg', 'svg', 'Exportar SVG'], ['fLaser', 'svg', 'SVG para corte láser…'], ['fDxf', 'dxf', 'Exportar DXF']],
-  spl: [['spline', 'spline', 'Spline por puntos (S)'], ['trTrace', 'trace', 'Trazar punto (activar o quitar)'], ['trClear', 'trash', 'Borrar trayectoria'], ['trSpline', 'spline', 'Trazado a spline…'], ['spClose', 'spline-closed', 'Cerrar o abrir el spline'], ['spOffset', 'spline', 'Equidistante…']],
+  spl: [['spline', 'spline', 'Spline por puntos (S)'], ['trTrace', 'trace', 'Trazar punto (activar o quitar)'], ['trClear', 'trash', 'Borrar trayectoria'], ['mkReset', 'mark-reset', 'Reiniciar marcas: vuelven a su referencia (con marcas seleccionadas, solo esas)'], ['trSpline', 'spline', 'Trazado a spline…'], ['spClose', 'spline-closed', 'Cerrar o abrir el spline'], ['spOffset', 'spline', 'Equidistante…']],
   sel: [['select', 'select', 'Seleccionar y arrastrar (V)'], ['filter', 'filter', 'Filtrar la selección…']],
   line: [['line', 'line', 'Línea (L)'], ['vector', 'vector', 'Vector: línea con flecha y magnitud (W). Con una línea seleccionada, la convierte en vector'], ['mline', 'mline', 'Línea de punto medio (M)'], ['cline', 'cline', 'Línea constructiva (K)']],
   circle: [['circle', 'circle', 'Círculo (C)'], ['circle3', 'circle3', 'Círculo perimetral (3 puntos)'], ['ccircle', 'ccircle', 'Círculo constructivo']],
@@ -2546,7 +2548,7 @@ const GROUPS = {
 };
 // Cada elemento de un grupo es una herramienta, salvo Filtrar y Copiar, que son acciones.
 // Archivo y Spline: sus acciones viven en botones ocultos (#acts) que conservan su logica y su estado habilitado.
-const ACT_IDS = new Set(['ghSave', 'ghOpen', 'ghCfg', 'fNew', 'fSave', 'fLoad', 'fPng', 'fSvg', 'fLaser', 'fDxf', 'trTrace', 'trClear', 'trSpline', 'spClose', 'spOffset']);
+const ACT_IDS = new Set(['ghSave', 'ghOpen', 'ghCfg', 'fNew', 'fSave', 'fLoad', 'fPng', 'fSvg', 'fLaser', 'fDxf', 'trTrace', 'trClear', 'mkReset', 'trSpline', 'spClose', 'spOffset']);
 const MENU_ONLY = new Set(['file']); // el boton solo abre el desplegable (nunca ejecuta algo, p. ej. "Nuevo")
 const isAct = (id) => id === 'filter' || ACT_IDS.has(id);
 // Vector <-> linea con lo seleccionado: con una linea (y uno de sus extremos, la cola) seleccionada, «Vector» la convierte;
@@ -2797,6 +2799,12 @@ function renderPropCons() {
     box.appendChild(row);
   }
 }
+// Tras mover marcas a mano: se actualizan las cotas que leen medidas (formulas) y los angulos continuos.
+function relaxMarks() {
+  const r = hasReactive(doc) ? settle(doc, solveSteps, [], { maxIter: 20 }) : solve(doc, []);
+  if (r.ok) trackAngles(doc);
+}
+
 function openProps(h) {
   propT = { k: h.k, id: h.id };
   const o = propObj();
@@ -2891,9 +2899,16 @@ function openProps(h) {
     // Marca de referencia: se desliza solo a lo largo de una linea y recuerda lo recorrido
     const lines = Object.entries(doc.lines).filter(([, l]) => l.a !== h.id && l.b !== h.id);
     const opts = [['', 'Ninguna'], ...lines.map(([id, l]) => [id, `${l.vec ? 'Vector' : 'Línea'} ${id} · L = ${fmt(dist(doc.pts[l.a], doc.pts[l.b]))}`])];
-    body.appendChild(propRow('Marca de referencia en', propSelect(opts, isMark(doc, h.id) ? o.mark : '', (v) => propSet((x) => {
-      if (v) { x.mark = v; x.fixed = false; projectMarks(doc); } else delete x.mark;
-    }))));
+    body.appendChild(propRow('Marca de referencia en', propSelect(opts, isMark(doc, h.id) ? o.mark : '', (v) => {
+      propSet((x) => { if (v) assignMark(doc, h.id, v); else { delete x.mark; delete x.mark0; } });
+      openProps(h); // los botones de la referencia aparecen o se van
+    })));
+    if (isMark(doc, h.id)) {
+      const mkBtn = (txt, tip, fn) => { const b = document.createElement('button'); b.textContent = txt; b.title = tip; b.onclick = fn; return b; };
+      body.appendChild(propRow('Referencia de la marca',
+        mkBtn('Reiniciar', 'Devuelve la marca a su referencia sobre la línea', () => { propSet(() => { resetMarks(doc, [h.id]); relaxMarks(); }); openProps(h); }),
+        mkBtn('Tomar la actual', 'La posición actual de la marca pasa a ser su referencia', () => { propSet(() => setMarkRef(doc, h.id)); openProps(h); })));
+    }
   }
   if (k === 'ha') {
     const sm = document.createElement('small');
@@ -3201,6 +3216,15 @@ $('trTrace').onclick = () => {
   if (pts.every((id) => doc.traces[id])) { pts.forEach((id) => delete doc.traces[id]); toast('Trazado desactivado'); }
   else { pts.forEach((id) => startTrace(doc, id)); toast('Trazado activado: mueve el mecanismo para dibujar la trayectoria'); }
   afterChange();
+};
+$('mkReset').onclick = () => {
+  const all = Object.keys(doc.pts).filter((id) => isMark(doc, id));
+  if (!all.length) return;
+  const chosen = sel.filter((x) => x.k === 'pt' && isMark(doc, x.id)).map((x) => x.id);
+  pushUndo();
+  const n = resetMarks(doc, chosen.length ? chosen : all);
+  relaxMarks(); afterChange();
+  toast(n === 1 ? 'Marca reiniciada' : `${n} marcas reiniciadas`);
 };
 $('trClear').onclick = () => {
   const pts = sel.filter((x) => x.k === 'pt' && doc.traces[x.id]).map((x) => x.id);
