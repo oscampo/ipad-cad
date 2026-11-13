@@ -7,7 +7,9 @@ import { exportSVG, exportSVGLaser, exportDXF, dimLayouts, extraExtents, laserCl
 import { splitElement } from '../src/split.js';
 import { buildTree, conLabel } from '../src/tree.js';
 import { cleanFileBase } from '../src/files.js';
-import { parseValue, evalExpr, isPlainNumber } from '../src/expr.js';
+import { parseValue, evalExpr, isPlainNumber, exprRefs, renameInExpr } from '../src/expr.js';
+import { recompute, pruneFormulas, renameDim, checkName, varsOf } from '../src/params.js';
+import { nameDims } from '../src/model.js';
 import { trimAt, extendEnd, cutsOf, curveCuts, linearArray, mirrorCopy, circularArray, clipOf, pasteClip, bboxOf } from '../src/edit.js';
 import { CLINE_STYLE, circleThrough3, addRectangle, polygonVertices, addPolygon, arcIsClockwise, constructionArcDash } from '../src/shapes.js';
 import { FONTS, fontCss } from '../src/text.js';
@@ -1920,6 +1922,78 @@ t('capas: recortar y dividir conservan la capa de la linea', () => {
   const r = splitElement(d, l, [m]);
   assert.ok(r.ok);
   for (const id of r.pieces) assert.equal(d.lines[id].layer, A);
+});
+
+t('cotas con nombre: D, A, R, O numeradas por letra y sin repetir', () => {
+  const d = newDoc();
+  const a = addPoint(d, 0, 0), b = addPoint(d, 10, 0), c = addPoint(d, 0, 10), cc = addPoint(d, 20, 0);
+  const l1 = addLine(d, a, b, {}), l2 = addLine(d, a, c, {});
+  const ci = addCircle(d, cc, 3, {});
+  const k1 = addCon(d, { t: 'DIST', refs: [a, b], v: 10 }), k2 = addCon(d, { t: 'DIST', refs: [a, c], v: 10 });
+  const k3 = addCon(d, { t: 'ANG', refs: [l1, l2], v: 90 }), k4 = addCon(d, { t: 'RAD', refs: [ci], v: 3 });
+  assert.deepEqual([k1, k2, k3, k4].map((k) => d.cons[k].name), ['D1', 'D2', 'A1', 'O1']);
+  addCon(d, { t: 'H', refs: [l1] });
+  assert.equal(d.cons[addCon(d, { t: 'DIST', refs: [b, c], v: 14, hidden: true })].name, undefined);
+  delete d.cons[k2];
+  assert.equal(d.cons[addCon(d, { t: 'DIST', refs: [b, c], v: 14 })].name, 'D3', 'no se reutiliza D2');
+  for (const k of Object.values(d.cons)) delete k.name; // dibujo viejo sin nombres
+  delete d.cnd;
+  nameDims(d);
+  assert.equal(d.cons[k1].name, 'D1');
+  assert.equal(d.cons[k3].name, 'A1');
+});
+t('formulas con variables: evalExpr, referencias y renombrado', () => {
+  const vars = { D1: { v: 10, r: false }, A1: { v: Math.PI / 6, r: true }, L: { v: 4, r: false } };
+  near(parseValue('D1*sin(A1)', { vars }), 5);
+  near(parseValue('D1*sin(3π/4)', { vars }), 10 * Math.sin((3 * Math.PI) / 4));
+  near(parseValue('2L+D1/2', { vars }), 13);
+  near(parseValue('A1', { angle: true, vars }), 30); // un angulo en una cota angular vuelve a grados
+  assert.throws(() => parseValue('D9*2', { vars }), /D9/);
+  assert.deepEqual(exprRefs('D1*sin(A1)+L2+3π').sort(), ['A1', 'D1', 'L2']);
+  assert.equal(renameInExpr('D1*sin(A1)+D10', 'D1', 'Ancho'), 'Ancho*sin(A1)+D10');
+});
+t('formulas entre cotas: recalculo en cadena, ciclos y referencias', () => {
+  const d = newDoc();
+  const a = addPoint(d, 0, 0), b = addPoint(d, 10, 0), c = addPoint(d, 0, 6);
+  d.pts[a].fixed = true;
+  const l1 = addLine(d, a, b, {}), l2 = addLine(d, a, c, {});
+  addCon(d, { t: 'H', refs: [l1] }); addCon(d, { t: 'V', refs: [l2] });
+  const kA = addCon(d, { t: 'DIST', refs: [a, b], v: 10 });
+  const kB = addCon(d, { t: 'DIST', refs: [a, c], v: 6, expr: 'D1/2+1' });
+  assert.ok(solve(d, []).ok);
+  d.cons[kA].v = 20;
+  const r = recompute(d);
+  assert.ok(r.ok); near(d.cons[kB].v, 11);
+  assert.ok(solve(d, []).ok);
+  near(Math.hypot(d.pts[c].x - d.pts[a].x, d.pts[c].y - d.pts[a].y), 11, 1e-4);
+  // ciclo
+  d.cons[kA].expr = 'D2*2';
+  const rc = recompute(d);
+  assert.ok(!rc.ok && /círculo/.test(rc.error), rc.error);
+  delete d.cons[kA].expr;
+  // una cota de referencia no sirve de variable
+  d.cons[kA].ref = true;
+  assert.deepEqual(pruneFormulas(d), ['D2']);
+  assert.equal(d.cons[kB].expr, undefined);
+  assert.ok(Object.keys(varsOf(d)).indexOf('D1') < 0);
+  // valor imposible (negativo) no modifica nada
+  d.cons[kA].ref = false; d.cons[kB].expr = 'D1-100';
+  const bad = recompute(d);
+  assert.ok(!bad.ok); near(d.cons[kB].v, 11);
+});
+t('cotas con nombre: renombrar actualiza formulas y valida el nombre', () => {
+  const d = newDoc();
+  const a = addPoint(d, 0, 0), b = addPoint(d, 10, 0), c = addPoint(d, 0, 6);
+  const k1 = addCon(d, { t: 'DIST', refs: [a, b], v: 10 }), k2 = addCon(d, { t: 'DIST', refs: [a, c], v: 20, expr: 'D1*2' });
+  assert.equal(checkName(d, 'D1', k2) !== null, true);
+  assert.equal(checkName(d, 'sin', k1) !== null, true);
+  assert.equal(checkName(d, '2x', k1) !== null, true);
+  assert.equal(checkName(d, 'Ancho', k1), null);
+  renameDim(d, k1, 'Ancho');
+  assert.equal(d.cons[k2].expr, 'Ancho*2');
+  assert.ok(recompute(d).ok); near(d.cons[k2].v, 20);
+  delete d.cons[k1];
+  assert.deepEqual(pruneFormulas(d), ['D2']);
 });
 
 console.log(`\n${passed} pruebas pasaron`);

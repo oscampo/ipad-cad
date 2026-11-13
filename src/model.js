@@ -208,16 +208,46 @@ export function addText(doc, pt, text, opts = {}) {
 export const CON_GROUP = { H: 'H', V: 'V', PAR: 'PAR', PERP: 'PERP', EQL: 'EQ', EQR: 'EQ', COI: 'COI', PONL: 'COI', PONC: 'COI', PONS: 'COI', PONE: 'COI', COL: 'COL', MID: 'MID', CONC: 'CONC', TANLC: 'TAN', TANCC: 'TAN', TANLS: 'TAN', TANCS: 'TAN', TANLE: 'TAN', TANCE: 'TAN', TANEE: 'TAN' };
 export const CON_GLYPH = { H: 'H', V: 'V', PAR: '∥', PERP: '⟂', EQ: '=', COI: '●', COL: 'Col', MID: 'M', CONC: '◎', TAN: 'T' };
 export const conTag = (k) => (CON_GROUP[k.t] ? CON_GLYPH[CON_GROUP[k.t]] + (k.n ?? '') : '');
+// Cotas con nombre: D (distancia), A (angulo), R (radio de arco), O (diametro de circulo), numeradas por letra
+// y sin reutilizar numeros. El nombre se puede cambiar; las formulas de otras cotas lo usan como variable.
+export const DIM_TYPES = ['DIST', 'DISTPL', 'ANG', 'RAD'];
+export const DIM_KIND = { D: 'Distancia', A: 'Ángulo', R: 'Radio', O: 'Diámetro' };
+export const isNamedDim = (k) => DIM_TYPES.includes(k.t) && k.v !== undefined && !k.hidden;
+export const dimLetter = (doc, k) => (k.t === 'ANG' ? 'A' : k.t === 'RAD' ? (k.refs[0] in doc.circles ? 'O' : 'R') : 'D');
+const nameTaken = (doc, name) => Object.values(doc.cons).some((k) => k.name === name);
+function giveName(doc, con) {
+  doc.cnd ||= {};
+  const L = dimLetter(doc, con);
+  do { doc.cnd[L] = (doc.cnd[L] || 0) + 1; } while (nameTaken(doc, L + doc.cnd[L]));
+  con.name = L + doc.cnd[L];
+}
 export function addCon(doc, con) {
   const id = nextId(doc, 'k');
   delete con.n;
+  if (isNamedDim(con)) { if (!con.name || nameTaken(doc, con.name)) giveName(doc, con); } else delete con.name;
   const g = CON_GROUP[con.t];
   if (g && !con.hidden) { doc.cn ||= {}; con.n = doc.cn[g] = (doc.cn[g] || 0) + 1; }
   doc.cons[id] = con;
   return id;
 }
+// Nombres para cotas sin nombre o repetidas (dibujos viejos, copias): por orden de creacion.
+export function nameDims(doc) {
+  const ids = Object.keys(doc.cons).sort((a, b) => Number(a.slice(1)) - Number(b.slice(1))), seen = new Set();
+  doc.cnd ||= {};
+  for (const id of ids) { // los contadores nunca quedan por debajo de un nombre ya usado
+    const m = /^([DARO])(\d+)$/.exec(doc.cons[id].name || '');
+    if (m) doc.cnd[m[1]] = Math.max(doc.cnd[m[1]] || 0, Number(m[2]));
+  }
+  for (const id of ids) {
+    const k = doc.cons[id];
+    if (!isNamedDim(k)) { if (k.name) delete k.name; continue; }
+    if (!k.name || seen.has(k.name)) { delete k.name; giveName(doc, k); }
+    seen.add(k.name);
+  }
+}
 // Dibujos guardados antes de la numeracion: se numeran en el orden en que se crearon.
 export function ensureNumbers(doc) {
+  nameDims(doc);
   doc.cn ||= {};
   const ids = Object.keys(doc.cons).sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
   for (const g of new Set(Object.values(CON_GROUP))) {

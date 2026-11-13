@@ -17,6 +17,7 @@ import { CLINE_STYLE, circleThrough3, addRectangle, polygonVertices, addPolygon,
 import { layoutDim, dragDim, dimValue, angSector, angTrue, DIAM } from './dims.js';
 import { textFrame, textHit, textPose, rawAngle, ANCHORS, ANCHOR_NAMES, LINE_SPACING, FONTS, fontCss } from './text.js';
 import * as gh from './github.js';
+import { varsOf, varsList, recompute, pruneFormulas, renameDim, checkName } from './params.js';
 import { exportSVG, exportSVGLaser, exportDXF, extraExtents, laserClasses } from './export.js';
 import { iconSvg } from './icons.js';
 import { buildTree, kindOf, conLabel } from './tree.js';
@@ -25,7 +26,7 @@ import { parseValue, isPlainNumber } from './expr.js';
 import { HELP_HTML } from './help.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from './lock.js';
 
-const VERSION = '1.4.2';
+const VERSION = '1.5.0';
 const STORE = 'ipad-cad-v1';
 const $ = (id) => document.getElementById(id);
 const cv = $('cv');
@@ -100,7 +101,7 @@ function persist() {
     try { localStorage.setItem(STORE, JSON.stringify({ doc, view, cur, opts })); } catch { /* sin almacenamiento */ }
   }, 300);
 }
-function afterChange() { layerBtn(); updateButtons(); updateEnabled(); syncPanel(); persist(); draw(); renderTree(); }
+function afterChange() { const fz = pruneFormulas(doc); if (fz.length) toast(`${fz.join(', ')}: la cota de la que dependía ya no existe o es de referencia; queda con su valor actual`); layerBtn(); updateButtons(); updateEnabled(); syncPanel(); persist(); draw(); renderTree(); }
 
 // Un boton de restriccion solo se activa si la seleccion actual le sirve (mismas reglas que applyCon).
 function updateEnabled() {
@@ -1885,12 +1886,18 @@ function makeIntersections(items) {
 // Ultimo estado del interruptor "Solo lectura" del dialogo de cotas.
 let dlgRef = false;
 let dlgUnit = null; // unidad elegida en la ultima cota angular ('deg' | 'rad')
+let dlgCtx = null, dlgName = null; // dlgCtx (lo fija quien llama): { vars, list, name?, check? } para formulas con nombres y el campo Nombre
 let dlgExpr = null; // formula tecleada en la ultima cota (null si fue un numero simple)
 const KEYS = [['π', 'π'], ['√', '√('], ['sin', 'sin('], ['cos', 'cos('], ['tan', 'tan('], ['^', '^'], ['(', '('], [')', ')'], ['×', '*'], ['÷', '/']];
 // kind: 'len' (distancias, radios) o 'angle' (grados; lo que lleve π se pasa de radianes a grados)
 function askNumber(labelText, initial, refState = false, kind = 'len', unit0 = 'deg') {
   return new Promise((resolve) => {
     const dlg = $('dlg'), inp = $('dlgInput'), chk = $('dlgRef'), prev = $('dlgPrev');
+    const ctx = dlgCtx || (kind === 'int' ? null : { vars: varsOf(doc), list: varsList(doc) }); dlgCtx = null; dlgName = null;
+    const nameRow = $('dlgNameRow'), nameInp = $('dlgName'), varsBox = $('dlgVars');
+    varsBox.style.display = ctx?.list ? 'block' : 'none'; varsBox.textContent = ctx?.list ? 'Cotas (úsalas en la fórmula): ' + ctx.list : '';
+    nameRow.style.display = ctx && ctx.name !== undefined ? 'flex' : 'none';
+    if (ctx && ctx.name !== undefined) nameInp.value = ctx.name;
     $('dlgLabel').textContent = labelText;
     inp.value = String(initial);
     chk.checked = refState; inp.disabled = refState;
@@ -1916,7 +1923,7 @@ function askNumber(labelText, initial, refState = false, kind = 'len', unit0 = '
       };
       keys.appendChild(b);
     }
-    const evalNow = () => { try { return { v: parseValue(inp.value, { angle: kind === 'angle', radians: kind === 'angle' && unitSel.value === 'rad' }) }; } catch (e) { return { err: e.message }; } };
+    const evalNow = () => { try { return { v: parseValue(inp.value, { angle: kind === 'angle', radians: kind === 'angle' && unitSel.value === 'rad', vars: ctx?.vars }) }; } catch (e) { return { err: e.message }; } };
     const showPrev = () => {
       if (chk.checked || (isPlainNumber(inp.value) && kind !== 'angle')) { prev.textContent = ''; return; }
       const r = evalNow();
@@ -1930,6 +1937,11 @@ function askNumber(labelText, initial, refState = false, kind = 'len', unit0 = '
     const finish = (v) => { if (done) return; done = true; dlgRef = chk.checked; dlgUnit = kind === 'angle' ? unitSel.value : null; dlg.close(); resolve(v); };
     $('dlgOk').onclick = (ev) => {
       ev.preventDefault();
+      if (ctx && ctx.name !== undefined) {
+        const nm = nameInp.value.trim();
+        if (nm !== ctx.name) { const er = ctx.check(nm); if (er) { prev.style.color = 'var(--warn)'; prev.textContent = er; return; } }
+        dlgName = nm;
+      }
       if (chk.checked) { dlgExpr = null; finish(Number(initial)); return; } // cota de referencia: no se teclea valor
       const r = evalNow();
       if (r.err) { prev.style.color = 'var(--warn)'; prev.textContent = r.err; return; } // se queda abierto para corregir
@@ -2215,18 +2227,22 @@ async function editDimension(id) {
   // si la cota se definio con una formula, se vuelve a mostrar la formula (siempre que siga dando el valor actual)
   const u0 = k.t === 'ANG' && (k.unit === 'rad' || (!k.expr && !k.unit && false)) ? 'rad' : 'deg';
   let initial = u0 === 'rad' ? Math.round(((shown * Math.PI) / 180) * 1e10) / 1e10 : Math.round(shown * 1000) / 1000;
-  if (k.expr && !k.ref) { try { if (Math.abs(parseValue(k.expr, { angle: k.t === 'ANG', radians: u0 === 'rad' }) - shown) <= 1e-6 * Math.max(1, Math.abs(shown))) initial = k.expr; } catch { /* formula invalida: valor */ } }
-  const val0 = await askNumber(k.t === 'ANG' ? 'Ángulo (°)' : k.t === 'RAD' ? (isC ? `Diámetro (${DIAM})` : 'Radio (R)') : 'Distancia', initial, !!k.ref, k.t === 'ANG' ? 'angle' : 'len', u0);
+  if (k.expr && !k.ref) { try { if (Math.abs(parseValue(k.expr, { angle: k.t === 'ANG', radians: u0 === 'rad', vars: varsOf(doc, id) }) - shown) <= 1e-6 * Math.max(1, Math.abs(shown))) initial = k.expr; } catch { /* formula invalida: valor */ } }
+  dlgCtx = { vars: varsOf(doc, id), list: varsList(doc, id), ...(k.name ? { name: k.name, check: (n) => checkName(doc, n, id) } : {}) };
+  const val0 = await askNumber((k.name ? k.name + ' · ' : '') + (k.t === 'ANG' ? 'Ángulo (°)' : k.t === 'RAD' ? (isC ? `Diámetro (${DIAM})` : 'Radio (R)') : 'Distancia'), initial, !!k.ref, k.t === 'ANG' ? 'angle' : 'len', u0);
   if (val0 === null || (!dlgRef && k.t !== 'ANG' && val0 <= 0)) return;
   pushUndo();
+  if (dlgName && dlgName !== k.name) renameDim(doc, id, dlgName);
   if (k.t === 'ANG') { if (dlgUnit === 'rad') k.unit = 'rad'; else delete k.unit; opts.angUnit = dlgUnit; persist(); }
   if (dlgRef) { k.ref = true; afterChange(); return; } // es (o pasa a ser) cota de referencia: no toca el solver
   if (k.t === 'ANG' && (val0 < 0 || val0 > 180)) { rollback(); toast('El ángulo debe estar entre 0° y 180°'); afterChange(); return; }
   const val = isC ? val0 / 2 : k.t === 'ANG' ? angTrue(doc, { ...k, ref: false, v: k.ref ? (angSector(doc, k).A * 180) / Math.PI : k.v }, val0) : val0;
   k.v = val; delete k.ref;
   if (dlgExpr) k.expr = dlgExpr; else delete k.expr;
+  const rc = recompute(doc); // las cotas definidas con formulas se actualizan con el nuevo valor
+  if (!rc.ok) { rollback(); toast(rc.error); afterChange(); return; }
   const r = solve(doc, []);
-  if (!r.ok) { rollback(); toast('Valor imposible con las restricciones actuales. Usa «Solo lectura» para solo medirla'); }
+  if (!r.ok) { rollback(); toast(rc.count ? 'Imposible con las restricciones actuales (con las cotas que dependen de esta). Usa «Solo lectura» para solo medirla' : 'Valor imposible con las restricciones actuales. Usa «Solo lectura» para solo medirla'); }
   afterChange();
 }
 

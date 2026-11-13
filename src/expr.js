@@ -1,6 +1,8 @@
 // Evaluador de expresiones matematicas para las cotas ("3π/4", "10*sin(30)", "10+1/3"). Sin eval.
 // Devuelve { value, rad }: rad indica que el valor viene de π (esta en radianes), para que una cota angular
 // lo convierta a grados. sin/cos/tan toman grados, salvo que su argumento contenga π (entonces radianes).
+// Variables: las cotas con nombre (D1, A1, R2, O3 o el que les des) se pueden usar en las formulas: vars = { nombre: { v, r } }.
+// Un angulo vale su medida en radianes (r = true), igual que π: sin(A1) funciona y R*A1 es la longitud de arco.
 
 const TAU_DEG = 180 / Math.PI;
 const FUNCS = {
@@ -12,36 +14,58 @@ const FUNCS = {
 const KEEP_RAD = new Set(['sqrt', 'raiz', 'abs']); // conservan la marca de radianes del argumento
 const CONSTS = { pi: Math.PI, π: Math.PI, e: Math.E };
 
-function tokenize(src) {
+// Nombres que no puede llevar una cota: funciones y constantes del evaluador.
+export const isReservedName = (n) => { const l = String(n).toLowerCase(); return l in FUNCS || l in CONSTS || l === 'log10'; };
+export const NAME_RE = /^[A-Za-zα-ωΑ-Ω_][A-Za-z0-9α-ωΑ-Ω_]*$/;
+const ID_RE = /^[A-Za-zα-ωΑ-Ω_][A-Za-z0-9α-ωΑ-Ω_]*/;
+
+// loose: no falla con identificadores desconocidos (para listar las variables de una formula)
+function tokenize(src, vars = null, loose = false) {
   const toks = [];
   let i = 0;
   while (i < src.length) {
     const c = src[i];
     if (/\s/.test(c)) { i++; continue; }
     let m = /^(\d+([.,]\d+)?|[.,]\d+)/.exec(src.slice(i));
-    if (m) { toks.push({ t: 'num', v: Number(m[0].replace(',', '.')) }); i += m[0].length; continue; }
-    if (c === '√') { toks.push({ t: 'sqrt' }); i++; continue; }
-    if (c === 'π') { toks.push({ t: 'id', v: 'π' }); i++; continue; }
-    m = /^(log10|[a-zA-Z]+)/.exec(src.slice(i));
+    if (m) { toks.push({ t: 'num', v: Number(m[0].replace(',', '.')), i, j: i + m[0].length }); i += m[0].length; continue; }
+    if (c === '√') { toks.push({ t: 'sqrt', i, j: i + 1 }); i++; continue; }
+    if (c === 'π') { toks.push({ t: 'id', v: 'π', i, j: i + 1 }); i++; continue; }
+    m = ID_RE.exec(src.slice(i));
     if (m) {
-      const name = m[0].toLowerCase();
-      if (!(name in FUNCS) && !(name in CONSTS)) throw new Error(`No reconozco «${m[0]}»`);
-      toks.push({ t: 'id', v: name }); i += m[0].length; continue;
+      const raw = m[0], name = raw.toLowerCase();
+      if (vars && Object.prototype.hasOwnProperty.call(vars, raw)) toks.push({ t: 'var', v: raw, i, j: i + raw.length });
+      else if (name in FUNCS || name in CONSTS) toks.push({ t: 'id', v: name, i, j: i + raw.length });
+      else if (loose) toks.push({ t: 'var', v: raw, i, j: i + raw.length });
+      else throw new Error(`No reconozco «${raw}»` + (/\d/.test(raw) || raw.length === 1 ? ' (no hay una cota con ese nombre)' : ''));
+      i += raw.length; continue;
     }
-    if (c === '*' && src[i + 1] === '*') { toks.push({ t: 'op', v: '^' }); i += 2; continue; }
-    if ('+-*/^()×÷·−'.includes(c)) { toks.push({ t: 'op', v: c === '×' || c === '·' ? '*' : c === '÷' ? '/' : c === '−' ? '-' : c }); i++; continue; }
+    if (c === '*' && src[i + 1] === '*') { toks.push({ t: 'op', v: '^', i, j: i + 2 }); i += 2; continue; }
+    if ('+-*/^()×÷·−'.includes(c)) { toks.push({ t: 'op', v: c === '×' || c === '·' ? '*' : c === '÷' ? '/' : c === '−' ? '-' : c, i, j: i + 1 }); i++; continue; }
     throw new Error(`Carácter no válido «${c}»`);
   }
   return toks;
 }
 
-export function evalExpr(src, { radians = false } = {}) {
-  const toks = tokenize(String(src ?? ''));
+// Variables que usa una formula (nombres que no son numeros, funciones ni constantes).
+export function exprRefs(src) {
+  try { return [...new Set(tokenize(String(src ?? ''), null, true).filter((k) => k.t === 'var').map((k) => k.v))]; } catch (e) { return []; }
+}
+// Cambia el nombre de una variable dentro de una formula (solo la palabra entera).
+export function renameInExpr(src, from, to) {
+  let out = '', last = 0;
+  try {
+    for (const k of tokenize(String(src ?? ''), null, true)) if (k.t === 'var' && k.v === from) { out += src.slice(last, k.i) + to; last = k.j; }
+  } catch (e) { return src; }
+  return out + src.slice(last);
+}
+
+export function evalExpr(src, { radians = false, vars = null } = {}) {
+  const toks = tokenize(String(src ?? ''), vars);
   if (!toks.length) throw new Error('Escribe un valor');
   let p = 0;
   const peek = () => toks[p];
   const isOp = (v) => peek()?.t === 'op' && peek().v === v;
-  const startsFactor = () => { const k = peek(); return k && (k.t === 'num' || k.t === 'id' || k.t === 'sqrt' || (k.t === 'op' && k.v === '(')); };
+  const startsFactor = () => { const k = peek(); return k && (k.t === 'num' || k.t === 'id' || k.t === 'var' || k.t === 'sqrt' || (k.t === 'op' && k.v === '(')); };
   const bin = (a, b, v) => ({ v, r: a.r || b.r });
 
   function expr() {
@@ -71,6 +95,7 @@ export function evalExpr(src, { radians = false } = {}) {
     const k = toks[p++];
     if (!k) throw new Error('Expresión incompleta');
     if (k.t === 'num') return { v: k.v, r: false };
+    if (k.t === 'var') return { v: vars[k.v].v, r: !!vars[k.v].r };
     if (k.t === 'sqrt') { const a = primary(); if (a.v < 0) throw new Error('Raíz de un número negativo'); return { v: Math.sqrt(a.v), r: a.r }; }
     if (k.t === 'op' && k.v === '(') {
       const a = expr();
@@ -101,7 +126,7 @@ export const isPlainNumber = (s) => /^\s*[-+]?(\d+([.,]\d+)?|[.,]\d+)\s*$/.test(
 
 // Valor numerico de lo que escribio el usuario; angle: lo que viene de π se pasa de radianes a grados.
 // radians: la cota angular se escribe en radianes (los numeros y sin/cos/tan van en radianes); si no, en grados.
-export function parseValue(src, { angle = false, radians = false } = {}) {
-  const { value, rad } = evalExpr(src, { radians: angle && radians });
+export function parseValue(src, { angle = false, radians = false, vars = null } = {}) {
+  const { value, rad } = evalExpr(src, { radians: angle && radians, vars });
   return Number((angle && (rad || radians) ? value * TAU_DEG : value).toPrecision(12));
 }

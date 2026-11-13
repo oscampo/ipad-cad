@@ -1,5 +1,11 @@
 # Historial de cambios
 
+## v1.5.0 (2026-11-12)
+
+- **Cotas con nombre**: cada cota recibe un nombre automático por tipo (D distancia, A ángulo, R radio de arco, O diámetro de círculo; D1, A1...), visible en el árbol y en el diálogo de la cota (doble toque), donde se puede cambiar. Los dibujos viejos se numeran al abrirlos.
+- **Fórmulas entre cotas**: el nombre de una cota se puede usar en la fórmula de otra (`D1*sin(3π/4)`, `D1/2+1`). Al cambiar una cota se recalculan en orden las que dependen de ella y se resuelve la geometría; ciclos, valores imposibles o referencias inexistentes se rechazan sin dejar cambios a medias. Un ángulo entra en la fórmula como radianes; las cotas de solo lectura no se pueden usar.
+- Si se borra una cota de la que dependía otra, esa conserva su valor y pierde la fórmula (con aviso).
+
 ## v1.4.2 (2026-11-12)
 
 - **Lupa del dedo**: al tocar y sostener (unos 0,28 s sin mover) aparece un círculo con zoom 2x de lo que hay bajo el dedo, desplazado hacia arriba para no taparlo, con mira en el centro. Se desliza para afinar. Con «Dedo dibuja» activo funciona con cualquier herramienta; con «Dedo dibuja» apagado, en Selección: al soltar se selecciona lo que está bajo la mira.

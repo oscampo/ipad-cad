@@ -15,10 +15,11 @@ const CON_NAMES = {
 
 export function conLabel(doc, k) {
   const tag = conTag(k);
-  let s = (tag ? tag + ' · ' : '') + (CON_NAMES[k.t] || k.t);
+  let s = (tag ? tag + ' · ' : k.name ? k.name + ' · ' : '') + (CON_NAMES[k.t] || k.t);
   if (k.t === 'DIST' || k.t === 'DISTPL') s += ` = ${f(k.v)}`;
   else if (k.t === 'ANG' || k.t === 'ANG4') s += ` = ${dimText(doc, k)}`;
   else if (k.t === 'RAD') s += (k.refs[0] in doc.circles ? ` ${DIAM} = ${f(k.v * 2)}` : ` R = ${f(k.v)}`);
+  if (k.expr && !k.ref) s += ` (= ${k.expr})`;
   if (k.ref) s += ' (referencia)';
   if (k.hidden) s += ' (auto)';
   return s;
