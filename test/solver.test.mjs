@@ -15,7 +15,7 @@ import { trimAt, extendEnd, cutsOf, curveCuts, linearArray, mirrorCopy, circular
 import { CLINE_STYLE, circleThrough3, addRectangle, polygonVertices, addPolygon, arcIsClockwise, constructionArcDash } from '../src/shapes.js';
 import { FONTS, fontCss } from '../src/text.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from '../src/lock.js';
-import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark, assignMark, setMarkRef, resetMarks, ensureMarkRefs, redundantCons, makeGear } from '../src/solver.js';
+import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark, assignMark, setMarkRef, resetMarks, ensureMarkRefs, redundantCons, makeGear, beginSession, endSession } from '../src/solver.js';
 import { readFileSync } from 'node:fs';
 import { bsplineThrough, bsplinePoint } from '../src/bspline.js';
 import { boxSelect } from '../src/boxsel.js';
@@ -1963,6 +1963,24 @@ t('engranaje: conserva sus datos al copiar el archivo y se borra con sus lineas'
   assert.equal(copia.cons[g.k].t, 'GEAR'); assert.equal(copia.cons[g.k].ratio, -1);
   delete g.d.lines[g.l1]; cleanup(g.d);
   assert.equal(g.d.cons[g.k], undefined, 'sin una de sus lineas la relacion desaparece');
+});
+
+t('sesion de arrastre: el resultado es el mismo con y sin la cache estructural, tambien si cambian los puntos fijos o la estructura', () => {
+  const a = dosEngranes(-0.5), b = dosEngranes(-0.5);
+  assert.ok(solve(a.d, []).ok && solve(b.d, []).ok);
+  beginSession(a.d);
+  const mover = (g, i) => { const ang = (i * 3 * Math.PI) / 180; return solve(g.d, [{ id: g.m1, x: 19 * Math.cos(ang), y: 19 * Math.sin(ang) }]); };
+  for (let i = 1; i <= 30; i++) { assert.ok(mover(a, i).ok && mover(b, i).ok); }
+  for (const id of Object.keys(a.d.pts)) { near(a.d.pts[id].x, b.d.pts[id].x, 1e-9); near(a.d.pts[id].y, b.d.pts[id].y, 1e-9); }
+  // cambia un punto fijo en plena sesion: la cache se descarta por su firma
+  a.d.pts[a.q1].fixed = true; b.d.pts[b.q1].fixed = true;
+  assert.equal(mover(a, 31).ok, mover(b, 31).ok);
+  for (const id of Object.keys(a.d.pts)) { near(a.d.pts[id].x, b.d.pts[id].x, 1e-9); near(a.d.pts[id].y, b.d.pts[id].y, 1e-9); }
+  // cambia la estructura (otra restriccion): la sesion se descarta sola
+  addCon(a.d, { t: 'DIST', refs: [a.c1, a.q2], v: 99, hidden: true }); addCon(b.d, { t: 'DIST', refs: [b.c1, b.q2], v: 99, hidden: true });
+  assert.equal(solve(a.d, []).ok, solve(b.d, []).ok);
+  endSession();
+  assert.ok(solve(a.d, []) !== undefined);
 });
 
 t('extender hasta elipses y splines: la linea y el arco llegan a la curva y quedan sobre ella', () => {

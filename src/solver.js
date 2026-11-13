@@ -6,6 +6,32 @@ import { bsplineThrough, bsplineSamples, bsplinePoint, bsplineTangent, samplePar
 
 let g = null;
 
+// Sesion de arrastre: mientras se arrastra no cambia la estructura del dibujo (que restricciones hay y que puntos son
+// fijos), solo las posiciones. El analisis estructural (seguidores, arcos inmoviles, cuerpos de los engranajes, splines y
+// elipses con relaciones) cuesta mas en JavaScript que la propia resolucion, asi que se hace una vez por arrastre y se
+// reutiliza. Si cambia el dibujo (otro objeto, otro numero de restricciones o de ids) la sesion se descarta sola.
+let session = null;
+export function beginSession(doc) { session = { doc, n: doc.n, nc: Object.keys(doc.cons).length, memo: new Map() }; }
+export function endSession() { session = null; }
+const fixedSig = (doc) => { let s = ''; for (const id in doc.pts) if (doc.pts[id].fixed) s += id + ','; return s; };
+// Al empezar cada resolucion: la sesion sigue valida si es el mismo dibujo con la misma estructura; los puntos fijos si pueden
+// cambiar entre resoluciones (las formulas fijan entradas un momento), asi que se guardan como firma de la cache.
+function touchSession(doc) {
+  const ss = session;
+  if (!ss) return;
+  ss.ok = ss.doc === doc && ss.n === doc.n && ss.nc === Object.keys(doc.cons).length;
+  if (ss.ok) ss.sig = fixedSig(doc);
+}
+function structural(doc, key, fn, useSig) {
+  const ss = session;
+  if (!ss || !ss.ok || ss.doc !== doc) return fn();
+  const sig = useSig ? ss.sig : '', hit = ss.memo.get(key);
+  if (hit && hit.sig === sig) return hit.v;
+  const v = fn();
+  ss.memo.set(key, { sig, v });
+  return v;
+}
+
 export async function initSolver(wasmUrl) {
   const mod = await init_planegcs_module(wasmUrl ? { locateFile: () => wasmUrl } : undefined);
   g = new GcsWrapper(new mod.GcsSystem(), mod);
@@ -95,7 +121,8 @@ function conPrims(doc, id, k) {
 //    curvas y el angulo entre ambas en T es 0 o 180 grados (angle_via_point).
 const ELL = new Set(['PONE', 'TANLE', 'TANCE', 'TANEE']);
 const ellRefs = (k) => (k.t === 'TANEE' ? [k.refs[0], k.refs[1]] : [k.refs[1]]);
-function nativeEllipses(doc) {
+const nativeEllipses = (doc) => structural(doc, 'ell', () => nativeEllipsesRaw(doc));
+function nativeEllipsesRaw(doc) {
   const out = new Set();
   for (const [id, e] of Object.entries(doc.ellipses || {})) if (isPartial(e)) out.add(id);
   for (const k of Object.values(doc.cons)) if (ELL.has(k.t) && !k.ref) for (const r of ellRefs(k)) if (doc.ellipses?.[r]) out.add(r);
@@ -185,7 +212,8 @@ function ellipseFlipStart(doc, live) {
 //    (angle_via_point_and_param).
 const SPL = new Set(['PONS', 'TANLS', 'TANCS']);
 const splCon = (doc, k) => SPL.has(k.t) && !k.ref && !!doc.splines?.[k.refs[1]];
-const hasSpl = (doc) => Object.values(doc.cons).some((k) => splCon(doc, k));
+const hasSplRaw = (doc) => Object.values(doc.cons).some((k) => splCon(doc, k));
+const hasSpl = (doc) => structural(doc, 'spl', () => hasSplRaw(doc));
 // punto que la relacion pone sobre el spline
 const splPoint = (k) => (k.t === 'PONS' ? k.refs[0] : k.refs[2]);
 const isClosed = (sp) => !!sp.closed && sp.pts.length >= 3;
@@ -372,6 +400,10 @@ function findFollowers(doc) {
 // (fijos, marcas o seguidores). Su regla (extremos sobre la circunferencia) solo queda como restriccion redundante, y con
 // decenas de arcos copia eso multiplicaba por 6 el costo de cada resolucion. El radio se calcula al terminar.
 function prepare(doc) {
+  const F0 = structural(doc, 'prep', () => prepareRaw(doc), true);
+  return F0 ? { ...F0 } : F0; // copia: cada resolucion le agrega sus propias primitivas
+}
+function prepareRaw(doc) {
   const F = findFollowers(doc);
   const fixedOf = (i) => !!doc.pts[i]?.fixed || isMark(doc, i) || !!F?.map.has(i);
   const idle = new Set(), arcs = Object.entries(doc.arcs);
@@ -474,10 +506,13 @@ const TWO_PI = 2 * Math.PI;
 const wrapPi = (x) => x - TWO_PI * Math.round(x / TWO_PI);
 const nearAng = (a, ref) => ref + wrapPi(a - ref);
 const lineDir = (doc, lid) => { const l = doc.lines[lid], a = doc.pts[l.a], b = doc.pts[l.b]; return Math.atan2(b.y - a.y, b.x - a.x); };
-const gearRels = (doc) => Object.values(doc.cons).filter((k) => k.t === 'GEAR' && !k.ref && k.refs.length === 2 && doc.lines[k.refs[0]] && doc.lines[k.refs[1]] && Number.isFinite(k.ratio) && k.ratio !== 0 && k.refs[0] !== k.refs[1]);
+const gearRelIds = (doc) => structural(doc, 'gearIds', () => Object.keys(doc.cons).filter((id) => gearOk(doc, doc.cons[id])));
+const gearRels = (doc) => gearRelIds(doc).map((id) => doc.cons[id]);
+const gearOk = (doc, k) => k.t === 'GEAR' && !k.ref && k.refs.length === 2 && doc.lines[k.refs[0]] && doc.lines[k.refs[1]] && Number.isFinite(k.ratio) && k.ratio !== 0 && k.refs[0] !== k.refs[1];
 
 // Cuerpos: puntos que se mueven juntos (unidos por alguna restriccion o forma) sin pasar por puntos fijos.
-function bodies(doc) {
+const bodies = (doc) => structural(doc, 'bodies', () => bodiesRaw(doc), true);
+function bodiesRaw(doc) {
   const par = new Map();
   const find = (x) => { while (par.get(x) !== x) { par.set(x, par.get(par.get(x))); x = par.get(x); } return x; };
   const movable = (id) => doc.pts[id] && !doc.pts[id].fixed && !isMark(doc, id);
@@ -518,7 +553,8 @@ function gearPlan(doc, targets) {
   for (const k of rels) for (const lid of k.refs) lines.get(lid).rels.push(k);
   const bod = targets.length ? bodies(doc) : null;
   const angle = new Map(), drop = new Set();
-  const pivotOf = (lid) => { // extremo de la linea que coincide con un punto fijo: el centro de giro
+  const pivotOf = (lid) => structural(doc, 'pivot:' + lid, () => pivotRaw(lid), true);
+  const pivotRaw = (lid) => { // extremo de la linea que coincide con un punto fijo: el centro de giro
     const l = doc.lines[lid];
     for (const id of [l.a, l.b]) {
       const p = doc.pts[id];
@@ -666,6 +702,7 @@ function commit(doc, res) {
 // quitaria algo que si restringe). No modifica doc. Devuelve los ids de doc.cons.
 export function redundantCons(doc) {
   if (!g) return [];
+  touchSession(doc);
   const F = prepare(doc);
   const res = solveLoop(doc, null, null, F);
   const red = new Set(res.redundant || []);
@@ -684,6 +721,7 @@ export function redundantCons(doc) {
 // resultado sea siempre factible. No modifica doc si falla.
 export function solve(doc, targets = []) {
   if (!g) return { ok: true, conflicts: [] };
+  touchSession(doc);
   let F = prepare(doc);
   targets = retarget(doc, F, targets);
   const G = gearPlan(doc, targets);

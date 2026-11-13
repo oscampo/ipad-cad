@@ -1,5 +1,5 @@
 import wasmUrl from '@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url';
-import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark, assignMark, setMarkRef, resetMarks, ensureMarkRefs, redundantCons, makeGear } from './solver.js';
+import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark, assignMark, setMarkRef, resetMarks, ensureMarkRefs, redundantCons, makeGear, beginSession, endSession } from './solver.js';
 import {
   newDoc, addLayer, deleteLayer, layerCount, shownEntries, shownValues, layerHiddenPoints, consHidden, visibleDoc, isHidden, addPoint, addLine, addCircle, addArc, addText, addSpline, splinePolyline, addCon, cleanup, deleteItems, clone, hatchLoops,
   allLtypes, PALETTE, arcOf, conTag, ensureNumbers, addEllipse, ellipsePolyline, ellipseOf, ellipsePoint, ellipseParam, ellipseRange, isPartial, DIM_TYPES,
@@ -1242,6 +1242,19 @@ cv.addEventListener('pointerdown', (e) => {
   trackIntersections(p);
   toolDown(p);
 });
+// Con «?perf» en la direccion se muestra, al mover, cuanto tarda cada parte (rastreo, calculo del solver, dibujo) en este
+// dispositivo: sirve para saber que pesa en un iPad o un telefono sin adivinar.
+const PERF = new URLSearchParams(location.search).has('perf');
+const perfLog = [];
+let perfSolveMs = 0; // lo que tardo solo la resolucion (solver) dentro del movimiento
+function perfShow(tTrack, tMove, tDraw, dragging, tSolve = 0) {
+  let box = document.getElementById('perfBox');
+  if (!box) { box = document.createElement('div'); box.id = 'perfBox'; box.style.cssText = 'position:fixed;top:4px;right:4px;z-index:99;background:rgba(0,0,0,.72);color:#fff;font:12px/1.35 monospace;padding:4px 8px;border-radius:6px;pointer-events:none;white-space:pre'; document.body.appendChild(box); }
+  const row = [tTrack, tMove, tDraw, tSolve]; if (dragging) perfLog.push(row); if (perfLog.length > 20) perfLog.shift();
+  const avg = (i) => (perfLog.length ? perfLog.reduce((a, r) => a + r[i], 0) / perfLog.length : 0).toFixed(0);
+  box.textContent = `${dragging ? 'arrastre' : 'mover'}: rastreo ${tTrack.toFixed(0)} ms, movimiento ${tMove.toFixed(0)} ms (resolver ${tSolve.toFixed(0)}), dibujo ${tDraw.toFixed(0)} ms
+media de ${perfLog.length}: ${avg(0)} / ${avg(1)} (${avg(3)}) / ${avg(2)} ms  (dpr ${window.devicePixelRatio})`;
+}
 cv.addEventListener('pointermove', (e) => {
   const p = pos(e);
   const q = pointers.get(e.pointerId);
@@ -1250,13 +1263,19 @@ cv.addEventListener('pointermove', (e) => {
   if (loupe && q) loupe = { x: p.x, y: p.y };
   if (gesture) { gestureMove(); return; }
   hover = p;
+  const tp0 = PERF ? performance.now() : 0;
+  perfSolveMs = 0;
   trackIntersections(p);
   trackArc(p); trackEarc(p);
+  const tp1 = PERF ? performance.now() : 0;
   if (q) toolMove(p);
+  const tp2 = PERF ? performance.now() : 0;
   updateStatus(p);
   draw();
+  if (PERF) perfShow(tp1 - tp0, tp2 - tp1, performance.now() - tp2, !!q, perfSolveMs);
 });
 function endPointer(e) {
+  endSession();
   const q = pointers.get(e.pointerId);
   pointers.delete(e.pointerId);
   const hadLoupe = !!loupe;
@@ -1293,7 +1312,7 @@ function zoomAt(p, f) {
 }
 
 function startGesture() {
-  drag = null;
+  drag = null; endSession();
   const t = [...pointers.values()].filter((q) => q.type === 'touch').slice(0, 2);
   gesture = { mode: 'pinch', d0: dist(t[0], t[1]) || 1, s0: view.s, c0: { x: (t[0].x + t[1].x) / 2, y: (t[0].y + t[1].y) / 2 }, o0: { x: view.ox, y: view.oy } };
 }
@@ -1474,32 +1493,30 @@ function trimStep(p, d) {
   draw();
 }
 
+// toolMove solo se llama desde pointermove, que dibuja una vez al terminar: no se dibuja aqui (antes se dibujaba dos veces por movimiento)
 function toolMove(p) {
   if (!drag) return;
   if (tool === 'trim') {
     const a = drag.last, n = Math.max(1, Math.ceil(dist(a, p) / 4));
     for (let i = 1; i <= n; i++) trimStep({ x: a.x + ((p.x - a.x) * i) / n, y: a.y + ((p.y - a.y) * i) / n }, drag);
     drag.last = p; drag.trail.push(p); drag.moved = true;
-    draw();
     return;
   }
   if (tool !== 'select') { if (dist(p, drag.p0) > 8) drag.moved = true; return; }
   if (drag.box) { // cuadro de seleccion
     drag.p1 = p;
     if (dist(p, drag.p0) > 6) drag.boxOn = true;
-    draw();
     return;
   }
   if (drag.dim) {
     if (!drag.started) { if (dist(p, drag.p0) < 5) return; drag.started = true; pushUndo(); }
     dragDim(doc, doc.cons[drag.hit.id], view, p);
-    draw();
     return;
   }
   if (!drag.hit || !drag.orig) return;
   if (!drag.started) {
     if (dist(p, drag.p0) < 6) return;
-    drag.started = true; pushUndo();
+    drag.started = true; pushUndo(); beginSession(doc);
   }
   const m = toModel(p.x, p.y);
   const h = drag.hit;
@@ -1516,13 +1533,14 @@ function toolMove(p) {
     for (let i = 1; i <= steps; i++) {
       const f = i / steps, dx = prev.dx + (cur2.dx - prev.dx) * f, dy = prev.dy + (cur2.dy - prev.dy) * f;
       const tg = Object.entries(drag.orig).map(([id, o]) => ({ id, x: o.x + dx, y: o.y + dy }));
+      const ts0 = PERF ? performance.now() : 0;
       const r = hasReactive(doc) ? settle(doc, solveSteps, tg, { maxIter: 20 }) : solve(doc, tg); // con cotas que leen medidas, se actualizan mientras arrastras
+      if (PERF) perfSolveMs += performance.now() - ts0;
       if (r.ok) trackAngles(doc);
       if (r.ok && tracing) recordTraces(doc, 1.5 / view.s);
     }
     drag.lastD = cur2;
   }
-  draw();
 }
 
 function toolUp(p, q) {
