@@ -85,6 +85,8 @@ const custom = {
   'con-conc': S('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1" fill="currentColor"/>'),
   // linea de punto medio: crece igual a ambos lados del punto inicial
   mline: S('<path d="M3 19 21 5"/><circle cx="12" cy="12" r="2.6" fill="currentColor"/><path d="M3 15v8M21 1v8" opacity=".45"/>'),
+  // vector: linea con cabeza de flecha
+  vector: S('<path d="M4 20 19 5"/><path d="M9 5h10v10"/>'),
   'con-tan': S('<circle cx="12" cy="14" r="6"/><path d="M3 8h18"/>'),
   'con-onc': S('<path d="M3 19 21 5"/><circle cx="12" cy="12" r="2.8" fill="var(--btn, #fff)"/><circle cx="12" cy="12" r="1" fill="currentColor"/>'),
   'dim-dist': S('<path d="M3 12h18M3 8v8M21 8v8M3 12l4-2.5M3 12l4 2.5M21 12l-4-2.5M21 12l-4 2.5"/>'),

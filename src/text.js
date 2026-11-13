@@ -1,6 +1,28 @@
 // Geometria de los textos: caja imaginaria, punto de insercion y orientacion. Sin DOM.
 // measure(linea) -> ancho de la linea para una altura de texto de 1 (en el navegador sale
 // de measureText; en las pruebas puede ser una aproximacion).
+import { evalExpr } from './expr.js';
+import { varsOf } from './params.js';
+import { fmtNum } from './dims.js';
+
+// Salidas en textos: [=expresion] se reemplaza por el valor de la expresion, que puede usar los nombres de las cotas
+// (D1, A1, O2...) y funciones: "El diametro es [=O1] cm", "vueltas: [=A1/(2π)]". Un ángulo vale su medida en radianes.
+// Si la expresion falla, queda ⚠ en su lugar.
+const OUT_RE = /\[=([^\]]*)\]/g;
+export function textValue(doc, t) {
+  const s = String(t.text ?? '');
+  if (!s.includes('[=')) return s;
+  let vars = null;
+  return s.replace(OUT_RE, (m, ex) => {
+    try { vars ||= varsOf(doc); return fmtNum(evalExpr(ex, { vars }).value); } catch (e) { return '⚠'; }
+  });
+}
+// El texto tal como se ve (con sus salidas calculadas): el mismo objeto si no hay ninguna.
+export function shownText(doc, t) {
+  const v = textValue(doc, t);
+  return v === t.text ? t : { ...t, text: v };
+}
+
 export const ANCHORS = ['tl', 'tc', 'tr', 'ml', 'mc', 'mr', 'bl', 'bc', 'br'];
 export const ANCHOR_NAMES = {
   tl: 'esquina superior izquierda', tc: 'medio del lado superior', tr: 'esquina superior derecha',
@@ -66,7 +88,7 @@ export function textFrame(t, measure, anchor = t.anchor) {
 export function textCorners(doc, t, measure) {
   const P = doc.pts[t.pt];
   const pose = textPose(doc, t);
-  const f = textFrame(t, measure, pose.anchor);
+  const f = textFrame(shownText(doc, t), measure, pose.anchor);
   const a = (pose.ang * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
   const to = (x, y) => ({ x: P.x + x * c - y * s, y: P.y + x * s + y * c });
   return [to(f.xmin, f.ymin), to(f.xmin + f.w, f.ymin), to(f.xmin + f.w, f.ymax), to(f.xmin, f.ymax)];
@@ -76,7 +98,7 @@ export function textCorners(doc, t, measure) {
 export function textHit(doc, t, p, measure, pad = 0) {
   const P = doc.pts[t.pt];
   const pose = textPose(doc, t);
-  const f = textFrame(t, measure, pose.anchor);
+  const f = textFrame(shownText(doc, t), measure, pose.anchor);
   const a = (pose.ang * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
   const rx = p.x - P.x, ry = p.y - P.y;
   const u = rx * c + ry * s, w = -rx * s + ry * c; // al sistema local

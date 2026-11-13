@@ -1,5 +1,10 @@
 # Historial de cambios
 
+## v1.6.0 (2026-11-13)
+
+- **Vector** (en el desplegable de Línea, tecla W): una línea con cabeza de flecha en el punto final y su magnitud como texto en el punto medio (inserción en el medio del lado superior, así queda centrada). La magnitud es una cota de solo lectura con nombre (D1...), usable en fórmulas y textos. Con una línea y uno de sus extremos (la cola) seleccionados, «Vector» la convierte; con un vector seleccionado, «Línea» lo convierte en línea. Se copian con su propio texto y magnitud, el borrado se lleva sus partes, y la flecha sale en SVG y DXF.
+- **Salidas en textos**: `[=expresión]` en un texto muestra el valor de la expresión (`[=O1]`, `[=D1*D2]`, `[=A1/(2π)]`), con los nombres de las cotas y sus funciones. Se actualiza al cambiar el dibujo, y también en las exportaciones.
+
 ## v1.5.2 (2026-11-12)
 
 - **Evolvente y otras salidas que leen una medida**: al resolver las fórmulas, los puntos que miden las cotas de solo lectura que ellas leen (las entradas) se dejan fijos. Antes, al fijar D1 = R·A1 el solver podía mover el punto tangente (que mide A1) en vez de alargar la cuerda, A1 cambiaba, la fórmula perseguía su propia cola y daba «D1 quedaría en -3.404». Si el dibujo necesita que la entrada se mueva (por ejemplo arrastrar la rueda por P), se reintenta sin fijarla. Con una comprobación de que la cota con fórmula se cumple de verdad.

@@ -15,7 +15,8 @@ import { crossPoints } from './snapx.js';
 import { trimAt, extendEnd, linearArray, mirrorCopy, circularArray, clipOf, pasteClip } from './edit.js';
 import { CLINE_STYLE, circleThrough3, addRectangle, polygonVertices, addPolygon, arcIsClockwise, constructionArcDash } from './shapes.js';
 import { layoutDim, dragDim, dimValue, angSector, angTrue, initAngle, trackAngles, DIAM } from './dims.js';
-import { textFrame, textHit, textPose, rawAngle, ANCHORS, ANCHOR_NAMES, LINE_SPACING, FONTS, fontCss } from './text.js';
+import { makeVector, unmakeVector, syncVectors, vecArrow } from './vectors.js';
+import { textFrame, textHit, textPose, shownText, rawAngle, ANCHORS, ANCHOR_NAMES, LINE_SPACING, FONTS, fontCss } from './text.js';
 import * as gh from './github.js';
 import { varsOf, varsList, recompute, pruneFormulas, renameDim, checkName, settle, hasReactive } from './params.js';
 import { exportSVG, exportSVGLaser, exportDXF, extraExtents, laserClasses } from './export.js';
@@ -26,7 +27,7 @@ import { parseValue, isPlainNumber } from './expr.js';
 import { HELP_HTML } from './help.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from './lock.js';
 
-const VERSION = '1.5.2';
+const VERSION = '1.6.0';
 const STORE = 'ipad-cad-v1';
 const $ = (id) => document.getElementById(id);
 const cv = $('cv');
@@ -102,7 +103,7 @@ function persist() {
   }, 300);
 }
 // afterChange tambien mantiene al dia las cotas que leen medidas (si no se estabilizan, se deja como estaba)
-function afterChange() { trackAngles(doc); const fz = pruneFormulas(doc); if (hasReactive(doc)) { const bak = snapshot(), st = settle(doc, solve, []); if (!st.ok) doc = JSON.parse(bak); } if (fz.length) toast(`${fz.join(', ')}: la cota de la que dependía ya no existe o es de referencia; queda con su valor actual`); layerBtn(); updateButtons(); updateEnabled(); syncPanel(); persist(); draw(); renderTree(); }
+function afterChange() { syncVectors(doc); trackAngles(doc); const fz = pruneFormulas(doc); if (hasReactive(doc)) { const bak = snapshot(), st = settle(doc, solve, []); if (!st.ok) doc = JSON.parse(bak); } if (fz.length) toast(`${fz.join(', ')}: la cota de la que dependía ya no existe o es de referencia; queda con su valor actual`); layerBtn(); updateButtons(); updateEnabled(); syncPanel(); persist(); draw(); renderTree(); }
 
 // Un boton de restriccion solo se activa si la seleccion actual le sirve (mismas reglas que applyCon).
 function updateEnabled() {
@@ -334,7 +335,7 @@ function shownPoints() {
 
 // ---- iman a intersecciones: la interseccion de dos elementos cercanos al cursor se toma como punto, una vez
 // que el cursor se queda ahi opts.intMs milisegundos (un toque o el inicio de un arrastre la toman al instante).
-const DRAW_TOOLS = new Set(['point', 'line', 'cline', 'mline', 'circle', 'circle3', 'rect', 'rectc', 'polygon', 'paste', 'ellipse', 'arcc', 'arc3', 'spline', 'text']);
+const DRAW_TOOLS = new Set(['point', 'line', 'vector', 'cline', 'mline', 'circle', 'circle3', 'rect', 'rectc', 'polygon', 'paste', 'ellipse', 'arcc', 'arc3', 'spline', 'text']);
 const intSeen = new Map();
 let intTimer = 0;
 function curvesNear(sx, sy, px) {
@@ -714,6 +715,14 @@ export function render(c, W, H, v, o) {
     const dsh = applyStroke(c, l.color, l.w, l.ltype, o, l.ls);
     if (l.ltype === 'constructiva') strokeConstruction(c, a.x * dpr, a.y * dpr, b.x * dpr, b.y * dpr, l.w, l.ls);
     else strokeLine(c, a.x * dpr, a.y * dpr, b.x * dpr, b.y * dpr, dsh);
+    const A = l.vec && vecArrow(doc, l); // cabeza de flecha del vector (en la cabeza; con rev, en el punto a)
+    if (A) {
+      const tp = toScreen(A.tip), ux = A.dir.x, uy = -A.dir.y, len = Math.min(11 + l.w * 2, dist(a, b) * 0.6), hw = len * 0.33;
+      c.setLineDash([]); c.fillStyle = colorOf(l.color, o);
+      c.beginPath(); c.moveTo(tp.x * dpr, tp.y * dpr);
+      c.lineTo((tp.x - ux * len - uy * hw) * dpr, (tp.y - uy * len + ux * hw) * dpr); c.lineTo((tp.x - ux * len + uy * hw) * dpr, (tp.y - uy * len - ux * hw) * dpr);
+      c.closePath(); c.fill();
+    }
   }
   for (const [id, sp] of shownEntries(doc, 'splines')) {
     const P = splinePolyline(doc, sp, 16).map((q) => { const s = toScreen(q); return { x: s.x * dpr, y: s.y * dpr }; });
@@ -872,7 +881,7 @@ function drawTexts(c, o) {
     const P = doc.pts[t.pt];
     if (!P) continue;
     const pose = textPose(doc, t);
-    const S = toScreen(P), f = textFrame(t, measureRel, pose.anchor), sc = view.s;
+    const S = toScreen(P), f = textFrame(shownText(doc, t), measureRel, pose.anchor), sc = view.s;
     c.save();
     c.translate(S.x * dpr, S.y * dpr);
     c.rotate(-(pose.ang * Math.PI) / 180);
@@ -966,7 +975,7 @@ function drawPreview(c) {
   if (hover) {
     let s = snapAt(hover.x, hover.y);
     // bloqueo suave de la linea que se esta dibujando (pendiente o arrastrando)
-    const lref = tool === 'line' || tool === 'cline' || tool === 'mline' || tool === 'polygon' ? lineStartRef() : null;
+    const lref = tool === 'line' || tool === 'vector' || tool === 'cline' || tool === 'mline' || tool === 'polygon' ? lineStartRef() : null;
     const lk = lref ? lockFor(lref, hover) : null;
     if (lk) s = { type: lk.end ? lk.end.type : 'free', x: lk.x, y: lk.y };
     const sp = toScreen(s);
@@ -1524,13 +1533,14 @@ function toolUp(p, q) {
     if (sUp.type === 'pt') { toast('Ya hay un punto aquí'); return; }
     pushUndo(); const id = pointFrom(sUp); doc.pts[id].auto = false; if (doc.curLayer && doc.layers?.[doc.curLayer]) doc.pts[id].layer = doc.curLayer; afterChange(); return;
   }
-  if (tool === 'line' || tool === 'cline') {
+  if (tool === 'line' || tool === 'vector' || tool === 'cline') {
     if (moved && !pending) {
       pushUndo();
       const lk = lockFor({ snap: sDown }, p);
       const a = pointFrom(sDown), b = pointFrom(lk ? lockEnd(lk) : sUp);
       if (a === b) { rollback(); return; }
       const lid = addLine(doc, a, b, lineStyle());
+      if (tool === 'vector') makeVector(doc, lid, { h: niceHeight() });
       if (lk) applyLock(lid, lk);
       finishEdit();
       return;
@@ -1541,6 +1551,7 @@ function toolUp(p, q) {
     const lk = lockFor({ id: pending.start }, p, !moved);
     const b = pointFrom(lk ? lockEnd(lk) : sUp);
     const lid = addLine(doc, pending.start, b, lineStyle());
+    if (tool === 'vector') makeVector(doc, lid, { h: niceHeight() });
     if (lk) applyLock(lid, lk);
     pending = { start: b };
     finishEdit(true);
@@ -2375,6 +2386,7 @@ const HINTS = {
   line: 'Toca inicio y fin (encadena); o arrastra un segmento. Esc/Seleccionar termina.',
   circle: 'Toca el centro y luego un punto del borde.',
   mline: 'Línea de punto medio: toca el punto medio y luego un extremo (o arrastra); la línea crece igual hacia el otro lado. Hay bloqueo suave.',
+  vector: 'Vector: como Línea, con cabeza de flecha en el punto final y su magnitud como texto en el punto medio. Con una línea (y uno de sus extremos, que será la cola) seleccionada, pulsar Vector la convierte en vector.',
   cline: 'Línea constructiva (gris, fina, con un punto en cada extremo): toca inicio y fin, o arrastra. No sale en el SVG de corte láser salvo que lo elijas.',
   circle3: 'Círculo perimetral: toca 3 puntos no colineales por donde pasa la circunferencia.',
   rect: 'Rectángulo: toca (o arrastra entre) dos esquinas opuestas de la diagonal.',
@@ -2402,7 +2414,7 @@ function updateStatus(p) {
   if (sel.length === 1) {
     const s = sel[0];
     if (s.k === 'pt') { const q = doc.pts[s.id]; txt = `Punto (${fmt(q.x)}, ${fmt(q.y)})${q.fixed ? ' fijo' : ''}`; }
-    else if (s.k === 'ln') { const [a, b] = lineEnds(s.id).map((i) => doc.pts[i]); txt = `Línea: longitud ${fmt(dist(a, b))}, ángulo ${fmt((Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI)}°, ${ltLabel(doc.lines[s.id])}`; }
+    else if (s.k === 'ln') { const [a, b] = lineEnds(s.id).map((i) => doc.pts[i]); txt = `${doc.lines[s.id].vec ? 'Vector' : 'Línea'}: ${doc.lines[s.id].vec ? 'magnitud' : 'longitud'} ${fmt(dist(a, b))}, ángulo ${fmt((Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI)}°, ${ltLabel(doc.lines[s.id])}`; }
     else if (s.k === 'ci') txt = `Círculo: radio ${fmt(doc.circles[s.id].r)}, ${ltLabel(doc.circles[s.id])}`;
     else if (s.k === 'tx') { const t = doc.texts[s.id]; txt = `Texto: “${t.text.split('\n')[0].slice(0, 24)}”, ${fmt(t.ang)}°, insercion ${t.anchor}${t.ref ? ', alineado con una línea' : ''}`; }
     else if (s.k === 'sp') { const sp = doc.splines[s.id]; txt = `Spline: ${sp.pts.length} puntos, ${sp.closed ? 'cerrada' : 'abierta'}, ${ltLabel(sp)}`; }
@@ -2520,7 +2532,7 @@ const GROUPS = {
   file: [['fNew', 'file-plus', 'Nuevo dibujo'], ['fSave', 'save', 'Guardar (.json)'], ['fLoad', 'folder-open', 'Abrir…'], ['ghSave', 'save', 'Guardar en GitHub…'], ['ghOpen', 'folder-open', 'Abrir de GitHub…'], ['ghCfg', 'props', 'Configurar GitHub…'], ['fPng', 'image', 'Exportar PNG'], ['fSvg', 'svg', 'Exportar SVG'], ['fLaser', 'svg', 'SVG para corte láser…'], ['fDxf', 'dxf', 'Exportar DXF']],
   spl: [['spline', 'spline', 'Spline por puntos (S)'], ['trTrace', 'trace', 'Trazar punto (activar o quitar)'], ['trClear', 'trash', 'Borrar trayectoria'], ['trSpline', 'spline', 'Trazado a spline…'], ['spClose', 'spline-closed', 'Cerrar o abrir el spline'], ['spOffset', 'spline', 'Equidistante…']],
   sel: [['select', 'select', 'Seleccionar y arrastrar (V)'], ['filter', 'filter', 'Filtrar la selección…']],
-  line: [['line', 'line', 'Línea (L)'], ['mline', 'mline', 'Línea de punto medio (M)'], ['cline', 'cline', 'Línea constructiva (K)']],
+  line: [['line', 'line', 'Línea (L)'], ['vector', 'vector', 'Vector: línea con flecha y magnitud (W). Con una línea seleccionada, la convierte en vector'], ['mline', 'mline', 'Línea de punto medio (M)'], ['cline', 'cline', 'Línea constructiva (K)']],
   circle: [['circle', 'circle', 'Círculo (C)'], ['circle3', 'circle3', 'Círculo perimetral (3 puntos)'], ['ccircle', 'ccircle', 'Círculo constructivo']],
   arc: [['arcc', 'arc-c', 'Arco por centro y extremos (R)'], ['arc3', 'arc-3', 'Arco por 3 puntos (A)'], ['carcc', 'carcc', 'Arco constructivo por centro y extremos'], ['carc3', 'carc3', 'Arco constructivo por 3 puntos']],
   ellipse: [['ellipse', 'ellipse', 'Elipse: centro y dos ejes (O)'], ['earc', 'earc', 'Elipse parcial (arco elíptico)']],
@@ -2532,7 +2544,29 @@ const GROUPS = {
 const ACT_IDS = new Set(['ghSave', 'ghOpen', 'ghCfg', 'fNew', 'fSave', 'fLoad', 'fPng', 'fSvg', 'fLaser', 'fDxf', 'trTrace', 'trClear', 'trSpline', 'spClose', 'spOffset']);
 const MENU_ONLY = new Set(['file']); // el boton solo abre el desplegable (nunca ejecuta algo, p. ej. "Nuevo")
 const isAct = (id) => id === 'filter' || ACT_IDS.has(id);
+// Vector <-> linea con lo seleccionado: con una linea (y uno de sus extremos, la cola) seleccionada, «Vector» la convierte;
+// con un vector seleccionado, «Línea» lo convierte en linea. Sin eso, el boton elige la herramienta.
+function selectedLines(wantVec) { return sel.filter((x) => x.k === 'ln' && doc.lines[x.id] && !!doc.lines[x.id].vec === wantVec).map((x) => x.id); }
+function convertToVector() {
+  const ids = selectedLines(false);
+  if (!ids.length) return false;
+  const pts = sel.filter((x) => x.k === 'pt').map((x) => x.id);
+  pushUndo();
+  for (const id of ids) { const l = doc.lines[id]; makeVector(doc, id, { rev: pts.includes(l.b) && !pts.includes(l.a), h: niceHeight() }); }
+  afterChange(); toast(ids.length === 1 ? 'Convertida en vector' : `${ids.length} líneas convertidas en vectores`);
+  return true;
+}
+function convertToLine() {
+  const ids = selectedLines(true);
+  if (!ids.length) return false;
+  pushUndo();
+  for (const id of ids) unmakeVector(doc, id);
+  afterChange(); toast(ids.length === 1 ? 'Convertido en línea' : `${ids.length} vectores convertidos en líneas`);
+  return true;
+}
 function runGroupItem(id) {
+  if (id === 'vector' && convertToVector()) return;
+  if (id === 'line' && convertToLine()) return;
   if (ACT_IDS.has(id)) { if (!$(id).disabled) $(id).click(); }
   else if (id === 'filter') openFilter();
   else if (id === 'copy') copySel();
@@ -2762,7 +2796,7 @@ function openProps(h) {
   propT = { k: h.k, id: h.id };
   const o = propObj();
   if (!o) { propT = null; return; }
-  $('prTitle').textContent = `${PROP_NAMES[h.k]}${h.k === 'el' && isPartial(o) ? ' (arco elíptico)' : ''} ${h.id}`;
+  $('prTitle').textContent = `${h.k === 'ln' && o.vec ? 'Vector' : PROP_NAMES[h.k]}${h.k === 'el' && isPartial(o) ? ' (arco elíptico)' : ''} ${h.id}`;
   const body = $('prBody');
   body.textContent = '';
   const k = h.k;
@@ -3323,7 +3357,7 @@ window.addEventListener('keydown', (e) => {
   else if ((e.ctrlKey || e.metaKey) && k === 'v') { e.preventDefault(); pasteTool(); }
   else if (k === 'escape') { if (pickResolve) { const r = pickResolve; pickResolve = null; r(null); } else if (pending) { if (tool === 'spline' && pending.ids?.length >= 2) finishSpline(false); else cancelPending(); } else { sel = []; afterChange(); } }
   else if (k === 'delete' || k === 'backspace') $('del').click();
-  else if (!e.ctrlKey && !e.metaKey) { const m = { v: 'select', p: 'point', l: 'line', c: 'circle', i: 'intersect', d: 'dim', a: 'arc3', r: 'arcc', t: 'text', s: 'spline', x: 'trim', e: 'extend', o: 'ellipse', b: 'rect', g: 'polygon', k: 'cline', m: 'mline' }[k]; if (m) setTool(m); }
+  else if (!e.ctrlKey && !e.metaKey) { const m = { v: 'select', p: 'point', l: 'line', c: 'circle', i: 'intersect', d: 'dim', a: 'arc3', r: 'arcc', t: 'text', s: 'spline', x: 'trim', e: 'extend', o: 'ellipse', b: 'rect', g: 'polygon', k: 'cline', m: 'mline', w: 'vector' }[k]; if (m) setTool(m); }
 });
 window.addEventListener('keyup', (e) => { if (e.code === 'Space') spaceDown = false; if (e.key === 'Shift') shiftDown = false; });
 // Area visible real (con teclado en pantalla): los dialogos se acomodan arriba de ella

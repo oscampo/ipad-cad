@@ -212,7 +212,7 @@ export const conTag = (k) => (CON_GROUP[k.t] ? CON_GLYPH[CON_GROUP[k.t]] + (k.n 
 // y sin reutilizar numeros. El nombre se puede cambiar; las formulas de otras cotas lo usan como variable.
 export const DIM_TYPES = ['DIST', 'DISTPL', 'ANG', 'RAD'];
 export const DIM_KIND = { D: 'Distancia', A: 'Ángulo', R: 'Radio', O: 'Diámetro' };
-export const isNamedDim = (k) => DIM_TYPES.includes(k.t) && k.v !== undefined && !k.hidden;
+export const isNamedDim = (k) => DIM_TYPES.includes(k.t) && k.v !== undefined && (!k.hidden || !!k.vec); // la magnitud de un vector es oculta pero con nombre
 export const dimLetter = (doc, k) => (k.t === 'ANG' ? 'A' : k.t === 'RAD' ? (k.refs[0] in doc.circles ? 'O' : 'R') : 'D');
 const nameTaken = (doc, name) => Object.values(doc.cons).some((k) => k.name === name);
 function giveName(doc, con) {
@@ -284,7 +284,7 @@ export function cleanup(doc) {
   while (changed) {
     changed = false;
     for (const [id, k] of Object.entries(doc.cons)) {
-      if (!conRefs(k).every(exists)) { delete doc.cons[id]; changed = true; }
+      if (!conRefs(k).every(exists) || (k.vec && !(k.vec in doc.lines))) { delete doc.cons[id]; changed = true; } // k.vec: magnitud de un vector que ya no existe
     }
     for (const [id, sp] of Object.entries(doc.splines || {})) {
       const keep = sp.pts.filter((p) => p in doc.pts);
@@ -298,7 +298,7 @@ export function cleanup(doc) {
     }
     for (const id of Object.keys(doc.traces || {})) if (!(id in doc.pts)) { delete doc.traces[id]; changed = true; }
     for (const [id, t] of Object.entries(doc.texts || {})) {
-      if (!(t.pt in doc.pts)) { delete doc.texts[id]; changed = true; }
+      if (!(t.pt in doc.pts) || (t.vecOf && !(t.vecOf in doc.lines))) { delete doc.texts[id]; changed = true; }
       else if (t.ref && !(t.ref in doc.lines)) delete t.ref; // la linea de referencia ya no existe: queda con su desfase
     }
     for (const [id, h] of Object.entries(doc.hatches)) {

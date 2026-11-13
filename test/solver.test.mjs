@@ -2,12 +2,13 @@ import assert from 'node:assert/strict';
 import { addLayer, deleteLayer, layerCount, isHidden, shownEntries, layerHiddenPoints, consHidden, visibleDoc, newDoc, addPoint, addLine, addCircle, addArc, addCon, addText, addSpline, deleteItems, hatchLoops, arcOf, cleanup, splinePolyline, conTag, ensureNumbers, addEllipse, ellipseOf, ellipsePolyline, ellipsePoint, ellipseParam, ellipseRange, isPartial } from '../src/model.js';
 import { startTrace, recordTraces, traceToSpline, offsetPolyline, firstLap } from '../src/curves.js';
 import { layoutDim, dragDim, dimValue, dimText, angSector, angTrue, initAngle, trackAngles } from '../src/dims.js';
-import { textFrame, textCorners, textHit, textPose, rawAngle } from '../src/text.js';
+import { textFrame, textCorners, textHit, textPose, rawAngle, textValue, shownText } from '../src/text.js';
 import { exportSVG, exportSVGLaser, exportDXF, dimLayouts, extraExtents, laserClasses, styleKey } from '../src/export.js';
 import { splitElement } from '../src/split.js';
 import { buildTree, conLabel } from '../src/tree.js';
 import { cleanFileBase } from '../src/files.js';
 import { parseValue, evalExpr, isPlainNumber, exprRefs, renameInExpr } from '../src/expr.js';
+import { makeVector, unmakeVector, syncVectors, isVector, vecArrow, vecEnds } from '../src/vectors.js';
 import { recompute, pruneFormulas, renameDim, checkName, varsOf, settle, hasReactive } from '../src/params.js';
 import { nameDims } from '../src/model.js';
 import { trimAt, extendEnd, cutsOf, curveCuts, linearArray, mirrorCopy, circularArray, clipOf, pasteClip, bboxOf } from '../src/edit.js';
@@ -2143,6 +2144,111 @@ t('angulo continuo: una formula puede dar mas de 360 y entra en otras como radia
   d.cons[kA].cur = 450; d.cons[kA].v = angTrue(d, d.cons[kA], 450); // 450° = 1 vuelta y 90°
   assert.ok(recompute(d).ok);
   near(d.cons[kB].v, 2 * (450 * Math.PI) / 180, 1e-9);
+});
+
+t('textos con salidas: [=expresion] usa los nombres de las cotas y las funciones', () => {
+  const d = newDoc();
+  const a = addPoint(d, 0, 0), b = addPoint(d, 4, 0), c = addPoint(d, 0, 3), cc = addPoint(d, 20, 0);
+  const ci = addCircle(d, cc, 5, {}), l1 = addLine(d, a, b, {}), l2 = addLine(d, a, c, {});
+  addCon(d, { t: 'DIST', refs: [a, b], v: 4 });                                 // D1
+  addCon(d, { t: 'DIST', refs: [a, c], v: 3 });                                 // D2
+  addCon(d, { t: 'RAD', refs: [ci], v: 5 });                                    // O1 (diametro 10)
+  addCon(d, { t: 'ANG', refs: [l1, l2], s1: 1, s2: 1, sg: 1, cur: 720, v: 0 }); // A1 = 720° = 4π rad
+  const P = addPoint(d, 1, 1);
+  const T = (txt) => textValue(d, d.texts[addText(d, P, txt, {})]);
+  assert.equal(T('El diámetro es [=O1] cm'), 'El diámetro es 10 cm');
+  assert.equal(T('El área es [=D1*D2] mm^2'), 'El área es 12 mm^2');
+  assert.equal(T('vueltas: [=A1/(2π)]'), 'vueltas: 2');
+  assert.equal(T('[=D1] y [=D2/3] y [=sin(30)*D1]'), '4 y 1 y 2');
+  assert.equal(T('sin salidas'), 'sin salidas');
+  assert.equal(T('[=D9]'), '⚠');
+  assert.equal(T('[=2+]'), '⚠');
+  // el ancho de la caja es el del texto ya calculado
+  const t = d.texts[addText(d, P, 'x [=O1]', { h: 2 })];
+  const w = textFrame(shownText(d, t), (ln) => ln.length * 0.5).w;
+  near(w, 'x 10'.length * 0.5 * 2, 1e-9);
+  assert.equal(shownText(d, d.texts[addText(d, P, 'hola', {})]).text, 'hola');
+});
+t('vector: linea con flecha, magnitud como cota de referencia y texto en el punto medio', () => {
+  const d = newDoc();
+  const a = addPoint(d, 0, 0, false), b = addPoint(d, 6, 8, false);
+  const l = addLine(d, a, b, { color: '#2563eb', ltype: 'continua', w: 2, ls: 1 });
+  assert.ok(makeVector(d, l, { h: 3 }));
+  assert.ok(!makeVector(d, l), 'no se convierte dos veces');
+  const v = d.lines[l].vec;
+  assert.ok(isVector(d.lines[l]));
+  const dim = d.cons[v.d];
+  assert.deepEqual([dim.t, dim.ref, dim.hidden, dim.name], ['DIST', true, true, 'D1']);
+  near(dimValue(d, dim), 10);
+  assert.equal(d.texts[v.t].text, '[=D1]');
+  assert.equal(d.texts[v.t].anchor, 'tc');
+  assert.equal(d.texts[v.t].pt, v.m);
+  near(d.pts[v.m].x, 3); near(d.pts[v.m].y, 4);
+  assert.equal(textValue(d, d.texts[v.t]), '10');
+  assert.ok(Object.values(d.cons).some((k) => k.t === 'MID' && k.refs[2] === v.m), 'el texto sigue al punto medio');
+  // el texto sigue el punto medio al mover la cabeza
+  d.pts[a].fixed = true;
+  assert.ok(solve(d, [{ id: b, x: 16, y: 8 }]).ok);
+  near(d.pts[v.m].x, 8); near(d.pts[v.m].y, 4);
+  near(Number(textValue(d, d.texts[v.t])), Math.hypot(16, 8), 1e-3);
+  const A = vecArrow(d, d.lines[l]);
+  near(A.tip.x, 16); near(Math.hypot(A.dir.x, A.dir.y), 1);
+  // la magnitud se puede usar en formulas de otras cotas
+  assert.deepEqual(Object.keys(varsOf(d)), ['D1']);
+  // cola en b: la cabeza queda en a
+  const l2 = addLine(d, a, b, {});
+  makeVector(d, l2, { rev: true });
+  assert.equal(vecEnds(d.lines[l2]).head, a);
+  const A2 = vecArrow(d, d.lines[l2]);
+  near(A2.tip.x, 0); assert.ok(A2.dir.x < 0);
+});
+t('vector: convertir a linea quita el texto, la cota y el punto medio; borrarlo tambien', () => {
+  const d = newDoc();
+  const a = addPoint(d, 0, 0, false), b = addPoint(d, 6, 8, false);
+  const l = addLine(d, a, b, {});
+  makeVector(d, l);
+  const nPts = Object.keys(d.pts).length;
+  assert.equal(nPts, 3);
+  assert.ok(unmakeVector(d, l));
+  assert.equal(d.lines[l].vec, undefined);
+  assert.equal(Object.keys(d.texts).length, 0);
+  assert.equal(Object.keys(d.cons).length, 0);
+  assert.equal(Object.keys(d.pts).length, 2, 'el punto medio (auto) se va');
+  makeVector(d, l);
+  deleteItems(d, [{ k: 'ln', id: l }]);
+  cleanup(d);
+  assert.equal(Object.keys(d.texts).length, 0, 'borrar el vector borra su texto');
+  assert.equal(Object.values(d.cons).filter((k) => k.vec).length, 0, 'y su cota');
+});
+t('vector: al cambiar un extremo (recortar o extender) la magnitud sigue a la linea; las copias son vectores nuevos', () => {
+  const d = newDoc();
+  const a = addPoint(d, 0, 0, false), b = addPoint(d, 6, 8, false), b2 = addPoint(d, 3, 4, false);
+  const l = addLine(d, a, b, {});
+  makeVector(d, l);
+  d.lines[l].b = b2; // como al recortar: la linea pasa a terminar en otro punto
+  syncVectors(d);
+  assert.deepEqual(d.cons[d.lines[l].vec.d].refs, [a, b2]);
+  near(dimValue(d, d.cons[d.lines[l].vec.d]), 5);
+  const r = linearArray(d, [{ k: 'ln', id: l }], [{ u: { x: 1, y: 0 }, s: 10, n: 1 }]);
+  assert.ok(r.ok);
+  const vecs = Object.entries(d.lines).filter(([, x]) => x.vec);
+  assert.equal(vecs.length, 2, 'la copia es otro vector');
+  assert.notEqual(vecs[0][1].vec.t, vecs[1][1].vec.t);
+  assert.notEqual(vecs[0][1].vec.d, vecs[1][1].vec.d);
+  assert.equal(Object.keys(d.texts).length, 2, 'cada vector con su propio texto');
+  assert.deepEqual(Object.values(d.cons).filter((k) => k.vec).map((k) => k.name).sort(), ['D1', 'D2']);
+});
+t('vector: la flecha sale en el SVG y en el DXF, y el texto con su valor', () => {
+  const d = newDoc();
+  const a = addPoint(d, 0, 0, false), b = addPoint(d, 10, 0, false);
+  const l = addLine(d, a, b, { color: '#2563eb', ltype: 'continua', w: 2, ls: 1 });
+  makeVector(d, l, { h: 2 });
+  const svg = exportSVG(d, 1, { dims: false, texts: true });
+  assert.match(svg, /<polygon/);
+  assert.match(svg, />10</, 'el valor de la magnitud');
+  const dxf = exportDXF(d, 5, { dims: false, texts: true });
+  assert.ok(dxf.split(/\r?\n/).filter((v) => v === 'LINE').length >= 3, 'la linea y dos trazos de la cabeza');
+  assert.match(dxf, /\r?\n1\r?\n10\r?\n/);
 });
 
 console.log(`\n${passed} pruebas pasaron`);

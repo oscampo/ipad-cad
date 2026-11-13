@@ -1,5 +1,6 @@
 // Recortar, extender y matriz lineal. Sin DOM (se prueba en Node). Mutan doc; quien llama hace undo/solve
 // y revierte si el solver falla.
+import { makeVector } from './vectors.js';
 import { shownEntries, addPoint, addLine, addArc, addCircle, addEllipse, addSpline, addText, addCon, nextId, arcOf, splinePolyline, deleteItems, arcSamples, ellipsePolyline, ellipseOf, ellipseRange, ellipsePoint, ellipseParam, isPartial, cleanup } from './model.js';
 import { dist, closestOnSeg, lineLine, lineCircle, circleCircle, polylineLine, polylineCircle, polylinePolyline, closestOnPolyline, inSweep, angleFrom, norm, TAU } from './geom.js';
 import { splitElement } from './split.js';
@@ -419,8 +420,11 @@ const jclone = (o) => JSON.parse(JSON.stringify(o));
 function makeCopy(doc, col, tf, { mirror = false, reuse = null, axisAng = 0, hvAngle, rotDeg = 0, linked = false, src = null } = {}) {
   const { P, L, Ci, Ar, Sp, Tx, El, cons, hatches } = col;
   const S = src || doc; // de donde se leen los originales (al pegar, un documento guardado al copiar)
-  const M = {}, made = [];
+  const M = {}, made = [], vecLines = [];
+  // las partes de un vector (punto medio, texto y cota de magnitud) no se copian: la copia del vector las crea nuevas
+  const vecMids = new Set(Object.values(S.lines).filter((l) => l.vec).map((l) => l.vec.m));
   for (const pid of P) {
+    if (vecMids.has(pid)) continue;
     if (reuse && reuse(pid)) { M[pid] = pid; continue; }
     const o = S.pts[pid], q = tf(o), np = addPoint(doc, q.x, q.y, !!o.auto);
     const { x, y, ...flags } = o;
@@ -428,7 +432,7 @@ function makeCopy(doc, col, tf, { mirror = false, reuse = null, axisAng = 0, hvA
     if (linked) doc.pts[np].fixed = false; // la copia sigue al original
     M[pid] = np;
   }
-  for (const id of L) { const { a, b, ...st } = S.lines[id]; M[id] = addLine(doc, M[a], M[b], st); made.push({ k: 'ln', id: M[id] }); }
+  for (const id of L) { const { a, b, vec, ...st } = S.lines[id]; M[id] = addLine(doc, M[a], M[b], st); made.push({ k: 'ln', id: M[id] }); if (vec) vecLines.push([M[id], vec, S.texts?.[vec.t]]); }
   for (const id of Ci) { const { c, r, ...st } = S.circles[id]; M[id] = addCircle(doc, M[c], r, st); made.push({ k: 'ci', id: M[id] }); }
   for (const id of Ar) {
     const { c, a, b, r, ...st } = S.arcs[id];
@@ -442,12 +446,13 @@ function makeCopy(doc, col, tf, { mirror = false, reuse = null, axisAng = 0, hvA
   for (const id of Sp) { const { pts, closed, ...st } = S.splines[id]; M[id] = addSpline(doc, pts.map((p) => M[p]), st, closed); made.push({ k: 'sp', id: M[id] }); }
   for (const id of Tx) {
     const t = S.texts[id];
+    if (t.vecOf) continue;
     const ang0 = t.ref && !M[t.ref] ? rawAngle(S, t) : t.ang; // alineado con una linea que no viene en la copia: conserva su orientacion
     M[id] = addText(doc, M[t.pt], t.text, { h: t.h, ang: mirror ? 2 * axisAng - ang0 : ang0 + rotDeg, anchor: t.anchor, color: t.color, readable: t.readable, font: t.font, layer: t.layer });
     if (t.ref && M[t.ref]) doc.texts[M[id]].ref = M[t.ref];
     made.push({ k: 'tx', id: M[id] });
   }
-  for (const k of linked ? [] : cons) { // vinculadas: las restricciones internas las hereda la copia por estar atada al original
+  for (const k of linked ? [] : cons.filter((k) => !k.vec && !k.refs.some((r) => vecMids.has(r)))) { // vinculadas: las restricciones internas las hereda la copia por estar atada al original
     const n = { ...jclone(k), refs: k.refs.map((r) => M[r]) };
     if (hvAngle !== undefined && (n.t === 'H' || n.t === 'V')) {
       const m = ((hvAngle % 180) + 180) % 180;
@@ -458,6 +463,7 @@ function makeCopy(doc, col, tf, { mirror = false, reuse = null, axisAng = 0, hvA
     addCon(doc, n);
   }
   for (const h of hatches) doc.hatches[nextId(doc, 'h')] = { ...jclone(h), ids: h.ids.map((x) => M[x]) };
+  for (const [lid, v, tx] of vecLines) makeVector(doc, lid, { rev: v.rev, h: tx?.h }); // cada copia es un vector con su propia magnitud
   return { made, M };
 }
 

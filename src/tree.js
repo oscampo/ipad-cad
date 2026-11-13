@@ -16,12 +16,12 @@ const CON_NAMES = {
 export function conLabel(doc, k) {
   const tag = conTag(k);
   let s = (tag ? tag + ' · ' : k.name ? k.name + ' · ' : '') + (CON_NAMES[k.t] || k.t);
-  if (k.t === 'DIST' || k.t === 'DISTPL') s += ` = ${f(k.v)}`;
+  if (k.t === 'DIST' || k.t === 'DISTPL') s += ` = ${f(dimValue(doc, k))}`;
   else if (k.t === 'ANG' || k.t === 'ANG4') s += ` = ${dimText(doc, k)}`;
   else if (k.t === 'RAD') s += (k.refs[0] in doc.circles ? ` ${DIAM} = ${f(k.v * 2)}` : ` R = ${f(k.v)}`);
   if (k.expr && !k.ref) s += ` (= ${k.expr})`;
   if (k.ref) s += ' (referencia)';
-  if (k.hidden) s += ' (auto)';
+  if (k.hidden) s += k.vec ? ' (magnitud de vector)' : ' (auto)';
   return s;
 }
 
@@ -41,7 +41,7 @@ export function buildTree(doc) {
   const group = (key, label, items) => ({ key, label: `${label} (${items.length})`, group: true, children: items });
 
   const lines = Object.entries(doc.lines).map(([id, l]) => ({
-    key: `ln:${id}`, label: `Línea ${id} · L = ${f(dist(doc.pts[l.a], doc.pts[l.b]))}`, sel: { k: 'ln', id },
+    key: `ln:${id}`, label: `${l.vec ? 'Vector' : 'Línea'} ${id} · ${l.vec ? '|v|' : 'L'} = ${f(dist(doc.pts[l.a], doc.pts[l.b]))}`, sel: { k: 'ln', id },
     children: [...conNodes(id), ...compact([ptNode(l.a, 'A:'), ptNode(l.b, 'B:')])],
   }));
   const circles = Object.entries(doc.circles).map(([id, c]) => ({

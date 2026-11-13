@@ -1,6 +1,7 @@
 import { visibleDoc, hatchLoops, allLtypes, arcOf, arcSamples, splinePolyline, ellipsePolyline } from './model.js';
 import { dashFromPattern, norm, splineBezier } from './geom.js';
-import { textFrame, textCorners, textPose, LINE_SPACING, fontCss } from './text.js';
+import { textFrame, textCorners, textPose, shownText, LINE_SPACING, fontCss } from './text.js';
+import { vecArrow } from './vectors.js';
 import { layoutDim } from './dims.js';
 
 const DIM_KINDS = new Set(['DIST', 'DISTPL', 'ANG', 'ANG4', 'RAD']);
@@ -129,6 +130,11 @@ export function exportSVG(doc, ltScale = 1, vis = {}) {
   for (const l of Object.values(doc.lines)) {
     const a = doc.pts[l.a], q = doc.pts[l.b];
     out.push(`<line x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(q.x)}" y2="${Y(q.y)}" stroke="${col(l.color)}" stroke-width="${l.w}"${dash(l.ltype === 'constructiva' ? 'continua' : l.ltype, l.ls)}/>`);
+    const A = l.vec && vecArrow(doc, l); // cabeza de flecha del vector
+    if (A) {
+      const len = Math.min(9 + l.w * 2, A.len * K * 0.6), hw = len * 0.33, tx = X(A.tip.x), ty = Y(A.tip.y), ux = A.dir.x, uy = -A.dir.y;
+      out.push(`<polygon points="${n(tx)},${n(ty)} ${n(tx - ux * len - uy * hw)},${n(ty - uy * len + ux * hw)} ${n(tx - ux * len + uy * hw)},${n(ty - uy * len - ux * hw)}" fill="${col(l.color)}"/>`);
+    }
   }
   // splines y trazados: poligonal muestreada
   const polyPath = (pts, closed) => 'M' + pts.map((q) => `${X(q.x)} ${Y(q.y)}`).join(' L') + (closed ? ' Z' : '');
@@ -143,7 +149,8 @@ export function exportSVG(doc, ltScale = 1, vis = {}) {
     out.push(`<path d="${polyPath(tr.pts, false)}" fill="none" stroke="${col(tr.color)}" stroke-width="${tr.w}" stroke-linejoin="round"${dash(tr.ltype, tr.ls)}/>`);
   }
   // textos: ancho aproximado (0.6 de la altura por caracter) solo para alinear
-  for (const t of vis.texts === false ? [] : Object.values(doc.texts || {})) {
+  for (const t0 of vis.texts === false ? [] : Object.values(doc.texts || {})) {
+    const t = shownText(doc, t0);
     const P = doc.pts[t.pt];
     if (!P) continue;
     const pose = textPose(doc, t);
@@ -181,6 +188,11 @@ export function exportDXF(doc, viewScale = 5, vis = {}) {
   for (const l of Object.values(doc.lines)) {
     const a = doc.pts[l.a], b = doc.pts[l.b];
     g(0, 'LINE'); g(8, '0'); g(10, a.x); g(20, a.y); g(30, 0); g(11, b.x); g(21, b.y); g(31, 0);
+    const A = l.vec && vecArrow(doc, l); // cabeza de flecha del vector: dos lineas cortas en V
+    if (A) {
+      const len = Math.min((9 + l.w * 2) / (viewScale > 0 ? viewScale : 5), A.len * 0.6), hw = len * 0.33;
+      for (const sg of [1, -1]) { g(0, 'LINE'); g(8, '0'); g(10, A.tip.x); g(20, A.tip.y); g(30, 0); g(11, A.tip.x - A.dir.x * len - sg * -A.dir.y * hw); g(21, A.tip.y - A.dir.y * len - sg * A.dir.x * hw); g(31, 0); }
+    }
   }
   for (const c of Object.values(doc.circles)) {
     const p = doc.pts[c.c];
@@ -202,7 +214,8 @@ export function exportDXF(doc, viewScale = 5, vis = {}) {
   for (const e of Object.values(doc.ellipses || {})) { const part = !!(e.p1 && e.p2), P = ellipsePolyline(doc, e, 120); poly(part ? P : P.slice(0, -1), !part); }
   for (const tr of Object.values(doc.traces || {})) if (tr.pts.length >= 2) poly(tr.pts, false);
   // textos: una entidad TEXT por linea, alineada segun el punto de insercion (ancho aproximado)
-  for (const t of vis.texts === false ? [] : Object.values(doc.texts || {})) {
+  for (const t0 of vis.texts === false ? [] : Object.values(doc.texts || {})) {
+    const t = shownText(doc, t0);
     const P = doc.pts[t.pt];
     if (!P) continue;
     const pose = textPose(doc, t);
