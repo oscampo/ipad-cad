@@ -2088,7 +2088,9 @@ t('cotas con nombre: renombrar actualiza formulas y valida el nombre', () => {
   assert.equal(checkName(d, 'sin', k1) !== null, true);
   assert.equal(checkName(d, '2x', k1) !== null, true);
   assert.equal(checkName(d, 'Ancho', k1), null);
+  const P = addPoint(d, 1, 1), tx = addText(d, P, 'D1 vale [=D1] y [=D1*D10], no D1', {});
   renameDim(d, k1, 'Ancho');
+  assert.equal(d.texts[tx].text, 'D1 vale [=Ancho] y [=Ancho*D10], no D1', 'las salidas de los textos siguen al nombre');
   assert.equal(d.cons[k2].expr, 'Ancho*2');
   assert.ok(recompute(d).ok); near(d.cons[k2].v, 20);
   delete d.cons[k1];

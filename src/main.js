@@ -2808,6 +2808,43 @@ function openProps(h) {
       if (isHidden(doc, propObj())) { $('dlgR').close(); sel = []; afterChange(); toast('El elemento quedó en una capa apagada: se ocultó'); }
     })));
   }
+  if (k === 'ln' && o.vec && doc.cons[o.vec.d]) { // magnitud del vector: su cota (D1...), de solo lectura o fija
+    const kid = o.vec.d, K = () => doc.cons[kid];
+    const mag = document.createElement('input'), fix = document.createElement('input'), nm = document.createElement('input');
+    const showVal = () => { const q = K(); mag.value = String(Math.round(dimValue(doc, q) * 1e6) / 1e6) ; if (q.expr && !q.ref) mag.value = q.expr; };
+    mag.type = 'text'; mag.autocomplete = 'off'; mag.spellcheck = false; mag.inputMode = 'text'; mag.style.flex = '1 1 120px';
+    fix.type = 'checkbox'; fix.style.cssText = 'width:22px;height:22px;min-height:22px;margin:0;flex:none'; fix.checked = !K().ref;
+    nm.type = 'text'; nm.autocomplete = 'off'; nm.spellcheck = false; nm.value = K().name || '';
+    showVal();
+    const apply = (mutate) => { // cambia la cota con deshacer; si el solver no la acepta, se deshace
+      pushUndo(); mutate(K());
+      const r = settle(doc, solve, []);
+      if (!r.ok) { rollback(); toast(r.error || 'Valor imposible con las restricciones actuales'); afterChange(); showVal(); fix.checked = !K().ref; return; }
+      afterChange(); showVal(); fix.checked = !K().ref;
+    };
+    mag.onchange = () => {
+      let v;
+      try { v = parseValue(mag.value, { vars: varsOf(doc, kid) }); } catch (e) { toast(e.message); showVal(); return; }
+      if (!(v > 0)) { toast('La magnitud debe ser mayor que cero'); showVal(); return; }
+      const f = isPlainNumber(mag.value) ? null : mag.value.trim();
+      apply((q) => { q.v = v; delete q.ref; if (f) q.expr = f; else delete q.expr; }); // escribir un valor la fija
+    };
+    fix.onchange = () => {
+      if (fix.checked) apply((q) => { q.v = dimValue(doc, { ...q, ref: true }); delete q.ref; });
+      else apply((q) => { q.ref = true; delete q.expr; });
+    };
+    nm.onchange = () => {
+      const n = nm.value.trim(), er = checkName(doc, n, kid);
+      if (er) { toast(er); nm.value = K().name || ''; return; }
+      pushUndo(); renameDim(doc, kid, n); afterChange();
+    };
+    body.appendChild(propRow('Magnitud', mag));
+    body.appendChild(propRow('Magnitud fija (restringe la longitud)', fix));
+    body.appendChild(propRow('Nombre de la magnitud', nm));
+    const sm = document.createElement('small');
+    sm.textContent = 'Escribe un valor o una fórmula con otras cotas (por ejemplo 2*D1) para fijar la magnitud; sin marcar es solo lectura y mide la longitud. La magnitud se puede usar en fórmulas y textos con su nombre.';
+    body.appendChild(sm);
+  }
   if (['ln', 'ci', 'ar', 'el', 'sp'].includes(k)) {
     body.appendChild(propRow('Color', propColors(o, 'color')));
     body.appendChild(propRow('Tipo de línea', propSelect(Object.entries(allLtypes(doc)).map(([v, t]) => [v, t.label]), o.ltype in allLtypes(doc) ? o.ltype : 'continua', (v) => {

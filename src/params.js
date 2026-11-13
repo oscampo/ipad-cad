@@ -45,6 +45,8 @@ export function renameDim(doc, id, name) {
   if (!old || old === name) { k.name = name; return; }
   k.name = name;
   for (const o of Object.values(doc.cons)) if (o.expr) o.expr = renameInExpr(o.expr, old, name);
+  // las salidas de los textos ([=D1]) tambien siguen al nombre
+  for (const t of Object.values(doc.texts || {})) if (typeof t.text === 'string' && t.text.includes('[=')) t.text = t.text.replace(/\[=([^\]]*)\]/g, (m, ex) => '[=' + renameInExpr(ex, old, name) + ']');
 }
 
 // Evalua en orden las cotas definidas con formula. { ok: true } o { ok: false, error } sin dejar nada a medias:
