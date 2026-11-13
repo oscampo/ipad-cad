@@ -14,7 +14,7 @@ import { trimAt, extendEnd, cutsOf, curveCuts, linearArray, mirrorCopy, circular
 import { CLINE_STYLE, circleThrough3, addRectangle, polygonVertices, addPolygon, arcIsClockwise, constructionArcDash } from '../src/shapes.js';
 import { FONTS, fontCss } from '../src/text.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from '../src/lock.js';
-import { initSolver, solve, reparamSplines, addConsSolved } from '../src/solver.js';
+import { initSolver, solve, solveSteps, reparamSplines, addConsSolved } from '../src/solver.js';
 import { readFileSync } from 'node:fs';
 import { bsplineThrough, bsplinePoint } from '../src/bspline.js';
 import { boxSelect } from '../src/boxsel.js';
@@ -2030,6 +2030,30 @@ t('rueda que rueda: la distancia lee el angulo medido y el punto sigue la cicloi
     near(d.pts[T].x, R * A, 1e-3, 'rueda sin deslizar');
     near(d.pts[P].x, e.x, 1e-3, 'P en la cicloide'); near(d.pts[P].y, e.y, 1e-3);
   }
+});
+t('rueda gobernada por el punto de tangencia: arrastrar T da varias vueltas y P queda en la cicloide', () => {
+  const R = 10, x0 = 7.377, cyc = (t) => ({ x: R * (t - Math.sin(t)), y: R * (1 - Math.cos(t)) });
+  const d = newDoc();
+  const O = addPoint(d, 0, 0), G1 = addPoint(d, 150, 0); d.pts[O].fixed = true; d.pts[G1].fixed = true;
+  const ground = addLine(d, O, G1, {});
+  const T = addPoint(d, x0, 0), C = addPoint(d, x0, R), q = cyc(x0 / R), P = addPoint(d, q.x, q.y);
+  const wheel = addCircle(d, C, R, {}), lCT = addLine(d, C, T, {}), lCP = addLine(d, C, P, {});
+  for (const k of [{ t: 'PONL', refs: [T, ground] }, { t: 'V', refs: [C, T] }, { t: 'RAD', refs: [wheel], v: R }, { t: 'TANLC', refs: [ground, wheel] }, { t: 'PONC', refs: [P, wheel] }]) addCon(d, k);
+  addCon(d, { t: 'DIST', refs: [O, T], v: x0, ref: true });                                                   // D1: medida (solo lectura)
+  const tdeg = (signedAngle({ x: 0, y: -R }, { x: d.pts[P].x - d.pts[C].x, y: d.pts[P].y - d.pts[C].y }) * 180) / Math.PI;
+  const kA = addCon(d, { t: 'ANG', refs: [lCT, lCP], s1: 1, s2: 1, v: tdeg, sg: tdeg < 0 ? -1 : 1, cur: Math.abs(tdeg), unit: 'rad', expr: 'D1/(O1/2)' });
+  assert.ok(settle(d, solveSteps, []).ok);
+  let maxIt = 0;
+  for (let x = x0 + 0.7; x <= 70; x += 0.7) {                       // casi dos vueltas arrastrando T por el suelo
+    const s = settle(d, solveSteps, [{ id: T, x, y: 0 }], { maxIter: 20 });
+    assert.ok(s.ok, 'x ' + x.toFixed(1) + ' ' + (s.error || 'solver'));
+    maxIt = Math.max(maxIt, s.iter);
+    near(d.pts[T].x, x, 1e-4, 'T llega a donde se arrastra');
+    const A = (d.cons[kA].cur * Math.PI) / 180, e = cyc(A);
+    near(A, x / R, 1e-4, 'A1 = D1/r'); near(d.pts[P].x, e.x, 1e-3, 'P en la cicloide'); near(d.pts[P].y, e.y, 1e-3);
+  }
+  assert.ok(maxIt <= 8, 'converge en pocas vueltas: ' + maxIt);
+  assert.ok(d.cons[kA].cur > 360, 'paso de una vuelta');
 });
 t('cotas con nombre: renombrar actualiza formulas y valida el nombre', () => {
   const d = newDoc();

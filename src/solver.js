@@ -382,6 +382,27 @@ export function solve(doc, targets = []) {
   return { ok, conflicts: res.conflicts, status: res.status };
 }
 
+// Como solve, pero si un salto grande del punto arrastrado hace perder el hilo al solver (puntos sobre circulos con
+// otros enlaces), reintenta recorriendo el camino en tramos cortos: 4 y, si hace falta, 16. Si ninguno llega, doc queda
+// como estaba. Sirve para arrastres rapidos de mecanismos con cotas que leen medidas.
+export function solveSteps(doc, targets = []) {
+  const r = solve(doc, targets);
+  const live = targets.filter((t) => doc.pts[t.id] && !doc.pts[t.id].fixed);
+  if (r.ok || !live.length) return r;
+  const before = JSON.stringify(doc), from = live.map((t) => ({ x: doc.pts[t.id].x, y: doc.pts[t.id].y }));
+  const restore = () => { const d = JSON.parse(before); for (const k of Object.keys(doc)) delete doc[k]; Object.assign(doc, d); };
+  for (const n of [4, 16]) {
+    let ok = true;
+    for (let i = 1; i <= n && ok; i++) {
+      const f = i / n;
+      ok = solve(doc, live.map((t, j) => ({ id: t.id, x: from[j].x + (t.x - from[j].x) * f, y: from[j].y + (t.y - from[j].y) * f }))).ok;
+    }
+    if (ok) return { ok: true, conflicts: [], status: 0 };
+    restore();
+  }
+  return r;
+}
+
 // Agrega restricciones y resuelve. Si falla y hay coincidencias entre puntos, reintenta acercando los puntos poco a
 // poco y poniendo las restricciones al final: un salto grande de golpe puede hacer que el solver pierda el hilo (por
 // ejemplo con arcos tangentes, que cambian de rama) aunque el caso tenga solucion. Si no hay solucion, doc queda

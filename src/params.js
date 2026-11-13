@@ -132,7 +132,22 @@ export function settle(doc, solveFn, targets = [], { maxIter = 40, tol = 1e-5 } 
     return r.ok ? { ok: true, iter: 1, count: rc.count } : { ok: false, error: null, iter: 1, count: rc.count };
   }
   const bak = JSON.stringify(doc);
-  const restore = () => { const o = JSON.parse(bak); for (const k of Object.keys(doc)) delete doc[k]; Object.assign(doc, o); };
+  const restoreTo = (json) => { const o = JSON.parse(json); for (const k of Object.keys(doc)) delete doc[k]; Object.assign(doc, o); };
+  const restore = () => restoreTo(bak);
+  // Un punto arrastrado que ya llego a su destino se deja fijo mientras se resuelve (asi no se desliza cuando otra cota gira,
+  // como el punto de tangencia de una rueda); si eso es imposible (el punto no puede estar ahi), se resuelve con el objetivo
+  // suave de siempre, que lo lleva lo mas cerca que las restricciones permiten.
+  const near = (t) => doc.pts[t.id] && Math.hypot(doc.pts[t.id].x - t.x, doc.pts[t.id].y - t.y) <= 1e-5;
+  const run = () => {
+    const pins = targets.filter((t) => doc.pts[t.id] && !doc.pts[t.id].fixed && near(t)).map((t) => t.id);
+    if (pins.length) {
+      pins.forEach((id) => { doc.pts[id].fixed = true; });
+      let r;
+      try { r = solveFn(doc, targets.filter((t) => !near(t))); } finally { pins.forEach((id) => { if (doc.pts[id]) doc.pts[id].fixed = false; }); }
+      if (r.ok) return r;
+    }
+    return solveFn(doc, targets);
+  };
   let last = null;
   // 1.º secante (rapida); 2.º, si no cierra, repeticion amortiguada (lenta pero mas estable). Si ninguna cierra, no deja nada a medias.
   for (const mode of ['secant', 'damped']) {
@@ -154,10 +169,18 @@ export function settle(doc, solveFn, targets = [], { maxIter = 40, tol = 1e-5 } 
     };
     if (mode === 'damped') restore();
     for (let i = 1; i <= (mode === 'secant' ? maxIter : 2 * maxIter); i++) {
+      const snap = JSON.stringify(doc);
       const rc = recompute(doc, 1, hook);
       if (!rc.ok) { restore(); return { ok: false, error: rc.error, iter: i }; }
       if (i > 1 && rc.resid <= tol) return { ok: true, iter: i, count: rc.count };
-      const r = solveFn(doc, targets);
+      let r = run();
+      if (!r.ok) { // un cambio grande de golpe: se reintenta avanzando solo una fraccion hacia el valor de las formulas
+        for (const w of [0.5, 0.25, 0.125, 0.0625]) {
+          restoreTo(snap); recompute(doc, w);
+          r = run();
+          if (r.ok) break;
+        }
+      }
       if (!r.ok) { last = { ok: false, error: null, iter: i, count: rc.count }; break; }
       trackAngles(doc); // los angulos de referencia siguen la medida (sin saltos de 180° a 0°)
     }

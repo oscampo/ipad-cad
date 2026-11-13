@@ -1,5 +1,5 @@
 import wasmUrl from '@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url';
-import { initSolver, solve, reparamSplines, addConsSolved } from './solver.js';
+import { initSolver, solve, solveSteps, reparamSplines, addConsSolved } from './solver.js';
 import {
   newDoc, addLayer, deleteLayer, layerCount, shownEntries, shownValues, layerHiddenPoints, consHidden, visibleDoc, isHidden, addPoint, addLine, addCircle, addArc, addText, addSpline, splinePolyline, addCon, cleanup, deleteItems, clone, hatchLoops,
   allLtypes, PALETTE, arcOf, conTag, ensureNumbers, addEllipse, ellipsePolyline, ellipseOf, ellipsePoint, ellipseParam, ellipseRange, isPartial,
@@ -26,7 +26,7 @@ import { parseValue, isPlainNumber } from './expr.js';
 import { HELP_HTML } from './help.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from './lock.js';
 
-const VERSION = '1.5.0';
+const VERSION = '1.5.1';
 const STORE = 'ipad-cad-v1';
 const $ = (id) => document.getElementById(id);
 const cv = $('cv');
@@ -1499,7 +1499,7 @@ function toolMove(p) {
     for (let i = 1; i <= steps; i++) {
       const f = i / steps, dx = prev.dx + (cur2.dx - prev.dx) * f, dy = prev.dy + (cur2.dy - prev.dy) * f;
       const tg = Object.entries(drag.orig).map(([id, o]) => ({ id, x: o.x + dx, y: o.y + dy }));
-      const r = hasReactive(doc) ? settle(doc, solve, tg, { maxIter: 20 }) : solve(doc, tg); // con cotas que leen medidas, se actualizan mientras arrastras
+      const r = hasReactive(doc) ? settle(doc, solveSteps, tg, { maxIter: 20 }) : solve(doc, tg); // con cotas que leen medidas, se actualizan mientras arrastras
       if (r.ok) trackAngles(doc);
       if (r.ok && tracing) recordTraces(doc, 1.5 / view.s);
     }

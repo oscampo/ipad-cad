@@ -1,5 +1,10 @@
 # Historial de cambios
 
+## v1.5.1 (2026-11-12)
+
+- **Arrastre con cotas que leen medidas, más robusto**: un salto grande del punto arrastrado se recorre en tramos cortos; si al girar otra cota el solver pierde el hilo, el punto arrastrado que ya llegó a su destino se deja fijo mientras se resuelve (así no se desliza), y si eso es imposible se vuelve al objetivo suave de siempre; si un cambio de golpe no se resuelve, se reintenta avanzando solo una fracción hacia el valor de las fórmulas.
+- Ejemplo de la rueda que rueda sin deslizar gobernada por el punto de tangencia (diseño de Oscar): al arrastrar T, A1 = D1/r y P traza la cicloide en varias vueltas. Arrastrar P para gobernar era mal condicionado cerca del suelo.
+
 ## v1.5.0 (2026-11-12)
 
 - **Cotas con nombre**: cada cota recibe un nombre automático por tipo (D distancia, A ángulo, R radio de arco, O diámetro de círculo; D1, A1...), visible en el árbol y en el diálogo de la cota (doble toque), donde se puede cambiar. Los dibujos viejos se numeran al abrirlos.
