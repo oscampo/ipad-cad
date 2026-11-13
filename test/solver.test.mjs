@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { addLayer, deleteLayer, layerCount, isHidden, shownEntries, layerHiddenPoints, consHidden, visibleDoc, newDoc, addPoint, addLine, addCircle, addArc, addCon, addText, addSpline, deleteItems, hatchLoops, arcOf, cleanup, splinePolyline, conTag, ensureNumbers, addEllipse, ellipseOf, ellipsePolyline, ellipsePoint, ellipseParam, ellipseRange, isPartial } from '../src/model.js';
 import { startTrace, recordTraces, traceToSpline, offsetPolyline, firstLap } from '../src/curves.js';
-import { layoutDim, dragDim, dimValue, dimText, angSector, angTrue } from '../src/dims.js';
+import { layoutDim, dragDim, dimValue, dimText, angSector, angTrue, initAngle, trackAngles } from '../src/dims.js';
 import { textFrame, textCorners, textHit, textPose, rawAngle } from '../src/text.js';
 import { exportSVG, exportSVGLaser, exportDXF, dimLayouts, extraExtents, laserClasses, styleKey } from '../src/export.js';
 import { splitElement } from '../src/split.js';
@@ -2044,6 +2044,57 @@ t('cotas con nombre: renombrar actualiza formulas y valida el nombre', () => {
   assert.ok(recompute(d).ok); near(d.cons[k2].v, 20);
   delete d.cons[k1];
   assert.deepEqual(pruneFormulas(d), ['D2']);
+});
+
+t('angulo continuo: una conductora de 250 queda a 250 y una de 400 vale una vuelta y 40', () => {
+  for (const [val, deg] of [[250, 250], [400, 40], [-30, -30]]) {
+    const d = newDoc();
+    const a = addPoint(d, 0, 0), b = addPoint(d, 10, 0), c = addPoint(d, 5, 5);
+    d.pts[a].fixed = true; d.pts[b].fixed = true;
+    const l1 = addLine(d, a, b, {}), l2 = addLine(d, a, c, {});
+    const k = { t: 'ANG', refs: [l1, l2], s1: 1, s2: 1, sg: 1, cur: val };
+    k.v = angTrue(d, k, val);
+    const id = addCon(d, k);
+    assert.ok(solve(d, []).ok);
+    const ang = (Math.atan2(d.pts[c].y, d.pts[c].x) * 180) / Math.PI;
+    near(((ang - deg) % 360 + 540) % 360 - 180, 0, 1e-3, `direccion ${val}`);
+    near(dimValue(d, d.cons[id]), val, 1e-9, 'el valor mostrado es el que se puso');
+    assert.match(dimText(d, d.cons[id]), new RegExp('^' + String(val).replace('-', '\\-') + '°'));
+  }
+});
+t('angulo continuo: una cota de referencia sigue la vuelta completa sin saltar de 180° a 0°', () => {
+  const d = newDoc();
+  const a = addPoint(d, 0, 0), b = addPoint(d, 10, 0), c = addPoint(d, 10 * Math.cos(0.5), 10 * Math.sin(0.5));
+  const l1 = addLine(d, a, b, {}), l2 = addLine(d, a, c, {});
+  const id = addCon(d, { t: 'ANG', refs: [l1, l2], s1: 1, s2: 1, v: (0.5 * 180) / Math.PI, ref: true });
+  trackAngles(d);
+  near(d.cons[id].cur, (0.5 * 180) / Math.PI, 1e-9);
+  for (let deg = 35; deg <= 760; deg += 25) { // dos vueltas y poco mas, en pasos de 25°
+    const r = (deg * Math.PI) / 180;
+    d.pts[c].x = 10 * Math.cos(r); d.pts[c].y = 10 * Math.sin(r);
+    trackAngles(d);
+    near(dimValue(d, d.cons[id]), deg, 1e-6, 'vuelta ' + deg);
+  }
+  // y de vuelta hacia atras
+  for (let deg = 735; deg >= 10; deg -= 25) {
+    const r = (deg * Math.PI) / 180;
+    d.pts[c].x = 10 * Math.cos(r); d.pts[c].y = 10 * Math.sin(r);
+    trackAngles(d);
+    near(dimValue(d, d.cons[id]), deg, 1e-6, 'regreso ' + deg);
+  }
+});
+t('angulo continuo: una formula puede dar mas de 360 y entra en otras como radianes', () => {
+  const d = newDoc();
+  const a = addPoint(d, 0, 0), b = addPoint(d, 10, 0), c = addPoint(d, 5, 5), e = addPoint(d, 0, 20);
+  d.pts[a].fixed = true; d.pts[b].fixed = true;
+  const l1 = addLine(d, a, b, {}), l2 = addLine(d, a, c, {});
+  const kA = addCon(d, { t: 'ANG', refs: [l1, l2], s1: 1, s2: 1, sg: 1, cur: 90, v: 90 });            // A1 = 90
+  const kB = addCon(d, { t: 'DIST', refs: [a, e], v: 1, expr: 'A1*2' });                               // D1 = 2 * (π/2)
+  assert.ok(settle(d, solve, []).ok);
+  near(d.cons[kB].v, Math.PI, 1e-9);
+  d.cons[kA].cur = 450; d.cons[kA].v = angTrue(d, d.cons[kA], 450); // 450° = 1 vuelta y 90°
+  assert.ok(recompute(d).ok);
+  near(d.cons[kB].v, 2 * (450 * Math.PI) / 180, 1e-9);
 });
 
 console.log(`\n${passed} pruebas pasaron`);

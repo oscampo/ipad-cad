@@ -14,7 +14,7 @@ import { boxSelect } from './boxsel.js';
 import { crossPoints } from './snapx.js';
 import { trimAt, extendEnd, linearArray, mirrorCopy, circularArray, clipOf, pasteClip } from './edit.js';
 import { CLINE_STYLE, circleThrough3, addRectangle, polygonVertices, addPolygon, arcIsClockwise, constructionArcDash } from './shapes.js';
-import { layoutDim, dragDim, dimValue, angSector, angTrue, DIAM } from './dims.js';
+import { layoutDim, dragDim, dimValue, angSector, angTrue, initAngle, trackAngles, DIAM } from './dims.js';
 import { textFrame, textHit, textPose, rawAngle, ANCHORS, ANCHOR_NAMES, LINE_SPACING, FONTS, fontCss } from './text.js';
 import * as gh from './github.js';
 import { varsOf, varsList, recompute, pruneFormulas, renameDim, checkName, settle, hasReactive } from './params.js';
@@ -102,7 +102,7 @@ function persist() {
   }, 300);
 }
 // afterChange tambien mantiene al dia las cotas que leen medidas (si no se estabilizan, se deja como estaba)
-function afterChange() { const fz = pruneFormulas(doc); if (hasReactive(doc)) { const bak = snapshot(), st = settle(doc, solve, []); if (!st.ok) doc = JSON.parse(bak); } if (fz.length) toast(`${fz.join(', ')}: la cota de la que dependía ya no existe o es de referencia; queda con su valor actual`); layerBtn(); updateButtons(); updateEnabled(); syncPanel(); persist(); draw(); renderTree(); }
+function afterChange() { trackAngles(doc); const fz = pruneFormulas(doc); if (hasReactive(doc)) { const bak = snapshot(), st = settle(doc, solve, []); if (!st.ok) doc = JSON.parse(bak); } if (fz.length) toast(`${fz.join(', ')}: la cota de la que dependía ya no existe o es de referencia; queda con su valor actual`); layerBtn(); updateButtons(); updateEnabled(); syncPanel(); persist(); draw(); renderTree(); }
 
 // Un boton de restriccion solo se activa si la seleccion actual le sirve (mismas reglas que applyCon).
 function updateEnabled() {
@@ -751,7 +751,7 @@ export function render(c, W, H, v, o) {
       if (!shown.has(id)) continue;
       const s = toScreen(p);
       const selp = isSel('pt', id) || sel.some((x) => x.k === 'tx' && doc.texts[x.id]?.pt === id);
-      c.fillStyle = selp ? theme.sel : o.fg;
+      c.fillStyle = selp ? theme.sel : p.color && p.color !== 'auto' ? p.color : o.fg;
       if (p.fixed) c.fillRect((s.x - 4) * dpr, (s.y - 4) * dpr, 8 * dpr, 8 * dpr);
       else { c.beginPath(); c.arc(s.x * dpr, s.y * dpr, (selp ? 5 : 3.2) * dpr, 0, 7); c.fill(); }
     }
@@ -1500,6 +1500,7 @@ function toolMove(p) {
       const f = i / steps, dx = prev.dx + (cur2.dx - prev.dx) * f, dy = prev.dy + (cur2.dy - prev.dy) * f;
       const tg = Object.entries(drag.orig).map(([id, o]) => ({ id, x: o.x + dx, y: o.y + dy }));
       const r = hasReactive(doc) ? settle(doc, solve, tg, { maxIter: 20 }) : solve(doc, tg); // con cotas que leen medidas, se actualizan mientras arrastras
+      if (r.ok) trackAngles(doc);
       if (r.ok && tracing) recordTraces(doc, 1.5 / view.s);
     }
     drag.lastD = cur2;
@@ -2119,13 +2120,13 @@ async function applyCon(kind) {
       const tmp = { t: 'ANG', refs: [lns[0], lns[1]], v };
       const S = angSector(doc, tmp);
       tmp.s1 = S.V0 ? S.s1 : 1; tmp.s2 = S.V0 ? S.s2 : 1;
+      tmp.sg = angSector(doc, tmp).phi < 0 ? -1 : 1; // sentido en que se mide (antihorario o horario)
       const u0 = opts.angUnit === 'rad' ? 'rad' : 'deg';
       const shownDeg = angSector(doc, tmp).val;
-      const val = await askNumber('Ángulo entre las dos líneas (0 a 180° = 0 a π rad)', u0 === 'rad' ? Math.round(((shownDeg * Math.PI) / 180) * 1e10) / 1e10 : Math.round(shownDeg * 100) / 100, false, 'angle', u0);
+      const val = await askNumber('Ángulo entre las dos líneas (sin límite: 400° = una vuelta y 40°)', u0 === 'rad' ? Math.round(((shownDeg * Math.PI) / 180) * 1e10) / 1e10 : Math.round(shownDeg * 100) / 100, false, 'angle', u0);
       if (val === null) return;
       opts.angUnit = dlgUnit; persist();
-      if (val < 0 || val > 180) return bad('El ángulo debe estar entre 0° y 180° (π rad)');
-      list.push({ t: 'ANG', refs: [lns[0], lns[1]], v: angTrue(doc, tmp, val), s1: tmp.s1, s2: tmp.s2, ...(dlgUnit === 'rad' ? { unit: 'rad' } : {}), ...(dlgExpr ? { expr: dlgExpr } : {}), ...(dlgRef ? { ref: true } : {}) });
+      list.push({ t: 'ANG', refs: [lns[0], lns[1]], v: angTrue(doc, { ...tmp, cur: val }, val), s1: tmp.s1, s2: tmp.s2, sg: tmp.sg, cur: val, ...(dlgUnit === 'rad' ? { unit: 'rad' } : {}), ...(dlgExpr ? { expr: dlgExpr } : {}), ...(dlgRef ? { ref: true } : {}) });
       break;
     }
     case 'RAD': {
@@ -2225,6 +2226,7 @@ async function editDimension(id) {
   if (!k || k.v === undefined) return;
   if (k.t === 'ANG4') { toast('Esta cota es de una matriz circular: para cambiarla, rehaz la matriz'); return; }
   const isC = k.t === 'RAD' && k.refs[0] in doc.circles;
+  if (k.t === 'ANG' && k.cur === undefined) initAngle(doc, k); // dibujo viejo: pasa a angulo continuo con el mismo valor
   const now = dimValue(doc, k); // las de referencia muestran el valor medido en este momento
   const shown = isC ? 2 * now : now;
   // si la cota se definio con una formula, se vuelve a mostrar la formula (siempre que siga dando el valor actual)
@@ -2238,9 +2240,9 @@ async function editDimension(id) {
   if (dlgName && dlgName !== k.name) renameDim(doc, id, dlgName);
   if (k.t === 'ANG') { if (dlgUnit === 'rad') k.unit = 'rad'; else delete k.unit; opts.angUnit = dlgUnit; persist(); }
   if (dlgRef) { k.ref = true; afterChange(); return; } // es (o pasa a ser) cota de referencia: no toca el solver
-  if (k.t === 'ANG' && (val0 < 0 || val0 > 180)) { rollback(); toast('El ángulo debe estar entre 0° y 180°'); afterChange(); return; }
   const val = isC ? val0 / 2 : k.t === 'ANG' ? angTrue(doc, { ...k, ref: false, v: k.ref ? (angSector(doc, k).A * 180) / Math.PI : k.v }, val0) : val0;
   k.v = val; delete k.ref;
+  if (k.t === 'ANG') k.cur = val0;
   if (dlgExpr) k.expr = dlgExpr; else delete k.expr;
   const r = settle(doc, solve, []); // las cotas definidas con formulas se actualizan con el nuevo valor (y se repite si leen medidas)
   if (!r.ok) { rollback(); toast(r.error || (r.count ? 'Imposible con las restricciones actuales (con las cotas que dependen de esta). Usa «Solo lectura» para solo medirla' : 'Valor imposible con las restricciones actuales. Usa «Solo lectura» para solo medirla')); }
@@ -2794,6 +2796,7 @@ function openProps(h) {
     body.appendChild(propRow(o.ref ? 'Desfase °' : 'Ángulo °', propNumber(o.ang, (v) => propSet((x) => { x.ang = Number(v) || 0; }))));
   }
   if (k === 'pt') {
+    body.appendChild(propRow('Color', propColors(o, 'color')));
     const fill = () => { xi.value = String(Math.round(propObj().x * 1000) / 1000); yi.value = String(Math.round(propObj().y * 1000) / 1000); };
     const move = () => {
       const x = Number(xi.value), y = Number(yi.value);

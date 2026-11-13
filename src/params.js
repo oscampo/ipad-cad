@@ -4,7 +4,7 @@
 // Las cotas de referencia (solo lectura) tambien se pueden leer en una formula: su valor sale de la geometria, asi que
 // resolver y recalcular se repite hasta que ya nada cambia (settle). Si no se estabiliza se avisa y se deshace.
 import { isNamedDim, dimLetter, DIM_KIND } from './model.js';
-import { dimValue, angTrue } from './dims.js';
+import { dimValue, angTrue, initAngle, trackAngles } from './dims.js';
 import { parseValue, exprRefs, renameInExpr, isReservedName, NAME_RE } from './expr.js';
 
 const DEG = Math.PI / 180;
@@ -53,6 +53,7 @@ export function renameDim(doc, id, name) {
 // realimentacion con pendiente -1 oscile para siempre al repetir.
 // hook(id, viejo, formula): si se da, decide el valor nuevo (settle lo usa para aplicar el metodo de la secante).
 export function recompute(doc, omega = 1, hook = null) {
+  for (const [, k] of drivers(doc)) if (k.t === 'ANG' && k.expr && k.cur === undefined) initAngle(doc, k); // las angulares con formula usan valor continuo
   const dr = drivers(doc), byName = new Map(named(doc).map(([id, k]) => [k.name, id])), f = dr.filter(([, k]) => k.expr);
   const deps = new Map();
   for (const [id, k] of f) {
@@ -83,16 +84,16 @@ export function recompute(doc, omega = 1, hook = null) {
     const k = doc.cons[id];
     let val;
     try { val = parseValue(k.expr, { angle: k.t === 'ANG', radians: k.t === 'ANG' && k.unit === 'rad', vars: varsOf(doc, id) }); } catch (e) { doc.cons = JSON.parse(bak); return { ok: false, error: `${k.name}: ${e.message}` }; }
-    if (k.t === 'ANG') {
-      if (val < 0 || val > 180) { doc.cons = JSON.parse(bak); return { ok: false, error: `${k.name} (ángulo) quedaría en ${Math.round(val * 100) / 100}°: debe estar entre 0° y 180°` }; }
-      const tv = angTrue(doc, { ...k, ref: false }, val);
-      resid = Math.max(resid, Math.abs(tv - k.v) / (1 + Math.abs(tv)));
-      k.v = hook ? hook(id, k.v, tv) : omega === 1 ? tv : k.v + omega * (tv - k.v);
+    if (k.t === 'ANG') { // el angulo no tiene limite (400° = una vuelta y 40°): se trabaja con el valor continuo
+      const old = k.cur;
+      resid = Math.max(resid, Math.abs(val - old) / (1 + Math.abs(val)));
+      k.cur = hook ? hook(id, old, val, false) : omega === 1 ? val : old + omega * (val - old);
+      k.v = angTrue(doc, { ...k, ref: false }, k.cur);
     } else {
       if (!(val > 0)) { doc.cons = JSON.parse(bak); return { ok: false, error: `${k.name} quedaría en ${Math.round(val * 1000) / 1000}: debe ser mayor que cero` }; }
       const tv = k.t === 'RAD' && k.refs[0] in doc.circles ? val / 2 : val;
       resid = Math.max(resid, Math.abs(tv - k.v) / (1 + Math.abs(tv)));
-      k.v = hook ? hook(id, k.v, tv) : omega === 1 ? tv : k.v + omega * (tv - k.v);
+      k.v = hook ? hook(id, k.v, tv, true) : omega === 1 ? tv : k.v + omega * (tv - k.v);
     }
   }
   return { ok: true, count: order.length, resid };
@@ -127,6 +128,7 @@ export function settle(doc, solveFn, targets = [], { maxIter = 40, tol = 1e-5 } 
     const rc = recompute(doc);
     if (!rc.ok) return { ok: false, error: rc.error, iter: 1 };
     const r = solveFn(doc, targets);
+    if (r.ok) trackAngles(doc);
     return r.ok ? { ok: true, iter: 1, count: rc.count } : { ok: false, error: null, iter: 1, count: rc.count };
   }
   const bak = JSON.stringify(doc);
@@ -135,7 +137,7 @@ export function settle(doc, solveFn, targets = [], { maxIter = 40, tol = 1e-5 } 
   // 1.º secante (rapida); 2.º, si no cierra, repeticion amortiguada (lenta pero mas estable). Si ninguna cierra, no deja nada a medias.
   for (const mode of ['secant', 'damped']) {
     const hist = new Map();
-    const hook = (id, old, tv) => {
+    const hook = (id, old, tv, positive) => {
       if (mode === 'damped') return old + 0.5 * (tv - old);
       const h = hist.get(id);
       hist.set(id, { x: old, g: tv });
@@ -145,7 +147,7 @@ export function settle(doc, solveFn, targets = [], { maxIter = 40, tol = 1e-5 } 
         const d = (tv - h.g) / dx - 1; // pendiente de g(x) - x
         if (Number.isFinite(d) && Math.abs(d) > 1e-3) {
           const nx = old - (tv - old) / d;
-          if (Number.isFinite(nx) && nx > 0 && Math.abs(nx - old) <= 20 * Math.abs(tv - old) + 1e-9) return nx;
+          if (Number.isFinite(nx) && (!positive || nx > 0) && Math.abs(nx - old) <= 20 * Math.abs(tv - old) + 1e-9) return nx;
         }
       }
       return old + 0.5 * (tv - old);
@@ -157,6 +159,7 @@ export function settle(doc, solveFn, targets = [], { maxIter = 40, tol = 1e-5 } 
       if (i > 1 && rc.resid <= tol) return { ok: true, iter: i, count: rc.count };
       const r = solveFn(doc, targets);
       if (!r.ok) { last = { ok: false, error: null, iter: i, count: rc.count }; break; }
+      trackAngles(doc); // los angulos de referencia siguen la medida (sin saltos de 180° a 0°)
     }
   }
   restore();

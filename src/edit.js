@@ -454,7 +454,7 @@ function makeCopy(doc, col, tf, { mirror = false, reuse = null, axisAng = 0, hvA
       if (Math.abs(m - 90) < 1e-6) n.t = n.t === 'H' ? 'V' : 'H';
       else if (m > 1e-6 && 180 - m > 1e-6) continue;
     }
-    if (mirror && (n.t === 'ANG' || n.t === 'ANG4') && typeof n.v === 'number') n.v = -n.v;
+    if (mirror && (n.t === 'ANG' || n.t === 'ANG4') && typeof n.v === 'number') { n.v = -n.v; if (n.sg) n.sg = -n.sg; }
     addCon(doc, n);
   }
   for (const h of hatches) doc.hatches[nextId(doc, 'h')] = { ...jclone(h), ids: h.ids.map((x) => M[x]) };

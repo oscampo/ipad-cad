@@ -29,7 +29,13 @@ function distEnds(doc, k) {
 // cada recta se acota, es decir en que sector se coloca la cota. El valor que se muestra es siempre
 // positivo (0 a 180): el del sector elegido. Mover la cota a otro sector cambia el valor mostrado
 // (20 o 160) sin tocar la geometria.
+// Angulo continuo: una cota con k.cur (grados, sin limite: 400 es una vuelta y 40°) y k.sg (+1 antihorario, -1 horario,
+// el sentido en que se mide desde la 1.a semirrecta hasta la 2.a). Es la medida de siempre, pero sin el tope de 180°:
+// las conductoras guardan el valor que pusiste y las de referencia (solo lectura) lo siguen de un cambio al siguiente
+// tomando siempre el equivalente mas cercano al ultimo (trackAngles), asi pasan de 180° a 190° y a 400°.
+// Sin k.cur (dibujos viejos) se muestra el valor de 0 a 180 como antes.
 const normA = (a) => { while (a > Math.PI) a -= TAU; while (a <= -Math.PI) a += TAU; return a; };
+const normD = (a) => { while (a > 180) a -= 360; while (a <= -180) a += 360; return a; };
 export function angSector(doc, k) {
   const l1 = doc.lines[k.refs[0]], l2 = doc.lines[k.refs[1]];
   const a1 = doc.pts[l1.a], b1 = doc.pts[l1.b], a2 = doc.pts[l2.a], b2 = doc.pts[l2.b];
@@ -45,12 +51,30 @@ export function angSector(doc, k) {
     s2 = m2.x * d2.x + m2.y * d2.y >= 0 ? 1 : -1;
   }
   const phi = normA(A + Math.PI * ((s2 < 0 ? 1 : 0) - (s1 < 0 ? 1 : 0)));
-  return { V0, d1, d2, s1, s2, phi, val: (Math.abs(phi) * 180) / Math.PI, A };
+  let val = (Math.abs(phi) * 180) / Math.PI, psi = phi;
+  if (k.cur !== undefined) {
+    const sg = k.sg === -1 ? -1 : 1, m = (sg * phi * 180) / Math.PI; // medida en el sentido de la cota, de -180 a 180
+    val = k.ref ? k.cur + normD(m - k.cur) : k.cur; // referencia: el equivalente mas cercano al ultimo valor
+    psi = (sg * (val % 360) * Math.PI) / 180; // lo que se dibuja (el arco puede pasar de 180°)
+  }
+  return { V0, d1, d2, s1, s2, phi, psi, val, A };
+}
+// Da a una cota angular (conductora o de referencia) su valor continuo, con la medida y el sentido actuales.
+export function initAngle(doc, k) {
+  const S = angSector(doc, { ...k, cur: undefined, sg: undefined });
+  k.sg = S.phi < 0 ? -1 : 1; k.cur = S.val;
+}
+// Despues de cada solucion: las cotas angulares de referencia siguen la medida sin saltar al volver de 180° a 0°.
+export function trackAngles(doc) {
+  for (const k of Object.values(doc.cons)) {
+    if (k.t !== 'ANG' || !k.ref) continue;
+    if (k.cur === undefined) initAngle(doc, k); else k.cur = angSector(doc, k).val;
+  }
 }
 // Valor verdadero (grados, para k.v) que corresponde a un valor positivo del sector que se muestra.
 export function angTrue(doc, k, valDeg) {
   const S = angSector(doc, k);
-  const sg = S.phi < 0 ? -1 : 1;
+  const sg = k.cur !== undefined ? (k.sg === -1 ? -1 : 1) : S.phi < 0 ? -1 : 1;
   return (normA(sg * (valDeg * Math.PI) / 180 - Math.PI * ((S.s2 < 0 ? 1 : 0) - (S.s1 < 0 ? 1 : 0))) * 180) / Math.PI;
 }
 
@@ -116,7 +140,7 @@ function layoutDimBase(doc, k, view) {
       out.label = { x: m.x + 14, y: m.y - 14, text };
       return out;
     }
-    const th1 = Math.atan2(S.d1.y * S.s1, S.d1.x * S.s1), psi = S.phi, sgn = psi >= 0 ? 1 : -1;
+    const th1 = Math.atan2(S.d1.y * S.s1, S.d1.x * S.s1), psi = S.psi, sgn = psi >= 0 ? 1 : -1;
     const R = Math.max(14, (k.off ?? 50 / s) * s);
     const C = v(V0);
     out.arcs.push({ cx: C.x, cy: C.y, r: R, a0: -th1, a1: -(th1 + psi), ccw: psi > 0 });
@@ -236,6 +260,7 @@ export function dragDim(doc, k, view, p) {
       if (Math.abs(phi) < 1e-9 || Math.abs(phi) > Math.PI - 1e-9) continue;
       if (phi > 0 ? tb >= 0 && tb <= phi : tb <= 0 && tb >= phi) { k.s1 = s1; k.s2 = s2; }
     }
+    if (k.cur !== undefined) initAngle(doc, k); // otro sector es otro angulo: empieza de nuevo (0 a 180) con la geometria igual
     return true;
   }
   if (k.t === 'RAD') {
