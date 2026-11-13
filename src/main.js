@@ -761,9 +761,11 @@ export function render(c, W, H, v, o) {
       const s = toScreen(p);
       const selp = isSel('pt', id) || sel.some((x) => x.k === 'tx' && doc.texts[x.id]?.pt === id);
       c.fillStyle = selp ? theme.sel : p.color && p.color !== 'auto' ? p.color : o.fg;
-      if (isMark(doc, id)) { // marca de referencia: rombo
-        const r = (selp ? 6 : 4.5) * dpr;
-        c.beginPath(); c.moveTo(s.x * dpr, s.y * dpr - r); c.lineTo(s.x * dpr + r, s.y * dpr); c.lineTo(s.x * dpr, s.y * dpr + r); c.lineTo(s.x * dpr - r, s.y * dpr); c.closePath(); c.fill();
+      if (isMark(doc, id)) { // marca de referencia: una x
+        const r = (selp ? 5.5 : 4.5) * dpr, x0 = s.x * dpr, y0 = s.y * dpr;
+        c.save(); c.strokeStyle = c.fillStyle; c.lineWidth = 2 * dpr; c.lineCap = 'round';
+        c.beginPath(); c.moveTo(x0 - r, y0 - r); c.lineTo(x0 + r, y0 + r); c.moveTo(x0 + r, y0 - r); c.lineTo(x0 - r, y0 + r); c.stroke();
+        c.restore();
       } else if (p.fixed) c.fillRect((s.x - 4) * dpr, (s.y - 4) * dpr, 8 * dpr, 8 * dpr);
       else { c.beginPath(); c.arc(s.x * dpr, s.y * dpr, (selp ? 5 : 3.2) * dpr, 0, 7); c.fill(); }
     }
@@ -2892,9 +2894,6 @@ function openProps(h) {
     body.appendChild(propRow('Marca de referencia en', propSelect(opts, isMark(doc, h.id) ? o.mark : '', (v) => propSet((x) => {
       if (v) { x.mark = v; x.fixed = false; projectMarks(doc); } else delete x.mark;
     }))));
-    const sm = document.createElement('small');
-    sm.textContent = 'Una marca de referencia no la mueve el solver: tras cada cambio se proyecta sobre la línea elegida. Así se desliza a lo largo de ella, arrastrada por la línea, y recuerda lo recorrido (un riel, una rueda, un planímetro). Se dibuja como un rombo.';
-    body.appendChild(sm);
   }
   if (k === 'ha') {
     const sm = document.createElement('small');

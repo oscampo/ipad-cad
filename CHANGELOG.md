@@ -2,7 +2,7 @@
 
 ## Sin publicar
 
-- **Marca de referencia**: un punto puede ser marca de una línea (propiedades del punto, «Marca de referencia en»). El solver no la mueve y, tras cada cambio, se proyecta sobre su línea: se desliza por ella arrastrada por la línea y recuerda lo recorrido, algo que una cota de posición no puede dar. Se dibuja como un rombo. Sirve para rieles, ruedas y planímetros; las copias la reasignan a la copia de su línea y si se borra la línea deja de ser marca. En el planímetro polar mide el área de un cuadrado con 2 a 4 % de error.
+- **Marca de referencia**: un punto puede ser marca de una línea (propiedades del punto, «Marca de referencia en»). El solver no la mueve y, tras cada cambio, se proyecta sobre su línea: se desliza por ella arrastrada por la línea y recuerda lo recorrido, algo que una cota de posición no puede dar. Se dibuja como una x. Sirve para rieles, ruedas y planímetros; las copias la reasignan a la copia de su línea y si se borra la línea deja de ser marca. En el planímetro polar mide el área de un cuadrado con 2 a 4 % de error.
 
 ## v1.5.3 (2026-11-13)
 
