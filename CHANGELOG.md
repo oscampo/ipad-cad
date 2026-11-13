@@ -2,6 +2,7 @@
 
 ## v1.6.0 (2026-11-13)
 
+- El texto de la magnitud de un vector queda **alineado con la línea** del vector por defecto.
 - **Propiedades del vector** (doble toque): «Magnitud» (valor o fórmula; escribirla fija la longitud), «Magnitud fija» (para volver a solo lectura) y «Nombre de la magnitud». Cambiar un nombre actualiza también las salidas `[=…]` de los textos.
 - **Vector** (en el desplegable de Línea, tecla W): una línea con cabeza de flecha en el punto final y su magnitud como texto en el punto medio (inserción en el medio del lado superior, así queda centrada). La magnitud es una cota de solo lectura con nombre (D1...), usable en fórmulas y textos. Con una línea y uno de sus extremos (la cola) seleccionados, «Vector» la convierte; con un vector seleccionado, «Línea» lo convierte en línea. Se copian con su propio texto y magnitud, el borrado se lleva sus partes, y la flecha sale en SVG y DXF.
 - **Salidas en textos**: `[=expresión]` en un texto muestra el valor de la expresión (`[=O1]`, `[=D1*D2]`, `[=A1/(2π)]`), con los nombres de las cotas y sus funciones. Se actualiza al cambiar el dibujo, y también en las exportaciones.

@@ -2184,6 +2184,8 @@ t('vector: linea con flecha, magnitud como cota de referencia y texto en el punt
   near(dimValue(d, dim), 10);
   assert.equal(d.texts[v.t].text, '[=D1]');
   assert.equal(d.texts[v.t].anchor, 'tc');
+  assert.equal(d.texts[v.t].ref, l, 'alineado con la linea del vector');
+  near(rawAngle(d, d.texts[v.t]), (Math.atan2(8, 6) * 180) / Math.PI, 1e-9);
   assert.equal(d.texts[v.t].pt, v.m);
   near(d.pts[v.m].x, 3); near(d.pts[v.m].y, 4);
   assert.equal(textValue(d, d.texts[v.t]), '10');

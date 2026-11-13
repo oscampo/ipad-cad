@@ -1,5 +1,6 @@
 // Vectores: una linea con cabeza de flecha en la cabeza, cuya magnitud es una cota de referencia (D1, D2...) y se muestra
-// como un texto "[=Dn]" unido al punto medio (punto de insercion: medio del lado superior de la caja, asi queda centrado).
+// como un texto "[=Dn]" unido al punto medio (punto de insercion: medio del lado superior de la caja, asi queda centrado)
+// y alineado con la linea del vector.
 // Sin DOM. Datos: line.vec = { rev, m, t, d }: rev = la cabeza esta en el punto a (la cola es b); m = punto medio (auto);
 // t = texto de la magnitud; d = cota de referencia de la magnitud (oculta, con nombre, se puede usar en formulas).
 import { addPoint, addCon, addText, cleanup } from './model.js';
@@ -29,6 +30,7 @@ export function makeVector(doc, lid, { rev = false, h = 4 } = {}) {
   const d = addCon(doc, { t: 'DIST', refs: [l.a, l.b], v: Math.hypot(b.x - a.x, b.y - a.y), ref: true, hidden: true, vec: lid });
   const t = addText(doc, m, `[=${doc.cons[d].name}]`, { h, anchor: 'tc', ang: 0, color: l.color ?? 'auto' });
   doc.texts[t].vecOf = lid;
+  doc.texts[t].ref = lid; // alineado con el cuerpo del vector (con desfase 0); la regla de legibilidad lo mantiene de izquierda a derecha
   if (l.layer) doc.texts[t].layer = l.layer;
   l.vec = { rev: !!rev, m, t, d };
   return true;
