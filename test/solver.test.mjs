@@ -15,7 +15,7 @@ import { trimAt, extendEnd, cutsOf, curveCuts, linearArray, mirrorCopy, circular
 import { CLINE_STYLE, circleThrough3, addRectangle, polygonVertices, addPolygon, arcIsClockwise, constructionArcDash } from '../src/shapes.js';
 import { FONTS, fontCss } from '../src/text.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from '../src/lock.js';
-import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark, assignMark, setMarkRef, resetMarks, ensureMarkRefs } from '../src/solver.js';
+import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark, assignMark, setMarkRef, resetMarks, ensureMarkRefs, redundantCons } from '../src/solver.js';
 import { readFileSync } from 'node:fs';
 import { bsplineThrough, bsplinePoint } from '../src/bspline.js';
 import { boxSelect } from '../src/boxsel.js';
@@ -1866,6 +1866,45 @@ t('copias vinculadas: cientos de puntos copiados no agotan el solver y siguen a 
   near(Math.hypot(d.pts[F2].x - d.pts[A].x, d.pts[F2].y - d.pts[A].y), 8, 1e-4, 'F2 sigue sujeta a su cota');
 });
 
+t('redundantes: se detectan, no se confunden con una restriccion distinta y quitarlas no cambia la geometria', () => {
+  const d = newDoc();
+  const A = addPoint(d, 0, 0, false), B = addPoint(d, 10, 1, false), C = addPoint(d, 5, 5, false);
+  d.pts[A].fixed = true;
+  const l = addLine(d, A, B, {});
+  const h1 = addCon(d, { t: 'H', refs: [l] }), h2 = addCon(d, { t: 'H', refs: [A, B], hidden: true }); // la 2.a repite a la 1.a
+  const k = addCon(d, { t: 'DIST', refs: [A, B], v: 10 });
+  addCon(d, { t: 'DIST', refs: [A, C], v: 7 });
+  assert.ok(solve(d, []).ok);
+  const red = redundantCons(d);
+  assert.equal(red.length, 1, 'solo una de las dos horizontales: ' + red);
+  assert.ok(red[0] === h1 || red[0] === h2);
+  assert.ok(!red.includes(k));
+  const antes = JSON.stringify(d.pts);
+  delete d.cons[red[0]];
+  assert.ok(solve(d, []).ok); assert.deepEqual(redundantCons(d), []);
+  assert.equal(JSON.stringify(d.pts), antes, 'la geometria no cambia');
+});
+t('solver: una restriccion entre puntos fijos que ya se cumple se omite sin cambiar nada', () => {
+  const d = newDoc();
+  const A = addPoint(d, 0, 0, false), B = addPoint(d, 3, 4, false);
+  d.pts[A].fixed = true; d.pts[B].fixed = true;
+  addCon(d, { t: 'DIST', refs: [A, B], v: 5 });
+  assert.ok(solve(d, []).ok);
+  assert.deepEqual(redundantCons(d), [], 'no es redundante para el usuario: el solver nunca la vio');
+  const antes = JSON.stringify(d.pts);
+  assert.ok(solve(d, []).ok); assert.equal(JSON.stringify(d.pts), antes);
+});
+t('solver: un arco con centro y extremos inmoviles se omite y su radio se actualiza solo', () => {
+  const d = newDoc();
+  const C = addPoint(d, 0, 0, false), P = addPoint(d, 5, 0, false), Q = addPoint(d, 0, 5, false), X = addPoint(d, 20, 0, false);
+  [C, P, Q].forEach((i) => { d.pts[i].fixed = true; });
+  const a = addArc(d, C, P, Q, 5, {});
+  d.arcs[a].r = 99; // radio desfasado
+  assert.ok(solve(d, []).ok);
+  near(d.arcs[a].r, 5, 1e-9, 'el radio sale de la geometria');
+  const Y = addPoint(d, 21, 0, false); addCon(d, { t: 'DIST', refs: [X, Y], v: 3 });
+  assert.ok(solve(d, [{ id: Y, x: 25, y: 2 }]).ok);
+});
 t('extender hasta elipses y splines: la linea y el arco llegan a la curva y quedan sobre ella', () => {
   const d = newDoc(); const { e } = mkEll(d);
   const l = addLine(d, addPoint(d, -30, 2), addPoint(d, -20, 2), ST);

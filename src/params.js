@@ -173,10 +173,16 @@ export function settle(doc, solveFn, targets = [], { maxIter = 40, tol = 1e-5 } 
     ids.forEach((id) => { doc.pts[id].fixed = true; });
     try { return solveFn(doc, tg); } finally { ids.forEach((id) => { if (doc.pts[id]) doc.pts[id].fixed = false; }); }
   };
+  // Un destino que la geometria no puede alcanzar del todo (el punto esta sobre un circulo y el raton no) nunca queda
+  // «llegado»: cada vuelta lo seguiria atrayendo y las formulas corren detras de un punto que se mueve un poco en
+  // cada una, con una resolucion cara por vuelta. Desde la 2.a vuelta ese punto se deja donde la 1.a lo puso (el
+  // siguiente movimiento del raton lo vuelve a atraer): las vueltas siguientes solo ajustan las formulas.
+  let pulled = false;
   const run = (withInputs) => {
-    const moving = new Set(targets.filter((t) => !near(t)).map((t) => t.id));
-    const arrived = targets.filter((t) => doc.pts[t.id] && !doc.pts[t.id].fixed && near(t)).map((t) => t.id);
-    const tg = targets.filter((t) => !near(t));
+    const live = (t) => doc.pts[t.id] && !doc.pts[t.id].fixed;
+    const moving = new Set(pulled ? [] : targets.filter((t) => !near(t)).map((t) => t.id));
+    const arrived = targets.filter((t) => live(t) && (pulled || near(t))).map((t) => t.id);
+    const tg = pulled ? [] : targets.filter((t) => !near(t));
     if (withInputs) {
       const inputs = [...measuredPoints(doc)].filter((id) => doc.pts[id] && !doc.pts[id].fixed && !moving.has(id));
       const r = solvePinned([...new Set([...inputs, ...arrived])], tg);
@@ -206,6 +212,7 @@ export function settle(doc, solveFn, targets = [], { maxIter = 40, tol = 1e-5 } 
     };
     if (mode !== modes[0]) restore();
     last = null; // el motivo del fallo es el de la ultima estrategia
+    pulled = false;
     for (let i = 1; i <= (mode === 'damped' ? 2 * maxIter : maxIter); i++) {
       const snap = JSON.stringify(doc);
       const rc = recompute(doc, 1, hook);
@@ -220,6 +227,7 @@ export function settle(doc, solveFn, targets = [], { maxIter = 40, tol = 1e-5 } 
         }
       }
       if (!r.ok) { last = { ok: false, error: null, iter: i, count: rc.count }; break; }
+      pulled = true;
       trackAngles(doc); // los angulos de referencia siguen la medida (sin saltos de 180° a 0°)
     }
   }

@@ -1,8 +1,8 @@
 import wasmUrl from '@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url';
-import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark, assignMark, setMarkRef, resetMarks, ensureMarkRefs } from './solver.js';
+import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark, assignMark, setMarkRef, resetMarks, ensureMarkRefs, redundantCons } from './solver.js';
 import {
   newDoc, addLayer, deleteLayer, layerCount, shownEntries, shownValues, layerHiddenPoints, consHidden, visibleDoc, isHidden, addPoint, addLine, addCircle, addArc, addText, addSpline, splinePolyline, addCon, cleanup, deleteItems, clone, hatchLoops,
-  allLtypes, PALETTE, arcOf, conTag, ensureNumbers, addEllipse, ellipsePolyline, ellipseOf, ellipsePoint, ellipseParam, ellipseRange, isPartial,
+  allLtypes, PALETTE, arcOf, conTag, ensureNumbers, addEllipse, ellipsePolyline, ellipseOf, ellipsePoint, ellipseParam, ellipseRange, isPartial, DIM_TYPES,
 } from './model.js';
 import {
   dist, closestOnSeg, lineLine, lineCircle, circleCircle, signedAngle, dashFromPattern, parsePattern,
@@ -3217,6 +3217,40 @@ $('trTrace').onclick = () => {
   else { pts.forEach((id) => startTrace(doc, id)); toast('Trazado activado: mueve el mecanismo para dibujar la trayectoria'); }
   afterChange();
 };
+// Restricciones redundantes: el solver las detecta (otras ya implican lo mismo); mientras existan, cada resolucion se
+// hace dos veces. Las cotas redundantes solo se avisan (pueden tener nombre y alimentar formulas), el resto se puede quitar.
+function redundantReport() {
+  const ids = redundantCons(doc);
+  const isDim = (id) => DIM_TYPES.includes(doc.cons[id].t) && !doc.cons[id].hidden; // las cotas ocultas (automaticas) no las nombra ni las lee nadie
+  return { removable: ids.filter((id) => !isDim(id)), dims: ids.filter(isDim) };
+}
+const redLine = (id) => '• ' + conLabel(doc, doc.cons[id]) + ' (' + doc.cons[id].refs.join(', ') + ')';
+const redList = (ids) => ids.slice(0, 10).map(redLine).join('\n') + (ids.length > 10 ? `\n… y ${ids.length - 10} más` : '');
+function warnRedundant() { // al abrir un archivo: un solo aviso, sin preguntar
+  let r;
+  try { r = redundantReport(); } catch { return; }
+  const n = r.removable.length + r.dims.length;
+  if (n) toast(`${n} restricción(es) redundante(s) hacen más lento el solver: botón «Redundantes» en Restricciones`);
+}
+$('redCheck').onclick = () => {
+  const r = redundantReport();
+  if (!r.removable.length && !r.dims.length) { toast('Sin restricciones redundantes'); return; }
+  let msg = '';
+  if (r.removable.length) msg += `${r.removable.length} restricción(es) redundante(s): no agregan información (otras ya implican lo mismo) y hacen más lento el solver.\n\n${redList(r.removable)}\n\n`;
+  if (r.dims.length) msg += `${r.dims.length} cota(s) redundante(s) que NO se quitan (pueden alimentar fórmulas; revísalas a mano):\n${redList(r.dims)}\n\n`;
+  if (!r.removable.length) { alert(msg.trim()); return; }
+  if (!confirm(msg + '¿Quitar las restricciones? La geometría no cambia; se puede deshacer.')) return;
+  pushUndo();
+  let quitadas = 0;
+  // el solver señala un subconjunto por vez: al quitarlo pueden aparecer otras que dependian de el, asi que se repite
+  for (let pasada = 0, lista = r.removable; lista.length && pasada < 6; pasada++, lista = redundantReport().removable) {
+    for (const id of lista) { delete doc.cons[id]; quitadas++; }
+  }
+  const ok = (hasReactive(doc) ? settle(doc, solve, []) : solve(doc, [])).ok;
+  if (!ok) { rollback(); toast('No se pudo: el dibujo no resuelve sin ellas; no se quitó nada'); afterChange(); return; }
+  afterChange();
+  toast(`${quitadas} restricción(es) quitada(s)`);
+};
 $('mkReset').onclick = () => {
   const all = Object.keys(doc.pts).filter((id) => isMark(doc, id));
   if (!all.length) return;
@@ -3329,7 +3363,7 @@ $('fLoad').onclick = () => $('fileIn').click();
 $('fileIn').onchange = async (e) => {
   const f = e.target.files[0]; e.target.value = '';
   if (!f) return;
-  try { const j = JSON.parse(await f.text()); loadDoc(j.doc || j); const b = cleanFileBase(f.name, 'json'); if (b) opts.fileBase = b; fitView(); afterChange(); toast('Abierto: ' + f.name); }
+  try { const j = JSON.parse(await f.text()); loadDoc(j.doc || j); const b = cleanFileBase(f.name, 'json'); if (b) opts.fileBase = b; fitView(); afterChange(); toast('Abierto: ' + f.name); setTimeout(warnRedundant, 2800); }
   catch (err) { toast('No se pudo abrir: ' + err.message); }
 };
 $('fPng').onclick = exportPNG;
@@ -3403,7 +3437,7 @@ async function ghOpenCmd() {
         loadDoc(j.doc || j);
         gh.rememberSha(c, path, f.sha);
         const base = cleanFileBase(f.name, 'json'); if (base) opts.fileBase = base;
-        fitView(); afterChange(); toast('Abierto de GitHub: ' + f.name);
+        fitView(); afterChange(); toast('Abierto de GitHub: ' + f.name); setTimeout(warnRedundant, 2800);
       } catch (e) { toast('No se pudo abrir: ' + e.message); }
     };
     box.appendChild(b);

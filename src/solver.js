@@ -366,8 +366,25 @@ function findFollowers(doc) {
   if (!order.length) return null;
   const skip = new Set();
   for (const [, d] of order) for (const i of d.ids) skip.add(i);
-  return { order, skip, map: new Map(order) };
+  return { order, skip, map: new Map(order), idleArcs: new Set() };
 }
+// Arcos que el solver puede ignorar: ninguna restriccion los menciona y su centro y sus dos extremos no se pueden mover
+// (fijos, marcas o seguidores). Su regla (extremos sobre la circunferencia) solo queda como restriccion redundante, y con
+// decenas de arcos copia eso multiplicaba por 6 el costo de cada resolucion. El radio se calcula al terminar.
+function prepare(doc) {
+  const F = findFollowers(doc);
+  const fixedOf = (i) => !!doc.pts[i]?.fixed || isMark(doc, i) || !!F?.map.has(i);
+  const idle = new Set(), arcs = Object.entries(doc.arcs);
+  if (arcs.length) {
+    const mentioned = new Set();
+    for (const k of Object.values(doc.cons)) if (!k.ref) for (const r of k.refs) mentioned.add(r);
+    for (const [id, a] of arcs) if (!mentioned.has(id) && [a.c, a.a, a.b].every((q) => doc.pts[q] && fixedOf(q))) idle.add(id);
+  }
+  if (!idle.size) return F;
+  if (F) { F.idleArcs = idle; return F; }
+  return { order: [], skip: new Set(), map: new Map(), idleArcs: idle };
+}
+
 // Calcula las posiciones de los seguidores a partir de P (id -> punto) y las escribe en out (id -> {x, y}).
 function applyFollowers(doc, F, P, out) {
   const get = (id) => out[id] || P(id);
@@ -401,6 +418,23 @@ function retarget(doc, F, targets) {
   });
 }
 
+// Una restriccion entre puntos que el solver no puede mover (fijos, marcas, seguidores, o los que se dejan fijos mientras
+// se resuelve una formula) y que ya se cumple no informa nada: solo vuelve redundante al sistema, y planegcs, al detectar
+// redundantes, resuelve dos veces cada vez y las diagnostica (un arrastre pasaba de ~80 ms a ~450 ms por una coincidencia
+// entre un punto fijado y el centro). Si no se cumple se deja pasar: el conflicto debe seguir apareciendo.
+function trivialFixed(doc, k, fixedOf) {
+  const r = k.refs, P = (i) => doc.pts[i];
+  if (!r.every((i) => P(i) && fixedOf(i))) return false;
+  const near = (a, b) => Math.abs(a - b) <= 1e-7 * (1 + Math.abs(b));
+  switch (k.t) {
+    case 'COI': return r.length === 2 && near(P(r[0]).x, P(r[1]).x) && near(P(r[0]).y, P(r[1]).y);
+    case 'H': return r.length === 2 && near(P(r[0]).y, P(r[1]).y);
+    case 'V': return r.length === 2 && near(P(r[0]).x, P(r[1]).x);
+    case 'DIST': return r.length === 2 && Number.isFinite(k.v) && near(Math.hypot(P(r[0]).x - P(r[1]).x, P(r[0]).y - P(r[1]).y), k.v);
+    default: return false;
+  }
+}
+
 function build(doc, pos, extra, F) {
   const out = [];
   const P = (id) => pos?.pts?.[id] || doc.pts[id];
@@ -413,13 +447,15 @@ function build(doc, pos, extra, F) {
     out.push({ id, type: 'circle', c_id: c.c, radius: pos?.circles?.[id] ?? c.r });
   }
   for (const [id, a] of Object.entries(doc.arcs)) {
+    if (F?.idleArcs.has(id)) continue;
     const { a0, sweep } = arcSweepOf(P(a.c), P(a.a), P(a.b));
     out.push({ id, type: 'arc', c_id: a.c, start_id: a.a, end_id: a.b, radius: pos?.arcs?.[id] ?? a.r, start_angle: a0, end_angle: a0 + sweep });
     out.push({ id: `${id}_rules`, type: 'arc_rules', a_id: id });
   }
   const ell = nativeEllipses(doc);
   if (ell.size) out.push(...nativeEllipsePrims(doc, pos, ell));
-  for (const [id, k] of Object.entries(doc.cons)) if (!F?.skip.has(id)) out.push(...conPrims(doc, id, k));
+  const fixedOf = (i) => !!doc.pts[i]?.fixed || isMark(doc, i) || !!F?.map.has(i);
+  for (const [id, k] of Object.entries(doc.cons)) if (!F?.skip.has(id) && !(!k.ref && trivialFixed(doc, k, fixedOf))) out.push(...conPrims(doc, id, k));
   if (extra) out.push(...extra);
   return out;
 }
@@ -434,13 +470,14 @@ function runSolve(prims) {
   const params = {};
   for (const n of names) params[n] = g.get_sketch_param_value(n);
   const conflicts = g.has_gcs_conflicting_constraints() ? g.get_gcs_conflicting_constraints() : [];
+  const redundant = g.has_gcs_redundant_constraints() ? g.get_gcs_redundant_constraints() : [];
   const pts = {}, circles = {}, arcs = {};
   for (const p of g.sketch_index.get_primitives()) {
     if (p.type === 'point') pts[p.id] = { x: p.x, y: p.y };
     else if (p.type === 'circle') circles[p.id] = p.radius;
     else if (p.type === 'arc') arcs[p.id] = p.radius;
   }
-  return { status, conflicts, pts, circles, arcs, params };
+  return { status, conflicts, redundant, pts, circles, arcs, params };
 }
 
 // Marca de referencia: un punto con p.mark = id de una linea. El solver la trata como fija mientras resuelve; despues de cada
@@ -508,12 +545,31 @@ function commit(doc, res) {
   for (const [sid, ts] of Object.entries(res.ts || {})) if (doc.splines[sid]) doc.splines[sid].ts = ts;
 }
 
+// Restricciones del documento que el solver reporta como redundantes: no agregan informacion (otras ya implican lo mismo)
+// y, mientras existan, cada resolucion se hace dos veces y se diagnostica, lo que en un dibujo grande multiplica el
+// costo. Solo cuenta una restriccion si TODAS sus primitivas salieron redundantes (si solo una parte lo es, quitarla
+// quitaria algo que si restringe). No modifica doc. Devuelve los ids de doc.cons.
+export function redundantCons(doc) {
+  if (!g) return [];
+  const F = prepare(doc);
+  const res = solveLoop(doc, null, null, F);
+  const red = new Set(res.redundant || []);
+  if (!red.size) return [];
+  const out = [];
+  for (const [id, k] of Object.entries(doc.cons)) {
+    if (k.ref) continue;
+    const ids = conPrims(doc, id, k).map((q) => q.id);
+    if (ids.length && ids.every((q) => red.has(q))) out.push(id);
+  }
+  return out;
+}
+
 // Resuelve el documento. targets (opcional): [{id,x,y}] puntos que el usuario arrastra;
 // se atraen con una restriccion debil y luego se resuelve sin ella para que el
 // resultado sea siempre factible. No modifica doc si falla.
 export function solve(doc, targets = []) {
   if (!g) return { ok: true, conflicts: [] };
-  const F = findFollowers(doc);
+  const F = prepare(doc);
   targets = retarget(doc, F, targets);
   let pos = null;
   const live = targets.filter((t) => doc.pts[t.id] && !doc.pts[t.id].fixed && !isMark(doc, t.id));
@@ -529,7 +585,10 @@ export function solve(doc, targets = []) {
     pos = { pts: r1.pts, circles: r1.circles, arcs: r1.arcs, u };
   }
   const res = solveLoop(doc, pos, null, F);
-  if (F) applyFollowers(doc, F, (id) => doc.pts[id], res.pts);
+  if (F) {
+    applyFollowers(doc, F, (id) => doc.pts[id], res.pts);
+    for (const id of F.idleArcs) { const a = doc.arcs[id], c = res.pts[a.c] || doc.pts[a.c], q = res.pts[a.a] || doc.pts[a.a]; res.arcs[id] = Math.hypot(q.x - c.x, q.y - c.y); }
+  }
   const ok = (res.status === 0 || res.status === 1) && res.conflicts.length === 0 && (!hasSpl(doc) || splineResidual(doc, res) < 1e-3);
   if (ok) { commit(doc, res); projectMarks(doc); }
   return { ok, conflicts: res.conflicts, status: res.status };
