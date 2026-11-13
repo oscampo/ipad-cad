@@ -1,0 +1,51 @@
+name: Release
+
+# Crea (o actualiza) el GitHub Release de una etiqueta vX.Y.Z con el token integrado de Actions.
+# Las notas salen de la seccion "## vX.Y.Z (fecha)" de CHANGELOG.md: no se redactan aparte, para no
+# tener dos fuentes de verdad. Si esa seccion no existe, el flujo falla antes de publicar nada.
+# Para una etiqueta que ya existe (por ejemplo, rehacer las notas), se puede lanzar a mano desde
+# Actions > Release > Run workflow, indicando la etiqueta.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Etiqueta a publicar (ej. v1.6.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fijar variable TAG
+        run: echo "TAG=${{ github.event.inputs.tag || github.ref_name }}" >> "$GITHUB_ENV"
+
+      - name: Extraer la seccion del CHANGELOG para esta etiqueta
+        run: |
+          VERSION="${TAG#v}"
+          awk "/^## v$VERSION /{flag=1; next} /^## v/{flag=0} flag" CHANGELOG.md > /tmp/notes.md
+          if ! grep -q '[^[:space:]]' /tmp/notes.md; then
+            echo "Sin seccion '## v$VERSION' en CHANGELOG.md: revisala antes de reintentar." >&2
+            exit 1
+          fi
+          echo "--- notas extraidas ---"
+          cat /tmp/notes.md
+
+      - name: Crear o actualizar el release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes-file /tmp/notes.md
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes-file /tmp/notes.md --verify-tag
+          fi
