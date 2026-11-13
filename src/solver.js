@@ -456,8 +456,123 @@ function build(doc, pos, extra, F) {
   if (ell.size) out.push(...nativeEllipsePrims(doc, pos, ell));
   const fixedOf = (i) => !!doc.pts[i]?.fixed || isMark(doc, i) || !!F?.map.has(i);
   for (const [id, k] of Object.entries(doc.cons)) if (!F?.skip.has(id) && !(!k.ref && trivialFixed(doc, k, fixedOf))) out.push(...conPrims(doc, id, k));
+  if (F?.gearPrims) out.push(...F.gearPrims);
   if (extra) out.push(...extra);
   return out;
+}
+
+// ---------------------------------------------------------------- relacion de engranaje (GEAR)
+// { t: 'GEAR', refs: [lineaA, lineaB], ratio, a0: [aA0, aB0], cur: [aA, aB] }  =>  (aB - aB0) = ratio * (aA - aA0)
+// Cada engranaje (o rueda, o polea) se representa por una linea rigida con su cuerpo; su angulo es la direccion a -> b. Los
+// angulos se llevan sin limite (varias vueltas): cur guarda el ultimo, y cada resolucion toma el equivalente mas cercano.
+// PlaneGCS no sirve para ligar los dos angulos como incognitas (su restriccion «proportional» ignora la razon cuando ambos
+// parametros son libres), asi que se hace como una cota conductora: en cada resolucion un engranaje es el MAESTRO (el que se
+// arrastra, o el primero) y su angulo se fija; el de los demas sale de la razon y tambien se fija. Con el angulo fijo el cuerpo
+// gira rigido (sus puntos estan amarrados al centro). El valor del maestro arrastrado sale del raton: es el angulo del raton
+// alrededor del centro, sin objetivo suave ni vueltas de formula.
+const TWO_PI = 2 * Math.PI;
+const wrapPi = (x) => x - TWO_PI * Math.round(x / TWO_PI);
+const nearAng = (a, ref) => ref + wrapPi(a - ref);
+const lineDir = (doc, lid) => { const l = doc.lines[lid], a = doc.pts[l.a], b = doc.pts[l.b]; return Math.atan2(b.y - a.y, b.x - a.x); };
+const gearRels = (doc) => Object.values(doc.cons).filter((k) => k.t === 'GEAR' && !k.ref && k.refs.length === 2 && doc.lines[k.refs[0]] && doc.lines[k.refs[1]] && Number.isFinite(k.ratio) && k.ratio !== 0 && k.refs[0] !== k.refs[1]);
+
+// Cuerpos: puntos que se mueven juntos (unidos por alguna restriccion o forma) sin pasar por puntos fijos.
+function bodies(doc) {
+  const par = new Map();
+  const find = (x) => { while (par.get(x) !== x) { par.set(x, par.get(par.get(x))); x = par.get(x); } return x; };
+  const movable = (id) => doc.pts[id] && !doc.pts[id].fixed && !isMark(doc, id);
+  const join = (ids) => {
+    let first = null;
+    for (const id of ids) {
+      if (!movable(id)) continue;
+      if (!par.has(id)) par.set(id, id);
+      if (first === null) first = id; else { const a = find(first), b = find(id); if (a !== b) par.set(a, b); }
+    }
+  };
+  const ptsOf = (r) => {
+    if (r in doc.pts) return [r];
+    if (r in doc.lines) return [doc.lines[r].a, doc.lines[r].b];
+    if (r in doc.circles) return [doc.circles[r].c];
+    if (r in doc.arcs) { const a = doc.arcs[r]; return [a.c, a.a, a.b]; }
+    if (doc.splines?.[r]) return doc.splines[r].pts;
+    if (doc.ellipses?.[r]) { const e = doc.ellipses[r]; return [e.c, e.a, e.b, e.p1, e.p2].filter(Boolean); }
+    return [];
+  };
+  for (const k of Object.values(doc.cons)) if (!k.ref && k.t !== 'GEAR') join(k.refs.flatMap(ptsOf));
+  for (const l of Object.values(doc.lines)) join([l.a, l.b]);
+  for (const a of Object.values(doc.arcs)) join([a.c, a.a, a.b]);
+  for (const sp of Object.values(doc.splines || {})) join(sp.pts);
+  return { of: (id) => (par.has(id) ? find(id) : null) };
+}
+
+// Plan de una resolucion: angulos fijos para las lineas de los engranajes y los destinos que ya no hacen falta.
+function gearPlan(doc, targets) {
+  const rels = gearRels(doc);
+  if (!rels.length) return { targets, prims: [] };
+  const lines = new Map(); // linea -> { meas, rels: [] }
+  for (const k of rels) k.refs.forEach((lid, i) => { if (!lines.has(lid)) lines.set(lid, { meas: nearAng(lineDir(doc, lid), Array.isArray(k.cur) && Number.isFinite(k.cur[i]) ? k.cur[i] : lineDir(doc, lid)), rels: [] }); });
+  const edge = (k, from) => { // angulo de la otra linea a partir del de `from`
+    const [A, B] = k.refs, [a0, b0] = k.a0;
+    return from === A ? { to: B, f: (x) => b0 + k.ratio * (x - a0) } : { to: A, f: (x) => a0 + (x - b0) / k.ratio };
+  };
+  for (const k of rels) for (const lid of k.refs) lines.get(lid).rels.push(k);
+  const bod = targets.length ? bodies(doc) : null;
+  const angle = new Map(), drop = new Set();
+  const pivotOf = (lid) => { // extremo de la linea que coincide con un punto fijo: el centro de giro
+    const l = doc.lines[lid];
+    for (const id of [l.a, l.b]) {
+      const p = doc.pts[id];
+      if (p.fixed) return id;
+      for (const q of Object.values(doc.pts)) if (q.fixed && Math.hypot(q.x - p.x, q.y - p.y) < 1e-6) return id;
+    }
+    return null;
+  };
+  const seen = new Set();
+  for (const lid0 of lines.keys()) {
+    if (seen.has(lid0)) continue;
+    // componente de lineas ligadas por relaciones
+    const comp = [], stack = [lid0]; seen.add(lid0);
+    while (stack.length) { const x = stack.pop(); comp.push(x); for (const k of lines.get(x).rels) for (const y of k.refs) if (!seen.has(y)) { seen.add(y); stack.push(y); } }
+    // maestro: la linea cuyo cuerpo contiene un punto arrastrado (y que tiene centro de giro); si no, la primera
+    let master = comp[0], value = lines.get(comp[0]).meas, bodyKey = null;
+    outer: for (const t of targets) {
+      const key = bod.of(t.id);
+      if (key === null) continue;
+      for (const lid of comp) {
+        const l = doc.lines[lid], inBody = [l.a, l.b].some((id) => bod.of(id) === key);
+        if (!inBody) continue;
+        const cid = pivotOf(lid);
+        if (cid === null) continue;
+        const c = doc.pts[cid], p = doc.pts[t.id];
+        if (Math.hypot(p.x - c.x, p.y - c.y) < 1e-9 || Math.hypot(t.x - c.x, t.y - c.y) < 1e-9) continue;
+        const delta = Math.atan2(p.y - c.y, p.x - c.x) - lines.get(lid).meas; // posicion del punto respecto a la linea (rigido)
+        master = lid; value = nearAng(Math.atan2(t.y - c.y, t.x - c.x) - delta, lines.get(lid).meas); bodyKey = key;
+        break outer;
+      }
+    }
+    angle.set(master, value);
+    const queue = [master];
+    while (queue.length) {
+      const x = queue.shift();
+      for (const k of lines.get(x).rels) {
+        const { to, f } = edge(k, x), v = f(angle.get(x));
+        if (!angle.has(to)) { angle.set(to, v); queue.push(to); }
+      }
+    }
+    if (bodyKey !== null) for (const t of targets) if (bod.of(t.id) === bodyKey) drop.add(t.id);
+  }
+  const prims = [];
+  for (const [lid, v] of angle) { const l = doc.lines[lid]; prims.push({ id: `__gr:${lid}`, type: 'p2p_angle', p1_id: l.a, p2_id: l.b, angle: wrapPi(v) }); }
+  return { targets: targets.filter((t) => !drop.has(t.id)), prims };
+}
+// Tras resolver: el angulo continuo de cada relacion sigue a la geometria.
+function trackGears(doc) {
+  for (const k of gearRels(doc)) k.cur = k.refs.map((lid, i) => nearAng(lineDir(doc, lid), Array.isArray(k.cur) && Number.isFinite(k.cur[i]) ? k.cur[i] : lineDir(doc, lid)));
+}
+// Datos de una relacion nueva con la postura actual como punto de partida.
+export function makeGear(doc, lineA, lineB, ratio) {
+  const a = lineDir(doc, lineA), b = lineDir(doc, lineB);
+  return { t: 'GEAR', refs: [lineA, lineB], ratio, a0: [a, b], cur: [a, b] };
 }
 
 function runSolve(prims) {
@@ -569,8 +684,10 @@ export function redundantCons(doc) {
 // resultado sea siempre factible. No modifica doc si falla.
 export function solve(doc, targets = []) {
   if (!g) return { ok: true, conflicts: [] };
-  const F = prepare(doc);
+  let F = prepare(doc);
   targets = retarget(doc, F, targets);
+  const G = gearPlan(doc, targets);
+  if (G.prims.length) { F ||= { order: [], skip: new Set(), map: new Map(), idleArcs: new Set() }; F.gearPrims = G.prims; targets = G.targets; }
   let pos = null;
   const live = targets.filter((t) => doc.pts[t.id] && !doc.pts[t.id].fixed && !isMark(doc, t.id));
   if (live.length) {
@@ -590,7 +707,7 @@ export function solve(doc, targets = []) {
     for (const id of F.idleArcs) { const a = doc.arcs[id], c = res.pts[a.c] || doc.pts[a.c], q = res.pts[a.a] || doc.pts[a.a]; res.arcs[id] = Math.hypot(q.x - c.x, q.y - c.y); }
   }
   const ok = (res.status === 0 || res.status === 1) && res.conflicts.length === 0 && (!hasSpl(doc) || splineResidual(doc, res) < 1e-3);
-  if (ok) { commit(doc, res); projectMarks(doc); }
+  if (ok) { commit(doc, res); projectMarks(doc); trackGears(doc); }
   return { ok, conflicts: res.conflicts, status: res.status };
 }
 

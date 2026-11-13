@@ -1,5 +1,5 @@
 import wasmUrl from '@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url';
-import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark, assignMark, setMarkRef, resetMarks, ensureMarkRefs, redundantCons } from './solver.js';
+import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark, assignMark, setMarkRef, resetMarks, ensureMarkRefs, redundantCons, makeGear } from './solver.js';
 import {
   newDoc, addLayer, deleteLayer, layerCount, shownEntries, shownValues, layerHiddenPoints, consHidden, visibleDoc, isHidden, addPoint, addLine, addCircle, addArc, addText, addSpline, splinePolyline, addCon, cleanup, deleteItems, clone, hatchLoops,
   allLtypes, PALETTE, arcOf, conTag, ensureNumbers, addEllipse, ellipsePolyline, ellipseOf, ellipsePoint, ellipseParam, ellipseRange, isPartial, DIM_TYPES,
@@ -124,6 +124,7 @@ function updateEnabled() {
     FIX: pt + ln + crv > 0,
     DIM: (pt === 2 && !ln) || (ln === 1 && !pt) || (pt === 1 && ln === 1) || (ln === 2 && !pt && !crv && !n.sp && !n.el) || (crv >= 1 && pt + ln + crv + n.el === 2 && !n.sp),
     ANG: ln === 2,
+    GEAR: ln === 2 && !pt && !crv && !n.sp && !n.el,
     RAD: crv >= 1,
   };
   document.querySelectorAll('[data-con]').forEach((b) => { b.disabled = !rules[b.dataset.con]; });
@@ -2000,6 +2001,15 @@ async function applyCon(kind) {
       if (lns.length < 2) return bad('Selecciona 2 líneas');
       for (let i = 1; i < lns.length; i++) list.push({ t: kind, refs: [lns[0], lns[i]] });
       break;
+    case 'GEAR': {
+      if (lns.length !== 2) return bad('Selecciona 2 líneas: una rígida con cada engranaje (por ejemplo la radial de cada uno)');
+      if (doc.cons && Object.values(doc.cons).some((k) => k.t === 'GEAR' && k.refs.includes(lns[0]) && k.refs.includes(lns[1]))) return bad('Esas dos líneas ya tienen una relación de engranaje');
+      const val = await askNumber('Giro de la 2.ª línea por cada giro de la 1.ª (negativo si giran en sentido contrario; admite fórmula, ej. -17/34)', -1);
+      if (val === null || !Number.isFinite(val) || val === 0) return;
+      list.push(makeGear(doc, lns[0], lns[1], val));
+      toast('Engranaje: la postura actual es el punto de partida; arrastra cualquiera de los dos');
+      break;
+    }
     case 'COL':
       if (lns.length < 2) return bad('Selecciona 2 o más líneas');
       for (let i = 1; i < lns.length; i++) list.push({ t: 'COL', refs: [lns[0], lns[i]] });

@@ -15,7 +15,7 @@ import { trimAt, extendEnd, cutsOf, curveCuts, linearArray, mirrorCopy, circular
 import { CLINE_STYLE, circleThrough3, addRectangle, polygonVertices, addPolygon, arcIsClockwise, constructionArcDash } from '../src/shapes.js';
 import { FONTS, fontCss } from '../src/text.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from '../src/lock.js';
-import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark, assignMark, setMarkRef, resetMarks, ensureMarkRefs, redundantCons } from '../src/solver.js';
+import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark, assignMark, setMarkRef, resetMarks, ensureMarkRefs, redundantCons, makeGear } from '../src/solver.js';
 import { readFileSync } from 'node:fs';
 import { bsplineThrough, bsplinePoint } from '../src/bspline.js';
 import { boxSelect } from '../src/boxsel.js';
@@ -1905,6 +1905,66 @@ t('solver: un arco con centro y extremos inmoviles se omite y su radio se actual
   const Y = addPoint(d, 21, 0, false); addCon(d, { t: 'DIST', refs: [X, Y], v: 3 });
   assert.ok(solve(d, [{ id: Y, x: 25, y: 2 }]).ok);
 });
+// dos engranajes de centro fijo: cada uno es un cuerpo rigido (un punto marcador a distancia fija del centro) y una linea centro-marcador
+function dosEngranes(ratio, fase = 0.4) {
+  const d = newDoc(), r1 = 17, r2 = 34, D = r1 + r2;
+  const c1 = addPoint(d, 0, 0, false), c2 = addPoint(d, D, 0, false); d.pts[c1].fixed = true; d.pts[c2].fixed = true;
+  const m1 = addPoint(d, r1, 0, false), m2 = addPoint(d, D + r2 * Math.cos(fase), r2 * Math.sin(fase), false);
+  const q1 = addPoint(d, 0, r1 / 2, false), q2 = addPoint(d, D, r2 / 2, false); // un segundo punto rigido por engranaje (el cuerpo es una forma, no un punto)
+  addCon(d, { t: 'DIST', refs: [c1, m1], v: r1, hidden: true }); addCon(d, { t: 'DIST', refs: [c2, m2], v: r2, hidden: true });
+  addCon(d, { t: 'DIST', refs: [c1, q1], v: r1 / 2, hidden: true }); addCon(d, { t: 'DIST', refs: [c2, q2], v: r2 / 2, hidden: true });
+  addCon(d, { t: 'DIST', refs: [m1, q1], v: Math.hypot(r1, r1 / 2), hidden: true }); addCon(d, { t: 'DIST', refs: [m2, q2], v: Math.hypot(d.pts[m2].x - d.pts[q2].x, d.pts[m2].y - d.pts[q2].y), hidden: true });
+  const l1 = addLine(d, c1, m1, {}), l2 = addLine(d, c2, m2, {});
+  const k = addCon(d, makeGear(d, l1, l2, ratio));
+  return { d, c1, c2, m1, m2, q1, q2, l1, l2, k, r1, r2, D };
+}
+t('engranaje: un maestro fijo hace girar al otro con la razon, varias vueltas, y se arrastra cualquiera de los dos', () => {
+  const g = dosEngranes(-0.5);
+  const { d, c1, c2, m1, m2, k, D } = g;
+  assert.ok(solve(d, []).ok);
+  const ang = (c, p) => Math.atan2(d.pts[p].y - d.pts[c].y, d.pts[p].x - d.pts[c].x);
+  const wrap = (x) => x - 2 * Math.PI * Math.round(x / (2 * Math.PI));
+  const a1_0 = ang(c1, m1), a2_0 = ang(c2, m2);
+  // arrastrar el marcador del engranaje 1, 3 vueltas, con el raton un poco fuera del circulo
+  for (let i = 1; i <= 216; i++) {
+    const a = a1_0 + (i * 5 * Math.PI) / 180;
+    const r = solve(d, [{ id: m1, x: 19 * Math.cos(a), y: 19 * Math.sin(a) }]);
+    assert.ok(r.ok, 'paso ' + i);
+    near(wrap(ang(c1, m1) - a), 0, 1e-6); // el marcador sigue el angulo del raton
+    near(wrap(ang(c2, m2) - (a2_0 - 0.5 * (a - a1_0))), 0, 1e-6, 'el 2 gira -1/2 del giro del 1 (paso ' + i + ')');
+  }
+  near(d.cons[k].cur[0] - d.cons[k].a0[0], (216 * 5 * Math.PI) / 180, 1e-6, 'el angulo continuo acumula las 3 vueltas');
+  // ahora se arrastra el engranaje 2 (la razon se invierte)
+  const b0 = ang(c2, m2), a1b = d.cons[k].cur[0];
+  for (let i = 1; i <= 72; i++) {
+    const b = b0 + (i * 5 * Math.PI) / 180;
+    assert.ok(solve(d, [{ id: m2, x: D + 40 * Math.cos(b), y: 40 * Math.sin(b) }]).ok, 'paso b' + i);
+    near(wrap(ang(c2, m2) - b), 0, 1e-6);
+    near(d.cons[k].cur[0] - a1b, -2 * (b - b0), 1e-6, 'el 1 gira -2 veces el giro del 2');
+  }
+});
+t('engranaje: sin arrastre conserva la postura y un punto del cuerpo que no es la linea tambien lo arrastra', () => {
+  const g = dosEngranes(-0.5);
+  const { d, c1, c2, m1, m2, q1 } = g;
+  assert.ok(solve(d, []).ok);
+  const antes = JSON.stringify(d.pts);
+  assert.ok(solve(d, []).ok); assert.equal(JSON.stringify(d.pts), antes, 'ya engranados: no se mueve nada');
+  // arrastrar q1 (otro punto del cuerpo 1): su angulo respecto al centro lleva al cuerpo
+  const a = Math.atan2(d.pts[q1].y, d.pts[q1].x) + 0.5;
+  assert.ok(solve(d, [{ id: q1, x: 3 * Math.cos(a), y: 3 * Math.sin(a) }]).ok);
+  near(Math.atan2(d.pts[q1].y, d.pts[q1].x), a, 1e-6);
+  const girado1 = Math.atan2(d.pts[m1].y, d.pts[m1].x) - 0;
+  assert.ok(Math.abs(girado1 - 0.5) < 1e-6, 'm1 giro 0.5 con q1');
+  near(Math.atan2(d.pts[m2].y, d.pts[m2].x - g.D), 0.4 - 0.25, 1e-6, 'el 2 giro -0.25');
+});
+t('engranaje: conserva sus datos al copiar el archivo y se borra con sus lineas', () => {
+  const g = dosEngranes(-1);
+  const copia = JSON.parse(JSON.stringify(g.d));
+  assert.equal(copia.cons[g.k].t, 'GEAR'); assert.equal(copia.cons[g.k].ratio, -1);
+  delete g.d.lines[g.l1]; cleanup(g.d);
+  assert.equal(g.d.cons[g.k], undefined, 'sin una de sus lineas la relacion desaparece');
+});
+
 t('extender hasta elipses y splines: la linea y el arco llegan a la curva y quedan sobre ella', () => {
   const d = newDoc(); const { e } = mkEll(d);
   const l = addLine(d, addPoint(d, -30, 2), addPoint(d, -20, 2), ST);

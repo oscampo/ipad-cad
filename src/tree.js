@@ -10,7 +10,7 @@ const CON_NAMES = {
   COI: 'Coincidentes', PONL: 'Coincidente (punto sobre línea)', PONC: 'Coincidente (punto sobre círculo/arco)', PONS: 'Coincidente (punto sobre spline)', PONE: 'Coincidente (punto sobre elipse)',
   COL: 'Colineales', MID: 'Punto medio', CONC: 'Concéntricos', TANLC: 'Tangente', TANCC: 'Tangente', TANLS: 'Tangente a spline', TANCS: 'Tangente a spline', TANLE: 'Tangente a elipse', TANCE: 'Tangente a elipse', TANEE: 'Tangente entre elipses',
   DIST: 'Distancia', DISTPL: 'Distancia a recta', ANG: 'Ángulo', ANG4: 'Ángulo', RAD: 'Radio',
-  AZ: 'Dirección', EQD: 'Igual distancia', SYM: 'Simetría',
+  AZ: 'Dirección', EQD: 'Igual distancia', SYM: 'Simetría', GEAR: 'Engranaje',
 };
 
 export function conLabel(doc, k) {
@@ -19,6 +19,7 @@ export function conLabel(doc, k) {
   if (k.t === 'DIST' || k.t === 'DISTPL') s += ` = ${f(dimValue(doc, k))}`;
   else if (k.t === 'ANG' || k.t === 'ANG4') s += ` = ${dimText(doc, k)}`;
   else if (k.t === 'RAD') s += (k.refs[0] in doc.circles ? ` ${DIAM} = ${f(k.v * 2)}` : ` R = ${f(k.v)}`);
+  else if (k.t === 'GEAR') s += ` (giro 2 / giro 1 = ${f(k.ratio)})`;
   if (k.expr && !k.ref) s += ` (= ${k.expr})`;
   if (k.ref) s += ' (referencia)';
   if (k.hidden) s += k.vec ? ' (magnitud de vector)' : ' (auto)';

@@ -1,6 +1,7 @@
 // Iconos: genericos de Lucide (ISC) incluidos en el build y simbolos de CAD propios,
 // todos con el mismo estilo (24x24, trazo 2, extremos redondeados).
 import undo from 'lucide-static/icons/undo-2.svg?raw';
+import cog from 'lucide-static/icons/cog.svg?raw';
 import redo from 'lucide-static/icons/redo-2.svg?raw';
 import trash from 'lucide-static/icons/trash-2.svg?raw';
 import fit from 'lucide-static/icons/maximize.svg?raw';
@@ -102,7 +103,7 @@ const custom = {
   labels: S('<path d="M4 7h16M4 12h10M4 17h16"/>'),
 };
 
-const generic = { undo, redo, trash, fit, grid, magnet, eye, 'eye-off': eyeOff, layers, props: settings2, hand, save, 'folder-open': folderOpen, 'file-plus': filePlus, image, download, lock, equal, select: pointer, circle, ruler, 'pencil-ruler': pencilRuler, menu, unlock, 'list-tree': listTree, help, copy, paste };
+const generic = { gear: cog, undo, redo, trash, fit, grid, magnet, eye, 'eye-off': eyeOff, layers, props: settings2, hand, save, 'folder-open': folderOpen, 'file-plus': filePlus, image, download, lock, equal, select: pointer, circle, ruler, 'pencil-ruler': pencilRuler, menu, unlock, 'list-tree': listTree, help, copy, paste };
 
 function clean(raw) {
   // quita comentarios de licencia y atributos de tamano; el CSS fija el tamano

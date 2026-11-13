@@ -1,5 +1,8 @@
 # Historial de cambios
 
+## Sin publicar
+
+- **Relación de engranaje** (nueva restricción «Engranaje», grupo Restricciones): liga el giro de dos cuerpos rígidos, cada uno representado por una línea (por ejemplo la radial de cada engranaje): `giro 2 = razón × giro 1`, con la razón que teclees (negativa si giran en sentido contrario; admite fórmula como `-17/34`) y la postura actual como punto de partida (no hay desfase que calcular: posiciona los engranes a mano y crea la relación). Se arrastra cualquiera de los dos y el otro gira con la razón, varias vueltas. El solver fija el ángulo del engranaje arrastrado (el del ratón alrededor del centro) y calcula el del otro, sin vueltas de fórmula ni objetivo suave: en el ejemplo de dos engranes de 17 dientes un movimiento de arrastre pasó de ~2 s a ~60 ms en el navegador. Requiere que el engranaje gire alrededor de un punto fijo y que sus puntos estén amarrados a ese centro (distancia y ángulo, como los de una matriz circular). No modela el contacto entre dientes.
 ## v1.6.1 (2026-11-13)
 
 - **Arrastre más rápido con cotas que leen medidas** (engranes acoplados por fórmulas): un destino que la geometría no alcanza del todo (un punto sobre un círculo arrastrado con el mouse) ya no se sigue atrayendo en cada vuelta de la fórmula; desde la 2.ª vuelta el punto se queda donde la 1.ª lo puso y las vueltas siguientes solo ajustan las fórmulas. Un paso de arrastre de dos engranes de 17 dientes pasó de ~3 s a ~0,25 s en un dibujo sin redundantes.
