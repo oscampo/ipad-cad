@@ -1,6 +1,6 @@
 # Historial de cambios
 
-## Sin publicar
+## v1.6.0 (2026-11-13)
 
 - **Reiniciar marcas**: cada marca guarda una referencia (su distancia sobre la línea desde el primer extremo, tomada al asignarla). El botón «Reiniciar marcas» del grupo Spline (con marcas seleccionadas, solo esas) y «Reiniciar» en las propiedades del punto las devuelven a ella, en cualquier lugar donde esté el mecanismo, para empezar de cero otra lectura. «Tomar la actual» redefine la referencia. Los archivos anteriores toman como referencia la posición al abrirlos.
 - **Spline**: tocar la curva y arrastrar la mueve entera (antes no hacía nada). Arrastrar uno de sus puntos sigue cambiando su forma.
