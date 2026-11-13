@@ -8,7 +8,7 @@ import { splitElement } from '../src/split.js';
 import { buildTree, conLabel } from '../src/tree.js';
 import { cleanFileBase } from '../src/files.js';
 import { parseValue, evalExpr, isPlainNumber, exprRefs, renameInExpr } from '../src/expr.js';
-import { recompute, pruneFormulas, renameDim, checkName, varsOf } from '../src/params.js';
+import { recompute, pruneFormulas, renameDim, checkName, varsOf, settle, hasReactive } from '../src/params.js';
 import { nameDims } from '../src/model.js';
 import { trimAt, extendEnd, cutsOf, curveCuts, linearArray, mirrorCopy, circularArray, clipOf, pasteClip, bboxOf } from '../src/edit.js';
 import { CLINE_STYLE, circleThrough3, addRectangle, polygonVertices, addPolygon, arcIsClockwise, constructionArcDash } from '../src/shapes.js';
@@ -1971,15 +1971,65 @@ t('formulas entre cotas: recalculo en cadena, ciclos y referencias', () => {
   const rc = recompute(d);
   assert.ok(!rc.ok && /círculo/.test(rc.error), rc.error);
   delete d.cons[kA].expr;
-  // una cota de referencia no sirve de variable
+  // una cota de referencia tambien sirve de variable (se lee su medida)
   d.cons[kA].ref = true;
-  assert.deepEqual(pruneFormulas(d), ['D2']);
-  assert.equal(d.cons[kB].expr, undefined);
-  assert.ok(Object.keys(varsOf(d)).indexOf('D1') < 0);
+  assert.deepEqual(pruneFormulas(d), []);
+  assert.equal(d.cons[kB].expr, 'D1/2+1');
+  assert.ok('D1' in varsOf(d));
   // valor imposible (negativo) no modifica nada
   d.cons[kA].ref = false; d.cons[kB].expr = 'D1-100';
   const bad = recompute(d);
   assert.ok(!bad.ok); near(d.cons[kB].v, 11);
+});
+t('cotas de referencia en formulas: se resuelve y recalcula hasta estabilizar', () => {
+  const d = newDoc();
+  const a = addPoint(d, 0, 0), b = addPoint(d, 10, 0), c = addPoint(d, 0, 6);
+  d.pts[a].fixed = true;
+  const l1 = addLine(d, a, b, {}), l2 = addLine(d, a, c, {});
+  addCon(d, { t: 'H', refs: [l1] }); addCon(d, { t: 'V', refs: [l2] });
+  const kIn = addCon(d, { t: 'DIST', refs: [a, b], v: 10 });                 // D1 (conductora)
+  const kRef = addCon(d, { t: 'DIST', refs: [a, b], v: 10, ref: true });     // D2 (solo lectura): mide la linea 1
+  const kOut = addCon(d, { t: 'DIST', refs: [a, c], v: 6, expr: 'D2*2+1' }); // D3 lee la medida
+  assert.equal(d.cons[kRef].name, 'D2');
+  assert.ok(hasReactive(d));
+  const r1 = settle(d, solve, []);
+  assert.ok(r1.ok, r1.error); near(d.cons[kOut].v, 21);
+  // cambiar la entrada: la geometria cambia, la medida cambia, la salida la sigue
+  d.cons[kIn].v = 30;
+  const r2 = settle(d, solve, []);
+  assert.ok(r2.ok, r2.error);
+  near(d.cons[kOut].v, 61, 1e-4);
+  near(Math.hypot(d.pts[c].x - d.pts[a].x, d.pts[c].y - d.pts[a].y), 61, 1e-3);
+  // realimentacion que diverge: una cota que se alimenta de su propia medida +1
+  const dd = newDoc();
+  const p0 = addPoint(dd, 0, 0), p1 = addPoint(dd, 5, 0);
+  dd.pts[p0].fixed = true;
+  const ll = addLine(dd, p0, p1, {});
+  addCon(dd, { t: 'H', refs: [ll] });
+  addCon(dd, { t: 'DIST', refs: [p0, p1], v: 5, expr: 'D2+1' });
+  addCon(dd, { t: 'DIST', refs: [p0, p1], v: 5, ref: true });
+  const bad = settle(dd, solve, [], { maxIter: 15 });
+  assert.ok(!bad.ok && /estabiliz/.test(bad.error), JSON.stringify(bad));
+});
+t('rueda que rueda: la distancia lee el angulo medido y el punto sigue la cicloide al arrastrarlo', () => {
+  const R = 10, th0 = 0.6, cyc = (t) => ({ x: R * (t - Math.sin(t)), y: R * (1 - Math.cos(t)) });
+  const d = newDoc();
+  const O = addPoint(d, 0, 0), G1 = addPoint(d, 120, 0); d.pts[O].fixed = true; d.pts[G1].fixed = true;
+  const ground = addLine(d, O, G1, {});
+  const T = addPoint(d, R * th0, 0), C = addPoint(d, R * th0, R), P = addPoint(d, R * th0 - R * Math.sin(th0), R - R * Math.cos(th0));
+  const wheel = addCircle(d, C, R, {}), lCT = addLine(d, C, T, {}), lCP = addLine(d, C, P, {});
+  for (const k of [{ t: 'PONL', refs: [T, ground] }, { t: 'V', refs: [C, T] }, { t: 'RAD', refs: [wheel], v: R }, { t: 'TANLC', refs: [ground, wheel] }, { t: 'PONC', refs: [P, wheel] }]) addCon(d, k);
+  const kA = addCon(d, { t: 'ANG', refs: [lCT, lCP], v: (th0 * 180) / Math.PI, ref: true });   // A1: solo lectura, mide el giro
+  addCon(d, { t: 'DIST', refs: [O, T], v: R * th0, expr: 'O1/2*A1' });                           // D1 = r * A1 (rueda sin deslizar)
+  assert.ok(hasReactive(d));
+  assert.ok(settle(d, solve, []).ok);
+  for (const th of [0.7, 0.9, 1.1, 1.3, 1.5]) {
+    const s = settle(d, solve, [{ id: P, x: d.pts[C].x - R * Math.sin(th), y: d.pts[C].y - R * Math.cos(th) }], { maxIter: 20 });
+    assert.ok(s.ok, 'th ' + th + ' ' + s.error);
+    const A = (dimValue(d, d.cons[kA]) * Math.PI) / 180, e = cyc(A);
+    near(d.pts[T].x, R * A, 1e-3, 'rueda sin deslizar');
+    near(d.pts[P].x, e.x, 1e-3, 'P en la cicloide'); near(d.pts[P].y, e.y, 1e-3);
+  }
 });
 t('cotas con nombre: renombrar actualiza formulas y valida el nombre', () => {
   const d = newDoc();

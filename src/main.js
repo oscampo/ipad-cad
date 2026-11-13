@@ -17,7 +17,7 @@ import { CLINE_STYLE, circleThrough3, addRectangle, polygonVertices, addPolygon,
 import { layoutDim, dragDim, dimValue, angSector, angTrue, DIAM } from './dims.js';
 import { textFrame, textHit, textPose, rawAngle, ANCHORS, ANCHOR_NAMES, LINE_SPACING, FONTS, fontCss } from './text.js';
 import * as gh from './github.js';
-import { varsOf, varsList, recompute, pruneFormulas, renameDim, checkName } from './params.js';
+import { varsOf, varsList, recompute, pruneFormulas, renameDim, checkName, settle, hasReactive } from './params.js';
 import { exportSVG, exportSVGLaser, exportDXF, extraExtents, laserClasses } from './export.js';
 import { iconSvg } from './icons.js';
 import { buildTree, kindOf, conLabel } from './tree.js';
@@ -101,7 +101,8 @@ function persist() {
     try { localStorage.setItem(STORE, JSON.stringify({ doc, view, cur, opts })); } catch { /* sin almacenamiento */ }
   }, 300);
 }
-function afterChange() { const fz = pruneFormulas(doc); if (fz.length) toast(`${fz.join(', ')}: la cota de la que dependía ya no existe o es de referencia; queda con su valor actual`); layerBtn(); updateButtons(); updateEnabled(); syncPanel(); persist(); draw(); renderTree(); }
+// afterChange tambien mantiene al dia las cotas que leen medidas (si no se estabilizan, se deja como estaba)
+function afterChange() { const fz = pruneFormulas(doc); if (hasReactive(doc)) { const bak = snapshot(), st = settle(doc, solve, []); if (!st.ok) doc = JSON.parse(bak); } if (fz.length) toast(`${fz.join(', ')}: la cota de la que dependía ya no existe o es de referencia; queda con su valor actual`); layerBtn(); updateButtons(); updateEnabled(); syncPanel(); persist(); draw(); renderTree(); }
 
 // Un boton de restriccion solo se activa si la seleccion actual le sirve (mismas reglas que applyCon).
 function updateEnabled() {
@@ -1497,7 +1498,8 @@ function toolMove(p) {
     const steps = tracing ? Math.min(40, Math.max(1, Math.ceil((Math.hypot(cur2.dx - prev.dx, cur2.dy - prev.dy) * view.s) / 8))) : 1;
     for (let i = 1; i <= steps; i++) {
       const f = i / steps, dx = prev.dx + (cur2.dx - prev.dx) * f, dy = prev.dy + (cur2.dy - prev.dy) * f;
-      const r = solve(doc, Object.entries(drag.orig).map(([id, o]) => ({ id, x: o.x + dx, y: o.y + dy })));
+      const tg = Object.entries(drag.orig).map(([id, o]) => ({ id, x: o.x + dx, y: o.y + dy }));
+      const r = hasReactive(doc) ? settle(doc, solve, tg, { maxIter: 20 }) : solve(doc, tg); // con cotas que leen medidas, se actualizan mientras arrastras
       if (r.ok && tracing) recordTraces(doc, 1.5 / view.s);
     }
     drag.lastD = cur2;
@@ -2214,6 +2216,7 @@ function commitCons(list, pre) {
   if (pre) pre();
   const r = addConsSolved(doc, list);
   if (!r.ok) { rollback(); toast('No se pudo: entra en conflicto con otras restricciones. Si solo quieres medir, usa «Solo lectura»'); afterChange(); return; }
+  if (hasReactive(doc)) { const st = settle(doc, solve, []); if (!st.ok) { rollback(); toast(st.error || 'No se pudo: entra en conflicto con otras restricciones'); afterChange(); return; } }
   afterChange();
 }
 
@@ -2239,10 +2242,8 @@ async function editDimension(id) {
   const val = isC ? val0 / 2 : k.t === 'ANG' ? angTrue(doc, { ...k, ref: false, v: k.ref ? (angSector(doc, k).A * 180) / Math.PI : k.v }, val0) : val0;
   k.v = val; delete k.ref;
   if (dlgExpr) k.expr = dlgExpr; else delete k.expr;
-  const rc = recompute(doc); // las cotas definidas con formulas se actualizan con el nuevo valor
-  if (!rc.ok) { rollback(); toast(rc.error); afterChange(); return; }
-  const r = solve(doc, []);
-  if (!r.ok) { rollback(); toast(rc.count ? 'Imposible con las restricciones actuales (con las cotas que dependen de esta). Usa «Solo lectura» para solo medirla' : 'Valor imposible con las restricciones actuales. Usa «Solo lectura» para solo medirla'); }
+  const r = settle(doc, solve, []); // las cotas definidas con formulas se actualizan con el nuevo valor (y se repite si leen medidas)
+  if (!r.ok) { rollback(); toast(r.error || (r.count ? 'Imposible con las restricciones actuales (con las cotas que dependen de esta). Usa «Solo lectura» para solo medirla' : 'Valor imposible con las restricciones actuales. Usa «Solo lectura» para solo medirla')); }
   afterChange();
 }
 

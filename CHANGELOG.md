@@ -5,6 +5,7 @@
 - **Cotas con nombre**: cada cota recibe un nombre automático por tipo (D distancia, A ángulo, R radio de arco, O diámetro de círculo; D1, A1...), visible en el árbol y en el diálogo de la cota (doble toque), donde se puede cambiar. Los dibujos viejos se numeran al abrirlos.
 - **Fórmulas entre cotas**: el nombre de una cota se puede usar en la fórmula de otra (`D1*sin(3π/4)`, `D1/2+1`). Al cambiar una cota se recalculan en orden las que dependen de ella y se resuelve la geometría; ciclos, valores imposibles o referencias inexistentes se rechazan sin dejar cambios a medias. Un ángulo entra en la fórmula como radianes; las cotas de solo lectura no se pueden usar.
 - Si se borra una cota de la que dependía otra, esa conserva su valor y pierde la fórmula (con aviso).
+- **Cotas de solo lectura en fórmulas**: una cota conductora puede leer una medida de la geometría. Se resuelve y recalcula en vueltas hasta que concuerden (secante, con repetición amortiguada de respaldo), al editar, crear y mientras se arrastra; si no se estabiliza se deshace y se avisa. Permite, por ejemplo, la rueda que rueda sin deslizar (D = r·A) y trazar la cicloide arrastrando un punto del borde.
 
 ## v1.4.2 (2026-11-12)
 
