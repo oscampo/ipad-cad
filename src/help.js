@@ -10,7 +10,7 @@ export const HELP_HTML = `
 <li><b>Menú (☰)</b>: muestra u oculta el panel de herramientas de la derecha. El primer botón de la barra abre el <b>árbol de elementos</b>.</li>
 <li>La barra inferior explica la herramienta activa y muestra los datos del elemento seleccionado.</li>
 <li>Seleccionar: toca un elemento (toca varios para sumar). Los botones del panel solo se activan si la selección les sirve.</li>
-<li><b>Propiedades</b>: toca <b>dos veces</b> un punto, línea, círculo, arco, elipse, spline, texto o relleno y se abre su ventana de propiedades (sobre una cota, el doble toque sigue editando su valor). Según el elemento: <b>capa</b>, <b>color</b>, <b>tipo de línea</b>, <b>grosor</b> y <b>escala del patrón</b>; en un texto, además el contenido, la <b>fuente</b>, la <b>altura</b> y el ángulo; en un punto, sus coordenadas X e Y y si está fijo. También lista las <b>restricciones y cotas</b> del elemento, cada una con «Quitar», y ofrece las que se pueden agregar a ese elemento solo (línea: horizontal, vertical, longitud y fijar; círculo: diámetro y fijar; arco: radio). Los cambios se aplican al momento y se pueden deshacer.</li>
+<li><b>Propiedades</b>: toca <b>dos veces</b> un punto, línea, círculo, arco, elipse, spline, texto o relleno y se abre su ventana de propiedades (sobre una cota, el doble toque sigue editando su valor). Según el elemento: <b>capa</b>, <b>color</b>, <b>tipo de línea</b>, <b>grosor</b> y <b>escala del patrón</b>; en un texto, además el contenido, la <b>fuente</b>, la <b>altura</b> y el ángulo; en un punto, su <b>color</b>, sus coordenadas X e Y y si está fijo; en un <b>vector</b>, su <b>magnitud</b> (valor o fórmula; escribirla la fija), si está fija o es de solo lectura y su nombre. También lista las <b>restricciones y cotas</b> del elemento, cada una con «Quitar», y ofrece las que se pueden agregar a ese elemento solo (línea: horizontal, vertical, longitud y fijar; círculo: diámetro y fijar; arco: radio). Los cambios se aplican al momento y se pueden deshacer.</li>
 <li><b>Selección con cuadro</b>: con la herramienta Seleccionar, arrastra desde un lugar vacío. De <b>izquierda a derecha</b> (cuadro azul, línea continua) se seleccionan los elementos que quedan <b>completamente dentro</b>; de <b>derecha a izquierda</b> (cuadro naranja, línea discontinua) también los que el cuadro <b>toca</b>. Con Mayús se suma a la selección. Alcanza puntos, líneas, círculos, arcos, splines y textos (un texto por su punto de inserción). Con el dedo, activa <i>Dedo dibuja</i>, porque si no el dedo desplaza el lienzo.</li>
 </ul></details>
 
@@ -122,7 +122,7 @@ export const HELP_HTML = `
 
 <details><summary>Vista y árbol de elementos</summary>
 <ul>
-<li><b>Vista</b>: cuadrícula, imán (a la cuadrícula), bloqueo suave (y cada cuántos grados), tiempo del imán a intersecciones, mostrar u ocultar restricciones, puntos, cotas y textos, dedo dibuja, etiquetas del panel y escala de los trazos.</li>
+<li><b>Vista</b>: cuadrícula, imán (a la cuadrícula), bloqueo suave (y cada cuántos grados), tiempo del imán a intersecciones, mostrar u ocultar restricciones, puntos, cotas y textos, dedo dibuja, etiquetas del panel y escala de los trazos. En la esquina inferior izquierda del dibujo se ve en cursiva la <b>versión de la app y la fecha de su release</b> (por ejemplo <i>v1.5.3 2026-11-13</i>).</li>
 <li><b>Árbol de elementos</b> (primer botón de la barra): lista líneas, círculos, arcos, splines, textos, rellenos, puntos y relaciones. Toca un elemento para seleccionarlo y ver sus puntos y restricciones.</li>
 </ul></details>
 
@@ -139,7 +139,7 @@ export const HELP_HTML = `
 <p>V seleccionar, P punto, L línea, K línea constructiva, C círculo, B rectángulo, G polígono, O elipse, Ctrl/Cmd+C copiar, Ctrl/Cmd+V pegar, R arco por centro, A arco por 3 puntos, S spline, T texto, D acotar, I intersección, X recortar, E extender. Ctrl/Cmd+Z deshacer, Ctrl/Cmd+Y (o Ctrl/Cmd+Mayús+Z) rehacer, Supr o Retroceso borra, Esc cancela o termina.</p></details>
 
 <details><summary>Historial de versiones</summary>
-<p><b>v1.6.0</b>: vectores (flecha y magnitud) y salidas <code>[=expresión]</code> en los textos.</p>
+<p><b>v1.5.3</b>: vectores (flecha y magnitud, con su texto alineado con la línea y su magnitud editable en las propiedades), salidas <code>[=expresión]</code> en los textos, y la versión con su fecha en la esquina inferior izquierda del dibujo.</p>
 <p><b>v1.5.2</b>: las entradas (puntos medidos por cotas de solo lectura) no se mueven al resolver las fórmulas: evolvente.</p>
 <p><b>v1.5.1</b>: el arrastre con cotas que leen medidas es más robusto (saltos grandes, punto arrastrado que no se desliza).</p>
 <p><b>v1.5.0</b>: cotas con nombre (D, A, R, O), fórmulas entre cotas, cotas de solo lectura como entradas de fórmulas, ángulos sin límite (vueltas) y color de los puntos.</p>

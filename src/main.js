@@ -27,7 +27,7 @@ import { parseValue, isPlainNumber } from './expr.js';
 import { HELP_HTML } from './help.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from './lock.js';
 
-const VERSION = '1.6.0';
+const VERSION = '1.5.3', RELEASE_DATE = '2026-11-13'; // fecha de la release: se ve en la esquina inferior izquierda del dibujo
 const STORE = 'ipad-cad-v1';
 const $ = (id) => document.getElementById(id);
 const cv = $('cv');
@@ -2841,9 +2841,6 @@ function openProps(h) {
     body.appendChild(propRow('Magnitud', mag));
     body.appendChild(propRow('Magnitud fija (restringe la longitud)', fix));
     body.appendChild(propRow('Nombre de la magnitud', nm));
-    const sm = document.createElement('small');
-    sm.textContent = 'Escribe un valor o una fórmula con otras cotas (por ejemplo 2*D1) para fijar la magnitud; sin marcar es solo lectura y mide la longitud. La magnitud se puede usar en fórmulas y textos con su nombre.';
-    body.appendChild(sm);
   }
   if (['ln', 'ci', 'ar', 'el', 'sp'].includes(k)) {
     body.appendChild(propRow('Color', propColors(o, 'color')));
@@ -3412,6 +3409,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { re
 // ---------------------------------------------------------------- arranque
 async function boot() {
   $('ver').textContent = VERSION;
+  $('relTag').textContent = `v${VERSION} ${RELEASE_DATE}`;
   readTheme();
   buildSwatches();
   buildAnchors();

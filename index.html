@@ -85,6 +85,7 @@ dialog.help a { color: var(--accent); }
 #toast.show { opacity: .95; }
 #tLayers { position: absolute; left: 8px; top: 8px; z-index: 4; box-shadow: 0 1px 4px rgba(0,0,0,.15); }
 #tLayers.on { border-color: var(--accent); }
+#relTag { position: absolute; left: 8px; bottom: 6px; z-index: 3; font-style: italic; color: var(--muted); font-variant-numeric: tabular-nums; pointer-events: none; user-select: none; } /* mismo tamano que el texto de ayuda de abajo (hereda el del cuerpo) */
 #layerName { position: absolute; left: 8px; top: 58px; z-index: 4; max-width: min(60%, 260px); padding: 3px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--fg); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; opacity: .92; }
 dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--fg); padding: 16px; min-width: 260px; max-width: calc(100vw - 16px);
   /* arriba del todo y con la altura del area visible: el teclado (acoplado o flotante) no tapa el campo ni los botones */
@@ -149,7 +150,7 @@ body.nopanel #panel { display: none; }
 </header>
 <main>
   <div id="stage"><canvas id="cv"></canvas><div id="toast"></div>
-  <button id="tLayers" data-icon="layers" title="Capas: crear, encender, apagar y borrar" aria-label="Capas"><i></i></button><div id="layerName" hidden></div>
+  <button id="tLayers" data-icon="layers" title="Capas: crear, encender, apagar y borrar" aria-label="Capas"><i></i></button><div id="layerName" hidden></div><div id="relTag"></div>
     <nav id="tree" aria-label="Árbol de elementos"><div class="thead"><b>Elementos</b><button id="treeClose" aria-label="Cerrar">✕</button></div><div id="treeBody"></div></nav>
   </div>
   <aside id="panel">
