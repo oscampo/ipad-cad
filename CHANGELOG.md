@@ -1,5 +1,9 @@
 # Historial de cambios
 
+## v1.5.2 (2026-11-12)
+
+- **Evolvente y otras salidas que leen una medida**: al resolver las fórmulas, los puntos que miden las cotas de solo lectura que ellas leen (las entradas) se dejan fijos. Antes, al fijar D1 = R·A1 el solver podía mover el punto tangente (que mide A1) en vez de alargar la cuerda, A1 cambiaba, la fórmula perseguía su propia cola y daba «D1 quedaría en -3.404». Si el dibujo necesita que la entrada se mueva (por ejemplo arrastrar la rueda por P), se reintenta sin fijarla. Con una comprobación de que la cota con fórmula se cumple de verdad.
+
 ## v1.5.1 (2026-11-12)
 
 - **Arrastre con cotas que leen medidas, más robusto**: un salto grande del punto arrastrado se recorre en tramos cortos; si al girar otra cota el solver pierde el hilo, el punto arrastrado que ya llegó a su destino se deja fijo mientras se resuelve (así no se desliza), y si eso es imposible se vuelve al objetivo suave de siempre; si un cambio de golpe no se resuelve, se reintenta avanzando solo una fracción hacia el valor de las fórmulas.

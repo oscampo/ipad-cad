@@ -2055,6 +2055,30 @@ t('rueda gobernada por el punto de tangencia: arrastrar T da varias vueltas y P 
   assert.ok(maxIt <= 8, 'converge en pocas vueltas: ' + maxIt);
   assert.ok(d.cons[kA].cur > 360, 'paso de una vuelta');
 });
+t('evolvente: la cuerda D1 = R*A1 lee el angulo del punto tangente y este no se mueve al alargarla', () => {
+  const R = 25, c = { x: -30.6, y: 4.481 }, th0 = 0.3694;
+  const d = newDoc();
+  const p1 = addPoint(d, c.x, c.y); d.pts[p1].fixed = true;
+  const p4 = addPoint(d, c.x - R * Math.sin(th0), c.y + R * Math.cos(th0)), p11 = addPoint(d, c.x, c.y + R);
+  const p8 = addPoint(d, c.x - R * Math.sin(th0) + 25 * Math.cos(th0), c.y + R * Math.cos(th0) + 25 * Math.sin(th0));
+  const circ = addCircle(d, p1, R, {}), l6 = addLine(d, p1, p4, {}), l9 = addLine(d, p4, p8, {}), l13 = addLine(d, p1, p11, {});
+  for (const k of [{ t: 'RAD', refs: [circ], v: R }, { t: 'PONC', refs: [p4, circ], hidden: true }, { t: 'PERP', refs: [l9, l6] }, { t: 'PONC', refs: [p11, circ], hidden: true }, { t: 'V', refs: [l13] }]) addCon(d, k);
+  const tdeg = (signedAngle({ x: d.pts[p4].x - c.x, y: d.pts[p4].y - c.y }, { x: 0, y: 1 }) * 180) / Math.PI; // de l6 a l13
+  const kA = addCon(d, { t: 'ANG', refs: [l6, l13], s1: 1, s2: 1, v: tdeg, sg: tdeg < 0 ? -1 : 1, cur: Math.abs(tdeg), unit: 'rad', ref: true });   // A1: giro del radio (solo lectura)
+  const kD = addCon(d, { t: 'DIST', refs: [p4, p8], v: 25, expr: 'A1*25' });                                                                    // D1 = R*A1 (cuerda)
+  const p4x = d.pts[p4].x, p4y = d.pts[p4].y;
+  const r0 = settle(d, solveSteps, []);
+  assert.ok(r0.ok, r0.error || 'no cerro');
+  near(d.cons[kD].v, 25 * th0, 2e-3); near(d.pts[p4].x, p4x, 1e-6, 'el punto tangente no se mueve'); near(d.pts[p4].y, p4y, 1e-6);
+  let worst = 0;
+  for (let th = 0.45; th <= 5.5; th += 0.05) {                      // arrastrar el punto tangente alrededor: la cuerda sigue la evolvente
+    const s = settle(d, solveSteps, [{ id: p4, x: c.x - R * Math.sin(th), y: c.y + R * Math.cos(th) }], { maxIter: 20 });
+    assert.ok(s.ok, 'th ' + th.toFixed(2) + ' ' + (s.error || 'solver'));
+    const A = (d.cons[kA].cur * Math.PI) / 180;
+    worst = Math.max(worst, Math.hypot(d.pts[p8].x - (c.x + R * (-Math.sin(A) + A * Math.cos(A))), d.pts[p8].y - (c.y + R * (Math.cos(A) + A * Math.sin(A)))));
+  }
+  assert.ok(worst < 1e-2, 'sobre la evolvente: ' + worst);
+});
 t('cotas con nombre: renombrar actualiza formulas y valida el nombre', () => {
   const d = newDoc();
   const a = addPoint(d, 0, 0), b = addPoint(d, 10, 0), c = addPoint(d, 0, 6);
