@@ -123,7 +123,7 @@ export const HELP_HTML = `
 
 <details><summary>Vista y árbol de elementos</summary>
 <ul>
-<li><b>Vista</b>: cuadrícula, imán (a la cuadrícula), bloqueo suave (y cada cuántos grados), tiempo del imán a intersecciones, mostrar u ocultar restricciones, puntos, cotas y textos, dedo dibuja, etiquetas del panel y escala de los trazos. En la esquina inferior izquierda del dibujo se ve en cursiva la <b>versión de la app y la fecha de su release</b> (por ejemplo <i>v1.6.0 2026-11-13</i>).</li>
+<li><b>Vista</b>: cuadrícula, imán (a la cuadrícula), bloqueo suave (y cada cuántos grados), tiempo del imán a intersecciones, mostrar u ocultar restricciones, puntos, cotas y textos, dedo dibuja, etiquetas del panel y escala de los trazos. En la esquina inferior izquierda del dibujo se ve en cursiva la <b>versión de la app y la fecha de su release</b> (por ejemplo <i>v1.6.1 2026-11-13</i>).</li>
 <li><b>Árbol de elementos</b> (primer botón de la barra): lista líneas, círculos, arcos, splines, textos, rellenos, puntos y relaciones. Toca un elemento para seleccionarlo y ver sus puntos y restricciones.</li>
 </ul></details>
 
@@ -140,6 +140,7 @@ export const HELP_HTML = `
 <p>V seleccionar, P punto, L línea, K línea constructiva, C círculo, B rectángulo, G polígono, O elipse, Ctrl/Cmd+C copiar, Ctrl/Cmd+V pegar, R arco por centro, A arco por 3 puntos, S spline, T texto, D acotar, I intersección, X recortar, E extender. Ctrl/Cmd+Z deshacer, Ctrl/Cmd+Y (o Ctrl/Cmd+Mayús+Z) rehacer, Supr o Retroceso borra, Esc cancela o termina.</p></details>
 
 <details><summary>Historial de versiones</summary>
+<p><b>v1.6.1</b>: botón «Redundantes» (lista y quita las restricciones que no agregan información), arrastre mucho más rápido en mecanismos con fórmulas que leen medidas y en dibujos con copias vinculadas (un engranaje de 17 dientes ya no agota la memoria del solver), y recortar un spline ya no multiplica sus puntos de control.</p>
 <p><b>v1.6.0</b>: marca de referencia (un punto que se desliza por una línea y recuerda lo recorrido, para rieles, ruedas y planímetros), con «Reiniciar marcas» para volver a empezar la lectura en cualquier lugar del dibujo; y tocar la curva de un spline la arrastra entera.</p>
 <p><b>v1.5.3</b>: vectores (flecha y magnitud, con su texto alineado con la línea y su magnitud editable en las propiedades), salidas <code>[=expresión]</code> en los textos, y la versión con su fecha en la esquina inferior izquierda del dibujo.</p>
 <p><b>v1.5.2</b>: las entradas (puntos medidos por cotas de solo lectura) no se mueven al resolver las fórmulas: evolvente.</p>

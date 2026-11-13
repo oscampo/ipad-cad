@@ -1,6 +1,6 @@
 # Historial de cambios
 
-## Sin publicar
+## v1.6.1 (2026-11-13)
 
 - **Arrastre más rápido con cotas que leen medidas** (engranes acoplados por fórmulas): un destino que la geometría no alcanza del todo (un punto sobre un círculo arrastrado con el mouse) ya no se sigue atrayendo en cada vuelta de la fórmula; desde la 2.ª vuelta el punto se queda donde la 1.ª lo puso y las vueltas siguientes solo ajustan las fórmulas. Un paso de arrastre de dos engranes de 17 dientes pasó de ~3 s a ~0,25 s en un dibujo sin redundantes.
 - **El solver omite lo que no puede cambiar nada**: los arcos cuyo centro y extremos no se pueden mover (copias de una matriz circular) y las restricciones ya cumplidas entre puntos fijos. Eran restricciones redundantes para planegcs, que al detectarlas resuelve dos veces y las diagnostica (64 arcos copia multiplicaban por 6 cada resolución).

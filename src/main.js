@@ -27,7 +27,7 @@ import { parseValue, isPlainNumber } from './expr.js';
 import { HELP_HTML } from './help.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from './lock.js';
 
-const VERSION = '1.6.0', RELEASE_DATE = '2026-11-13'; // fecha de la release: se ve en la esquina inferior izquierda del dibujo
+const VERSION = '1.6.1', RELEASE_DATE = '2026-11-13'; // fecha de la release: se ve en la esquina inferior izquierda del dibujo
 const STORE = 'ipad-cad-v1';
 const $ = (id) => document.getElementById(id);
 const cv = $('cv');
