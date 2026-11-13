@@ -1,0 +1,365 @@
+{
+ "app": "ipad-cad",
+ "version": "1.5.3",
+ "doc": {
+  "n": 69,
+  "cons": {
+   "k5": {
+    "t": "DIST",
+    "refs": [
+     "p1",
+     "p2"
+    ],
+    "v": 240,
+    "hidden": true
+   },
+   "k8": {
+    "t": "DIST",
+    "refs": [
+     "p1",
+     "p6"
+    ],
+    "v": 150,
+    "ref": true,
+    "off": -24,
+    "lt": 0.62,
+    "name": "D1"
+   },
+   "k9": {
+    "t": "DIST",
+    "refs": [
+     "p1",
+     "p7"
+    ],
+    "v": 70,
+    "ref": true,
+    "off": 24,
+    "lt": 0.29,
+    "name": "D2"
+   },
+   "k45": {
+    "t": "H",
+    "refs": [
+     "l44"
+    ],
+    "n": 2
+   },
+   "k47": {
+    "t": "PONL",
+    "refs": [
+     "p46",
+     "l44"
+    ],
+    "hidden": true
+   },
+   "k48": {
+    "t": "DIST",
+    "refs": [
+     "p42",
+     "p46"
+    ],
+    "v": 170.258,
+    "name": "D3",
+    "ref": true,
+    "off": -12.032461151713587,
+    "lt": 0.5166702480181646
+   },
+   "k50": {
+    "t": "V",
+    "refs": [
+     "p46",
+     "p6"
+    ],
+    "n": 2
+   },
+   "k52": {
+    "t": "V",
+    "refs": [
+     "p51",
+     "p7"
+    ],
+    "n": 3
+   },
+   "k53": {
+    "t": "DIST",
+    "refs": [
+     "p42",
+     "p51"
+    ],
+    "v": 95.02,
+    "name": "D4",
+    "ref": true
+   }
+  },
+  "hatches": {},
+  "ltypes": {},
+  "arcs": {},
+  "ellipses": {},
+  "texts": {
+   "t10": {
+    "pt": "p1",
+    "text": "A",
+    "h": 5,
+    "ang": 0,
+    "anchor": "tr",
+    "color": "#111111",
+    "readable": true
+   },
+   "t11": {
+    "pt": "p2",
+    "text": "B",
+    "h": 5,
+    "ang": 0,
+    "anchor": "tl",
+    "color": "#111111",
+    "readable": true
+   },
+   "t12": {
+    "pt": "p6",
+    "text": "M  marca de referencia",
+    "h": 5,
+    "ang": 0,
+    "anchor": "bc",
+    "color": "#b91c1c",
+    "readable": true
+   },
+   "t13": {
+    "pt": "p7",
+    "text": "F  punto fijo",
+    "h": 5,
+    "ang": 0,
+    "anchor": "tc",
+    "color": "#475569",
+    "readable": true
+   },
+   "t19": {
+    "pt": "p18",
+    "text": "Lectura\nA a M = [=D1]\nA a F = [=D2]",
+    "h": 5,
+    "ang": 0,
+    "anchor": "tl",
+    "color": "#111111",
+    "readable": true
+   },
+   "t54": {
+    "pt": "p42",
+    "text": "A2",
+    "h": 4,
+    "ang": 0,
+    "anchor": "br",
+    "color": "auto",
+    "readable": true,
+    "font": "futura"
+   },
+   "t55": {
+    "pt": "p46",
+    "text": "Punto \"coincidente\"",
+    "h": 4,
+    "ang": 0,
+    "anchor": "bc",
+    "color": "#dc2626",
+    "readable": true,
+    "font": "futura"
+   },
+   "t57": {
+    "pt": "p56",
+    "text": "RECORRIDO CON GIRO (prueba de memoria). Haz la misma secuencia en cada riel:",
+    "h": 5.5,
+    "ang": 0,
+    "anchor": "tl",
+    "color": "#2563eb",
+    "readable": true
+   },
+   "t59": {
+    "pt": "p58",
+    "text": "(a) A 50 a la derecha; (b) gira el riel 60 grados con B; (c) A 50 a lo largo del riel; (d) gira de regreso.",
+    "h": 4.5,
+    "ang": 0,
+    "anchor": "tl",
+    "color": "#111111",
+    "readable": true
+   },
+   "t61": {
+    "pt": "p60",
+    "text": "Riel con marca (el de arriba): A a M pasa de 168,6 a 67,3. Llevado directo al mismo lugar daria cerca de 93.",
+    "h": 4.5,
+    "ang": 0,
+    "anchor": "tl",
+    "color": "#111111",
+    "readable": true
+   },
+   "t63": {
+    "pt": "p62",
+    "text": "Riel con punto coincidente (el de abajo; antes borra su restriccion H): D3 pasa de 173,3 a 98,3, igual que llevado directo.",
+    "h": 4.5,
+    "ang": 0,
+    "anchor": "tl",
+    "color": "#111111",
+    "readable": true
+   },
+   "t65": {
+    "pt": "p64",
+    "text": "Conclusion: el punto coincidente solo lee la geometria de ahora, no tiene memoria. La marca guarda el camino.",
+    "h": 4.5,
+    "ang": 0,
+    "anchor": "tl",
+    "color": "#b91c1c",
+    "readable": true
+   },
+   "t67": {
+    "pt": "p66",
+    "text": "Con H activa en el riel de abajo solo hay traslacion, y ahi las dos construcciones dan lo mismo.",
+    "h": 4.5,
+    "ang": 0,
+    "anchor": "tl",
+    "color": "#475569",
+    "readable": true
+   },
+   "t69": {
+    "pt": "p68",
+    "text": "Gira 60 grados, no 90: con el riel de abajo vertical la interseccion con la vertical por M se dispara.",
+    "h": 4.5,
+    "ang": 0,
+    "anchor": "tl",
+    "color": "#475569",
+    "readable": true
+   }
+  },
+  "splines": {},
+  "traces": {},
+  "cn": {
+   "H": 2,
+   "V": 3
+  },
+  "layers": {},
+  "curLayer": null,
+  "pts": {
+   "p1": {
+    "x": -20.31216270672364,
+    "y": 4.452958513052344,
+    "fixed": false,
+    "auto": false
+   },
+   "p2": {
+    "x": 219.67840936129414,
+    "y": 2.325678920340828,
+    "fixed": false,
+    "auto": false
+   },
+   "p6": {
+    "x": 148.28136210912186,
+    "y": 2.958543287847564,
+    "fixed": false,
+    "auto": false,
+    "mark": "l3"
+   },
+   "p7": {
+    "x": 70,
+    "y": 0,
+    "fixed": true,
+    "auto": false
+   },
+   "p18": {
+    "x": 270,
+    "y": 40,
+    "fixed": false,
+    "auto": true,
+    "txOnly": true
+   },
+   "p42": {
+    "x": -25.04310140643747,
+    "y": -49.649968873191845,
+    "fixed": false,
+    "auto": true
+   },
+   "p43": {
+    "x": 272.7440020175046,
+    "y": -49.649968873191845,
+    "fixed": false,
+    "auto": true
+   },
+   "p46": {
+    "x": 148.28136210912186,
+    "y": -49.649968873191845,
+    "fixed": false,
+    "auto": false
+   },
+   "p51": {
+    "x": 70,
+    "y": -65.86667207849808,
+    "fixed": true,
+    "auto": false
+   },
+   "p56": {
+    "x": -30,
+    "y": -88,
+    "fixed": false,
+    "auto": true,
+    "txOnly": true
+   },
+   "p58": {
+    "x": -30,
+    "y": -99,
+    "fixed": false,
+    "auto": true,
+    "txOnly": true
+   },
+   "p60": {
+    "x": -30,
+    "y": -109,
+    "fixed": false,
+    "auto": true,
+    "txOnly": true
+   },
+   "p62": {
+    "x": -30,
+    "y": -119,
+    "fixed": false,
+    "auto": true,
+    "txOnly": true
+   },
+   "p64": {
+    "x": -30,
+    "y": -133,
+    "fixed": false,
+    "auto": true,
+    "txOnly": true
+   },
+   "p66": {
+    "x": -30,
+    "y": -143,
+    "fixed": false,
+    "auto": true,
+    "txOnly": true
+   },
+   "p68": {
+    "x": -30,
+    "y": -153,
+    "fixed": false,
+    "auto": true,
+    "txOnly": true
+   }
+  },
+  "lines": {
+   "l3": {
+    "a": "p1",
+    "b": "p2",
+    "color": "#2563eb",
+    "w": 2.5,
+    "ltype": "continua"
+   },
+   "l44": {
+    "a": "p42",
+    "b": "p43",
+    "color": "#2563eb",
+    "ltype": "continua",
+    "w": 2.5,
+    "ls": 1
+   }
+  },
+  "circles": {},
+  "cnd": {
+   "D": 4
+  }
+ }
+}

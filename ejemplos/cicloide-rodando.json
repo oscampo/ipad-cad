@@ -1,0 +1,220 @@
+{
+ "app": "ipad-cad",
+ "version": "1.5.0",
+ "doc": {
+  "n": 22,
+  "pts": {
+   "p1": {
+    "x": 0,
+    "y": 0,
+    "fixed": true,
+    "auto": false
+   },
+   "p2": {
+    "x": 150,
+    "y": 0,
+    "fixed": true,
+    "auto": false
+   },
+   "p4": {
+    "x": 7.377,
+    "y": 0,
+    "fixed": false,
+    "auto": false
+   },
+   "p5": {
+    "x": 7.377,
+    "y": 10,
+    "fixed": false,
+    "auto": false
+   },
+   "p6": {
+    "x": 0.6511234805019255,
+    "y": 2.5998253368947792,
+    "fixed": false,
+    "auto": false
+   },
+   "p17": {
+    "x": -8,
+    "y": 24,
+    "fixed": false,
+    "auto": false
+   },
+   "p19": {
+    "x": -8,
+    "y": 20.5,
+    "fixed": false,
+    "auto": false
+   },
+   "p21": {
+    "x": -8,
+    "y": 17.5,
+    "fixed": false,
+    "auto": false
+   }
+  },
+  "lines": {
+   "l3": {
+    "a": "p1",
+    "b": "p2",
+    "color": "#111111",
+    "ltype": "continua",
+    "w": 2,
+    "ls": 1
+   },
+   "l8": {
+    "a": "p5",
+    "b": "p4",
+    "color": "#C3C3C3",
+    "ltype": "constructiva",
+    "w": 1,
+    "ls": 1
+   },
+   "l9": {
+    "a": "p5",
+    "b": "p6",
+    "color": "#2563eb",
+    "ltype": "continua",
+    "w": 1.5,
+    "ls": 1
+   }
+  },
+  "circles": {
+   "c7": {
+    "c": "p5",
+    "r": 10,
+    "color": "#475569",
+    "ltype": "continua",
+    "w": 2,
+    "ls": 1
+   }
+  },
+  "arcs": {},
+  "ellipses": {},
+  "texts": {
+   "t18": {
+    "pt": "p17",
+    "text": "Rueda que rueda sin deslizar: A1 = D1/r (r = O1/2): el giro lo gobierna la posición del punto de tangencia T",
+    "h": 2,
+    "ang": 0,
+    "anchor": "bl",
+    "color": "auto",
+    "readable": true
+   },
+   "t20": {
+    "pt": "p19",
+    "text": "Arrastra el punto T (en el suelo, bajo el centro) a la derecha: la rueda rueda y P traza la cicloide. A1 no tiene límite (varias vueltas).",
+    "h": 1.5,
+    "ang": 0,
+    "anchor": "bl",
+    "color": "#64748b",
+    "readable": true
+   },
+   "t22": {
+    "pt": "p21",
+    "text": "Para quitar la trayectoria: Spline → Borrar trayectoria. Para convertirla en curva: selecciona P y usa Spline → Trazado a spline.",
+    "h": 1.5,
+    "ang": 0,
+    "anchor": "bl",
+    "color": "#64748b",
+    "readable": true
+   }
+  },
+  "splines": {},
+  "traces": {
+   "p6": {
+    "pts": [
+     {
+      "x": 0.651123,
+      "y": 2.599825
+     }
+    ],
+    "color": "#db2777",
+    "ltype": "continua",
+    "w": 1.5,
+    "ls": 1
+   }
+  },
+  "cons": {
+   "k10": {
+    "t": "PONL",
+    "refs": [
+     "p4",
+     "l3"
+    ],
+    "n": 1
+   },
+   "k11": {
+    "t": "V",
+    "refs": [
+     "p5",
+     "p4"
+    ],
+    "n": 1
+   },
+   "k12": {
+    "t": "RAD",
+    "refs": [
+     "c7"
+    ],
+    "v": 10,
+    "name": "O1"
+   },
+   "k13": {
+    "t": "TANLC",
+    "refs": [
+     "l3",
+     "c7"
+    ],
+    "n": 1
+   },
+   "k14": {
+    "t": "PONC",
+    "refs": [
+     "p6",
+     "c7"
+    ],
+    "n": 2
+   },
+   "k15": {
+    "t": "DIST",
+    "refs": [
+     "p1",
+     "p4"
+    ],
+    "v": 7.377,
+    "ref": true,
+    "name": "D1"
+   },
+   "k16": {
+    "t": "ANG",
+    "refs": [
+     "l8",
+     "l9"
+    ],
+    "s1": 1,
+    "s2": 1,
+    "v": -42.2670965468,
+    "sg": -1,
+    "cur": 42.2670965468,
+    "unit": "rad",
+    "expr": "D1/(O1/2)",
+    "name": "A1"
+   }
+  },
+  "hatches": {},
+  "ltypes": {},
+  "cn": {
+   "COI": 2,
+   "V": 1,
+   "TAN": 1
+  },
+  "layers": {},
+  "curLayer": null,
+  "cnd": {
+   "O": 1,
+   "D": 1,
+   "A": 1
+  }
+ }
+}

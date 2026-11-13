@@ -1,0 +1,362 @@
+{
+ "app": "ipad-cad",
+ "version": "1.5.3",
+ "doc": {
+  "n": 41,
+  "pts": {
+   "p1": {
+    "x": 0,
+    "y": 0,
+    "fixed": false,
+    "auto": false
+   },
+   "p2": {
+    "x": 240,
+    "y": 0,
+    "fixed": false,
+    "auto": false
+   },
+   "p6": {
+    "x": 150,
+    "y": 0,
+    "fixed": false,
+    "auto": false,
+    "mark": "l3"
+   },
+   "p7": {
+    "x": 70,
+    "y": 0,
+    "fixed": true,
+    "auto": false
+   },
+   "p14": {
+    "x": -20,
+    "y": 110,
+    "fixed": false,
+    "auto": true,
+    "txOnly": true
+   },
+   "p16": {
+    "x": -20,
+    "y": 92,
+    "fixed": false,
+    "auto": true,
+    "txOnly": true
+   },
+   "p18": {
+    "x": 270,
+    "y": 40,
+    "fixed": false,
+    "auto": true,
+    "txOnly": true
+   },
+   "p20": {
+    "x": -20,
+    "y": -80,
+    "fixed": false,
+    "auto": true,
+    "txOnly": true
+   },
+   "p22": {
+    "x": -20,
+    "y": -92,
+    "fixed": false,
+    "auto": true,
+    "txOnly": true
+   },
+   "p24": {
+    "x": -20,
+    "y": -102,
+    "fixed": false,
+    "auto": true,
+    "txOnly": true
+   },
+   "p26": {
+    "x": -20,
+    "y": -112,
+    "fixed": false,
+    "auto": true,
+    "txOnly": true
+   },
+   "p28": {
+    "x": -20,
+    "y": -134,
+    "fixed": false,
+    "auto": true,
+    "txOnly": true
+   },
+   "p30": {
+    "x": -20,
+    "y": -146,
+    "fixed": false,
+    "auto": true,
+    "txOnly": true
+   },
+   "p32": {
+    "x": -20,
+    "y": -158,
+    "fixed": false,
+    "auto": true,
+    "txOnly": true
+   },
+   "p34": {
+    "x": -20,
+    "y": -168,
+    "fixed": false,
+    "auto": true,
+    "txOnly": true
+   },
+   "p36": {
+    "x": -20,
+    "y": -178,
+    "fixed": false,
+    "auto": true,
+    "txOnly": true
+   },
+   "p38": {
+    "x": -20,
+    "y": -190,
+    "fixed": false,
+    "auto": true,
+    "txOnly": true
+   },
+   "p40": {
+    "x": -20,
+    "y": -204,
+    "fixed": false,
+    "auto": true,
+    "txOnly": true
+   }
+  },
+  "lines": {
+   "l3": {
+    "a": "p1",
+    "b": "p2",
+    "color": "#2563eb",
+    "w": 2.5,
+    "ltype": "continua"
+   }
+  },
+  "circles": {},
+  "arcs": {},
+  "ellipses": {},
+  "texts": {
+   "t10": {
+    "pt": "p1",
+    "text": "A",
+    "h": 5,
+    "ang": 0,
+    "anchor": "tr",
+    "color": "#111111",
+    "readable": true
+   },
+   "t11": {
+    "pt": "p2",
+    "text": "B",
+    "h": 5,
+    "ang": 0,
+    "anchor": "tl",
+    "color": "#111111",
+    "readable": true
+   },
+   "t12": {
+    "pt": "p6",
+    "text": "M  marca de referencia",
+    "h": 5,
+    "ang": 0,
+    "anchor": "bc",
+    "color": "#b91c1c",
+    "readable": true
+   },
+   "t13": {
+    "pt": "p7",
+    "text": "F  punto fijo",
+    "h": 5,
+    "ang": 0,
+    "anchor": "tc",
+    "color": "#475569",
+    "readable": true
+   },
+   "t15": {
+    "pt": "p14",
+    "text": "MARCA DE REFERENCIA vs PUNTO FIJO",
+    "h": 8,
+    "ang": 0,
+    "anchor": "tl",
+    "color": "#111111",
+    "readable": true
+   },
+   "t17": {
+    "pt": "p16",
+    "text": "M (x) y F (cuadrado) empiezan sobre el riel, pero se comportan distinto.",
+    "h": 4.5,
+    "ang": 0,
+    "anchor": "tl",
+    "color": "#475569",
+    "readable": true
+   },
+   "t19": {
+    "pt": "p18",
+    "text": "Lectura\nA a M = [=D1]\nA a F = [=D2]",
+    "h": 5,
+    "ang": 0,
+    "anchor": "tl",
+    "color": "#111111",
+    "readable": true
+   },
+   "t21": {
+    "pt": "p20",
+    "text": "PARTE 1, con la restriccion H activa (el riel solo se traslada). Arrastra A.",
+    "h": 5.5,
+    "ang": 0,
+    "anchor": "tl",
+    "color": "#2563eb",
+    "readable": true
+   },
+   "t23": {
+    "pt": "p22",
+    "text": "1. Hacia arriba o abajo: M se queda pegada al riel y viaja con el. F se queda en su sitio y se despega.",
+    "h": 4.5,
+    "ang": 0,
+    "anchor": "tl",
+    "color": "#111111",
+    "readable": true
+   },
+   "t25": {
+    "pt": "p24",
+    "text": "2. A lo largo del riel (izq/der): M y F quedan quietas en el plano y el riel se desliza por debajo.",
+    "h": 4.5,
+    "ang": 0,
+    "anchor": "tl",
+    "color": "#111111",
+    "readable": true
+   },
+   "t27": {
+    "pt": "p26",
+    "text": "    La lectura depende solo de donde esta A: si A vuelve, la lectura vuelve. Aqui no hay memoria.",
+    "h": 4.5,
+    "ang": 0,
+    "anchor": "tl",
+    "color": "#111111",
+    "readable": true
+   },
+   "t29": {
+    "pt": "p28",
+    "text": "PARTE 2, quita la restriccion H (seleccionala y borrala). Ahora el riel tambien gira.",
+    "h": 5.5,
+    "ang": 0,
+    "anchor": "tl",
+    "color": "#2563eb",
+    "readable": true
+   },
+   "t31": {
+    "pt": "p30",
+    "text": "3. Arrastra B en circulos: M sigue sobre el riel mientras gira; F no.",
+    "h": 4.5,
+    "ang": 0,
+    "anchor": "tl",
+    "color": "#111111",
+    "readable": true
+   },
+   "t33": {
+    "pt": "p32",
+    "text": "4. Prueba de memoria, recorrido cerrado: (a) A 50 a la derecha; (b) gira el riel 90 grados con B;",
+    "h": 4.5,
+    "ang": 0,
+    "anchor": "tl",
+    "color": "#111111",
+    "readable": true
+   },
+   "t35": {
+    "pt": "p34",
+    "text": "    (c) A 50 a lo largo del riel (queda 50 arriba); (d) gira de regreso. Riel horizontal, mismo lugar",
+    "h": 4.5,
+    "ang": 0,
+    "anchor": "tl",
+    "color": "#111111",
+    "readable": true
+   },
+   "t37": {
+    "pt": "p36",
+    "text": "    que si lo llevaras directo, pero A a M da cerca de 48 (directo daria 100). El camino cuenta.",
+    "h": 4.5,
+    "ang": 0,
+    "anchor": "tl",
+    "color": "#111111",
+    "readable": true
+   },
+   "t39": {
+    "pt": "p38",
+    "text": "Nota: al arrastrar A con el riel libre, el solver lo inclina un poco (reparte el movimiento entre A y B).",
+    "h": 4.5,
+    "ang": 0,
+    "anchor": "tl",
+    "color": "#475569",
+    "readable": true
+   },
+   "t41": {
+    "pt": "p40",
+    "text": "Uso real: el planimetro (dibujos/planimetro-corregido.json). La rueda lee el camino, no la posicion.",
+    "h": 4.5,
+    "ang": 0,
+    "anchor": "tl",
+    "color": "#475569",
+    "readable": true
+   }
+  },
+  "splines": {},
+  "traces": {},
+  "cons": {
+   "k4": {
+    "t": "H",
+    "refs": [
+     "l3"
+    ],
+    "n": 1
+   },
+   "k5": {
+    "t": "DIST",
+    "refs": [
+     "p1",
+     "p2"
+    ],
+    "v": 240,
+    "hidden": true
+   },
+   "k8": {
+    "t": "DIST",
+    "refs": [
+     "p1",
+     "p6"
+    ],
+    "v": 150,
+    "ref": true,
+    "off": -24,
+    "lt": 0.62,
+    "name": "D1"
+   },
+   "k9": {
+    "t": "DIST",
+    "refs": [
+     "p1",
+     "p7"
+    ],
+    "v": 70,
+    "ref": true,
+    "off": 24,
+    "lt": 0.29,
+    "name": "D2"
+   }
+  },
+  "hatches": {},
+  "ltypes": {},
+  "cn": {
+   "H": 1
+  },
+  "layers": {},
+  "curLayer": null,
+  "cnd": {
+   "D": 2
+  }
+ }
+}
