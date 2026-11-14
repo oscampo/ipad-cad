@@ -611,13 +611,19 @@ export function makeGear(doc, lineA, lineB, ratio) {
   return { t: 'GEAR', refs: [lineA, lineB], ratio, a0: [a, b], cur: [a, b] };
 }
 
+// Tiempos acumulados (ms) de las tres partes de cada llamada al solver, para el medidor ?perf: pasar las primitivas a WASM,
+// el calculo y leer el resultado.
+export const perfStats = { push: 0, solve: 0, read: 0 };
 function runSolve(prims) {
+  const t0 = performance.now();
   g.clear_data();
   const names = [];
   for (const p of prims) if (p.type === 'param') { g.push_sketch_param(p.name, p.value, !!p.fixed); names.push(p.name); }
   g.push_primitives_and_params(prims.filter((p) => p.type !== 'param'));
+  const t1 = performance.now();
   const status = g.solve();
   g.apply_solution();
+  const t2 = performance.now();
   const params = {};
   for (const n of names) params[n] = g.get_sketch_param_value(n);
   const conflicts = g.has_gcs_conflicting_constraints() ? g.get_gcs_conflicting_constraints() : [];
@@ -628,6 +634,8 @@ function runSolve(prims) {
     else if (p.type === 'circle') circles[p.id] = p.radius;
     else if (p.type === 'arc') arcs[p.id] = p.radius;
   }
+  const t3 = performance.now();
+  perfStats.push += t1 - t0; perfStats.solve += t2 - t1; perfStats.read += t3 - t2;
   return { status, conflicts, redundant, pts, circles, arcs, params };
 }
 

@@ -1,5 +1,5 @@
 import wasmUrl from '@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url';
-import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark, assignMark, setMarkRef, resetMarks, ensureMarkRefs, redundantCons, makeGear, beginSession, endSession } from './solver.js';
+import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark, assignMark, setMarkRef, resetMarks, ensureMarkRefs, redundantCons, makeGear, beginSession, endSession, perfStats } from './solver.js';
 import {
   newDoc, addLayer, deleteLayer, layerCount, shownEntries, shownValues, layerHiddenPoints, consHidden, visibleDoc, isHidden, addPoint, addLine, addCircle, addArc, addText, addSpline, splinePolyline, addCon, cleanup, deleteItems, clone, hatchLoops,
   allLtypes, PALETTE, arcOf, conTag, ensureNumbers, addEllipse, ellipsePolyline, ellipseOf, ellipsePoint, ellipseParam, ellipseRange, isPartial, DIM_TYPES,
@@ -1248,12 +1248,14 @@ const PERF = new URLSearchParams(location.search).has('perf');
 const perfLog = [];
 let perfSolveMs = 0; // lo que tardo solo la resolucion (solver) dentro del movimiento
 function perfShow(tTrack, tMove, tDraw, dragging, tSolve = 0) {
+  const perfWasm = [perfStats.push, perfStats.solve, perfStats.read], tWasm = perfWasm[0] + perfWasm[1] + perfWasm[2];
   let box = document.getElementById('perfBox');
-  if (!box) { box = document.createElement('div'); box.id = 'perfBox'; box.style.cssText = 'position:fixed;top:4px;right:4px;z-index:99;background:rgba(0,0,0,.72);color:#fff;font:12px/1.35 monospace;padding:4px 8px;border-radius:6px;pointer-events:none;white-space:pre'; document.body.appendChild(box); }
+  if (!box) { box = document.createElement('div'); box.id = 'perfBox'; box.style.cssText = 'position:fixed;top:4px;right:4px;max-width:calc(100vw - 8px);z-index:99;background:rgba(0,0,0,.72);color:#fff;font:11px/1.35 monospace;padding:4px 8px;border-radius:6px;pointer-events:none;white-space:pre'; document.body.appendChild(box); }
   const row = [tTrack, tMove, tDraw, tSolve]; if (dragging) perfLog.push(row); if (perfLog.length > 20) perfLog.shift();
   const avg = (i) => (perfLog.length ? perfLog.reduce((a, r) => a + r[i], 0) / perfLog.length : 0).toFixed(0);
-  box.textContent = `${dragging ? 'arrastre' : 'mover'}: rastreo ${tTrack.toFixed(0)} ms, movimiento ${tMove.toFixed(0)} ms (resolver ${tSolve.toFixed(0)}), dibujo ${tDraw.toFixed(0)} ms
-media de ${perfLog.length}: ${avg(0)} / ${avg(1)} (${avg(3)}) / ${avg(2)} ms  (dpr ${window.devicePixelRatio})`;
+  box.textContent = `${dragging ? 'arrastre' : 'mover'}: rastreo ${tTrack.toFixed(0)}, movimiento ${tMove.toFixed(0)}, dibujo ${tDraw.toFixed(0)} ms
+resolver ${tSolve.toFixed(0)} = WASM ${tWasm.toFixed(0)} (carga ${perfWasm[0].toFixed(0)}, calculo ${perfWasm[1].toFixed(0)}, lectura ${perfWasm[2].toFixed(0)}) + JS ${(tSolve - tWasm).toFixed(0)}
+media de ${perfLog.length}: rastreo ${avg(0)}, mov ${avg(1)} (resolver ${avg(3)}), dibujo ${avg(2)} ms (dpr ${window.devicePixelRatio})`;
 }
 cv.addEventListener('pointermove', (e) => {
   const p = pos(e);
@@ -1264,7 +1266,7 @@ cv.addEventListener('pointermove', (e) => {
   if (gesture) { gestureMove(); return; }
   hover = p;
   const tp0 = PERF ? performance.now() : 0;
-  perfSolveMs = 0;
+  perfSolveMs = 0; perfStats.push = perfStats.solve = perfStats.read = 0;
   trackIntersections(p);
   trackArc(p); trackEarc(p);
   const tp1 = PERF ? performance.now() : 0;
