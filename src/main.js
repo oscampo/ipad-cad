@@ -2846,7 +2846,7 @@ function renderPropCons() {
     if (FINITE_TYPES.includes(k.t) && !k.ref) { // «solo dentro de los limites»: la relacion deja de valer fuera del segmento o del arco
       const lab = document.createElement('label'), cb = document.createElement('input');
       lab.style.cssText = 'display:flex;gap:6px;align-items:center;font-size:12px;flex:none';
-      lab.title = 'La relación solo vale mientras el punto de contacto cae dentro de los límites del segmento o del arco; fuera, los elementos quedan libres';
+      lab.title = 'La relación solo vale mientras los elementos se tocan gráficamente, dentro de los límites del segmento o del arco; fuera, quedan libres';
       cb.type = 'checkbox'; cb.checked = !!k.finite; cb.style.cssText = 'width:20px;height:20px;min-height:20px;margin:0';
       cb.onchange = () => {
         pushUndo();

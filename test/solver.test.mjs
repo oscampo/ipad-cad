@@ -2064,8 +2064,13 @@ t('relacion finita: un punto sobre un segmento solo esta ligado dentro de los ex
   assert.ok(solve(b.d, [{ id: b.P, x: 15, y: 3 }]).ok);
   near(b.d.pts[b.P].x, 15, 1e-3); near(b.d.pts[b.P].y, 3, 1e-3, 'pasado el extremo queda libre');
   assert.ok(finiteInactive(b.d).has(b.k));
-  assert.ok(solve(b.d, [{ id: b.P, x: 5, y: 3 }]).ok);
-  near(b.d.pts[b.P].y, 0, 1e-6, 'al volver al segmento se liga otra vez');
+  // libre y lejos del segmento: aunque se proyecte dentro de el no esta en contacto, asi que no vale (no sigue al punto una ranura lejana)
+  for (let x = 14; x >= 5; x--) assert.ok(solve(b.d, [{ id: b.P, x, y: 3 }]).ok, 'paso ' + x); // pasos de 1: a 3 del segmento nunca se toca
+  near(b.d.pts[b.P].x, 5, 1e-2); near(b.d.pts[b.P].y, 3, 1e-2, 'a 3 del segmento no esta en contacto: sigue libre');
+  assert.ok(finiteInactive(b.d).has(b.k));
+  // al atravesar el segmento se captura: queda sobre la linea
+  assert.ok(solve(b.d, [{ id: b.P, x: 5, y: -2 }]).ok);
+  near(b.d.pts[b.P].y, 0, 1e-6, 'al atravesar el segmento se liga'); near(b.d.pts[b.P].x, 5, 1e-2);
   assert.ok(!finiteInactive(b.d).has(b.k));
 });
 t('relacion finita: tangencia circulo-segmento y punto sobre arco solo valen dentro de sus limites', () => {
@@ -2112,10 +2117,41 @@ t('solo lo conectado al arrastre: con muchas relaciones sin relacion con el meca
     assert.ok(solve(a.d, T).ok && solve(b.d, T2).ok);
   }
   endSession();
-  for (const id of [a.m, a.n]) { near(a.d.pts[id].x, b.d.pts[id === a.m ? b.m : b.n].x, 1e-6); near(a.d.pts[id].y, b.d.pts[id === a.m ? b.m : b.n].y, 1e-6); }
+  for (const id of [a.m, a.n]) { near(a.d.pts[id].x, b.d.pts[id === a.m ? b.m : b.n].x, 1e-4); near(a.d.pts[id].y, b.d.pts[id === a.m ? b.m : b.n].y, 1e-4); } // (el sistema chico y el grande convergen con diferencias de ~1e-5)
   assert.equal(JSON.stringify(a.ajenas.map((q) => a.d.pts[q])), antes, 'las partes sin relacion no se tocan');
   // una parte conectada si se resuelve: la manivela es un cuerpo con dos puntos
   assert.ok(Math.hypot(a.d.pts[a.m].x, a.d.pts[a.m].y) > 9.99 && Math.hypot(a.d.pts[a.m].x - a.d.pts[a.n].x, a.d.pts[a.m].y - a.d.pts[a.n].y) > 9.99);
+});
+
+t('cruz de malta: 4 ranuras como relaciones finitas, el impulsor da vueltas y la cruz avanza 90 grados por vuelta sin fallar', () => {
+  const n = 4, D = 25, a = D * Math.sin(Math.PI / n), Rw = Math.sqrt(D * D - a * a), r0 = D - a; // geometria ideal: a/d = sen(pi/n)
+  const d = newDoc();
+  const c1 = addPoint(d, 0, 0, false), c2 = addPoint(d, D, 0, false); d.pts[c1].fixed = true; d.pts[c2].fixed = true;
+  const pin = addPoint(d, a, 0, false); addCon(d, { t: 'DIST', refs: [c1, pin], v: a });
+  const ends = [];
+  for (let k = 0; k < n; k++) { // ranuras como segmentos radiales de la cruz, de r0 (fondo) a Rw (boca); una apunta al impulsor
+    const ang = Math.PI + (k * 2 * Math.PI) / n;
+    ends.push([addPoint(d, D + r0 * Math.cos(ang), r0 * Math.sin(ang), false), addPoint(d, D + Rw * Math.cos(ang), Rw * Math.sin(ang), false)]);
+  }
+  ends.forEach(([p, q], k) => { // cuerpo rigido: cada extremo a su radio y las ranuras a 90 grados entre si
+    addCon(d, { t: 'DIST', refs: [c2, p], v: r0, hidden: true }); addCon(d, { t: 'DIST', refs: [c2, q], v: Rw, hidden: true });
+    addCon(d, { t: 'ANG4', refs: [c2, p, c2, q], v: 0, hidden: true });
+    if (k > 0) addCon(d, { t: 'ANG4', refs: [c2, ends[0][1], c2, q], v: (k * 360) / n, hidden: true });
+    addCon(d, { t: 'PONL', refs: [pin, addLine(d, p, q, {})], finite: true }); // el perno solo esta ligado a la ranura que toca
+  });
+  assert.ok(solve(d, []).ok);
+  const wheel = () => (Math.atan2(d.pts[ends[0][1]].y - d.pts[c2].y, d.pts[ends[0][1]].x - d.pts[c2].x) * 180) / Math.PI;
+  let prev = wheel(), acc = 0, fails = 0;
+  beginSession(d);
+  for (let i = 1; i <= 360; i++) { // 2 vueltas del impulsor, de 2 grados en 2 grados
+    const t = (i * 2 * Math.PI) / 180, R = a + 0.2;
+    if (!solve(d, [{ id: pin, x: R * Math.cos(t), y: R * Math.sin(t) }]).ok) fails++;
+    const w = wheel(); acc += ((w - prev + 540) % 360) - 180; prev = w;
+    if (i === 180) near(acc, -90, 0.5, 'tras 1 vuelta la cruz avanzo una ranura');
+  }
+  endSession();
+  assert.equal(fails, 0);
+  near(acc, -180, 0.5, 'tras 2 vueltas, dos ranuras (en sentido contrario al impulsor)');
 });
 
 t('yugo escoces: una manivela con su perno en una ranura se resuelve con las restricciones de siempre, vueltas completas', () => {

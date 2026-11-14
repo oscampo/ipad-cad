@@ -672,7 +672,11 @@ export function makeGear(doc, lineA, lineB, ratio) {
 // contacto seguiria tirando de la geometria. Se decide con la postura actual antes de resolver y se repite si al resolver cambia.
 export const FINITE_TYPES = ['PONL', 'PONC', 'TANLC', 'TANCC'];
 const finiteIds = (doc) => structural(doc, 'finIds', () => Object.keys(doc.cons).filter((id) => doc.cons[id].finite && !doc.cons[id].ref && FINITE_TYPES.includes(doc.cons[id].t)));
-function finiteHolds(doc, k) {
+// Estado de una relacion finita con la postura actual: { inside, gap, tol }.
+//  inside: el punto de contacto cae dentro de los limites graficos (el segmento, el barrido del arco)
+//  gap: separacion con signo entre los elementos (0 = se tocan); cambia de signo al atravesarse
+//  tol: separacion maxima para considerar que se tocan (graficamente en contacto)
+function finiteState(doc, k) {
   const P = (id) => doc.pts[id], eps = 1e-6;
   const centerOf = (id) => P((doc.circles[id] || doc.arcs[id]).c);
   const radiusOf = (id) => (id in doc.circles ? doc.circles[id].r : Math.hypot(P(doc.arcs[id].a).x - P(doc.arcs[id].c).x, P(doc.arcs[id].a).y - P(doc.arcs[id].c).y));
@@ -682,30 +686,65 @@ function finiteHolds(doc, k) {
     const sw = arcSweepOf(P(a.c), P(a.a), P(a.b));
     return inSweep(P(a.c), sw.a0, sw.sweep, p, eps);
   };
-  const segParam = (lid, x, y) => { const l = doc.lines[lid], a = P(l.a), b = P(l.b), dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy; return L2 > 0 ? ((x - a.x) * dx + (y - a.y) * dy) / L2 : 0.5; };
   switch (k.t) {
-    case 'PONL': { const p = P(k.refs[0]), t = segParam(k.refs[1], p.x, p.y); return t >= -eps && t <= 1 + eps; }
-    case 'PONC': return onCurve(k.refs[1], P(k.refs[0]));
+    case 'PONL': { // punto sobre segmento: esta sobre el cuando su distancia a la recta es ~0 y su pie cae entre los extremos
+      const p = P(k.refs[0]), l = doc.lines[k.refs[1]], a = P(l.a), b = P(l.b), dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy) || 1;
+      const t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / (L * L);
+      return { inside: t >= -eps && t <= 1 + eps, gap: ((p.x - a.x) * dy - (p.y - a.y) * dx) / L, tol: 1e-3 * L };
+    }
+    case 'PONC': {
+      const p = P(k.refs[0]), c = centerOf(k.refs[1]), r = radiusOf(k.refs[1]);
+      return { inside: onCurve(k.refs[1], p), gap: Math.hypot(p.x - c.x, p.y - c.y) - r, tol: 1e-3 * r };
+    }
     case 'TANLC': {
-      const [lid, cid] = k.refs, c = centerOf(cid), l = doc.lines[lid], a = P(l.a), b = P(l.b), dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy || 1;
-      const t = ((c.x - a.x) * dx + (c.y - a.y) * dy) / L2; // pie de la perpendicular desde el centro: el punto de contacto
-      return t >= -eps && t <= 1 + eps && onCurve(cid, { x: a.x + t * dx, y: a.y + t * dy });
+      const [lid, cid] = k.refs, c = centerOf(cid), r = radiusOf(cid), l = doc.lines[lid], a = P(l.a), b = P(l.b), dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy) || 1;
+      const t = ((c.x - a.x) * dx + (c.y - a.y) * dy) / (L * L); // pie de la perpendicular desde el centro: el punto de contacto
+      const sd = Math.abs(((c.x - a.x) * dy - (c.y - a.y) * dx) / L);
+      return { inside: t >= -eps && t <= 1 + eps && onCurve(cid, { x: a.x + t * dx, y: a.y + t * dy }), gap: sd - r, tol: 1e-3 * Math.max(r, 1e-9) };
     }
     case 'TANCC': {
       const [c1, c2] = k.refs, C1 = centerOf(c1), C2 = centerOf(c2), d = Math.hypot(C2.x - C1.x, C2.y - C1.y);
-      if (d < 1e-12) return true;
+      if (d < 1e-12) return { inside: true, gap: 0, tol: 1 };
       const r1 = radiusOf(c1), r2 = radiusOf(c2), u = { x: (C2.x - C1.x) / d, y: (C2.y - C1.y) / d };
       const external = Math.abs(d - (r1 + r2)) <= Math.abs(d - Math.abs(r1 - r2));
       const s1 = external || r1 >= r2 ? 1 : -1, s2 = external ? -1 : r1 >= r2 ? 1 : -1; // lado del contacto en cada circulo
-      return onCurve(c1, { x: C1.x + s1 * u.x * r1, y: C1.y + s1 * u.y * r1 }) && onCurve(c2, { x: C2.x + s2 * u.x * r2, y: C2.y + s2 * u.y * r2 });
+      return {
+        inside: onCurve(c1, { x: C1.x + s1 * u.x * r1, y: C1.y + s1 * u.y * r1 }) && onCurve(c2, { x: C2.x + s2 * u.x * r2, y: C2.y + s2 * u.y * r2 }),
+        gap: external ? d - (r1 + r2) : d - Math.abs(r1 - r2), tol: 1e-3 * (r1 + r2) / 2,
+      };
     }
-    default: return true;
+    default: return { inside: true, gap: 0, tol: 1 };
   }
 }
-// Ids de las relaciones finitas que ahora mismo no valen.
-function finiteOff(doc) {
+// Puntos que intervienen en una relacion finita (los que pueden moverse y por tanto "recorrer" el contacto en un paso).
+function finitePts(doc, k) {
+  const ptsOf = (r) => (r in doc.pts ? [r] : r in doc.lines ? [doc.lines[r].a, doc.lines[r].b] : r in doc.circles ? [doc.circles[r].c] : r in doc.arcs ? [doc.arcs[r].c, doc.arcs[r].a, doc.arcs[r].b] : []);
+  return k.refs.flatMap(ptsOf);
+}
+// Separaciones y posiciones actuales de las relaciones finitas (para detectar que se atravesaron o se rozaron entre dos posturas).
+function finiteGaps(doc) {
+  const m = new Map();
+  for (const id of finiteIds(doc)) {
+    try { const k = doc.cons[id]; m.set(id, { gap: finiteState(doc, k).gap, pos: finitePts(doc, k).map((q) => ({ id: q, x: doc.pts[q].x, y: doc.pts[q].y })) }); } catch { /* geometria incompleta */ }
+  }
+  return m;
+}
+// Ids de las relaciones finitas que ahora mismo no valen. Una relacion finita vale solo si los elementos se TOCAN graficamente: su punto de
+// contacto cae dentro de los limites y la separacion es ~0 (o se atravesaron desde la postura anterior prev: entonces se activa y
+// la resolucion los devuelve al contacto). Un punto que simplemente "se proyecta" sobre el segmento no vale: sin esto, un punto lejos
+// de una ranura la seguiria con toda la cruz, y con varias ranuras a la vez las relaciones chocan entre si.
+function finiteOff(doc, prev) {
   const out = new Set();
-  for (const id of finiteIds(doc)) { try { if (!finiteHolds(doc, doc.cons[id])) out.add(id); } catch { /* geometria incompleta: se deja valer */ } }
+  for (const id of finiteIds(doc)) {
+    try {
+      const st = finiteState(doc, doc.cons[id]), pv = prev && prev.get(id);
+      const crossed = !!pv && pv.gap * st.gap < 0;
+      // en un paso discreto un contacto puede pasarse de largo o rozarse por menos de lo que se movio el punto: la tolerancia suma la
+      // mitad de lo que se movio lo que interviene (si el perno entra de lado por la boca de una ranura, a 5 grados de paso queda a ~0,07 de la linea)
+      const moved = pv ? Math.max(0, ...pv.pos.map((q) => Math.hypot(doc.pts[q.id].x - q.x, doc.pts[q.id].y - q.y))) : 0;
+      if (!(st.inside && (Math.abs(st.gap) <= st.tol + 0.5 * moved || crossed))) out.add(id);
+    } catch { /* geometria incompleta: se deja valer */ }
+  }
   return out;
 }
 export const finiteInactive = (doc) => finiteOff(doc); // para dibujar atenuadas las que no valen
@@ -932,11 +971,12 @@ export function solve(doc, targets = []) {
   const tg0 = retarget(doc, F0, targets);
   const G = gearPlan(doc, tg0);
   const S = scopeOf(doc, tg0);
+  const gap0 = finiteIds(doc).length ? finiteGaps(doc) : null; // separaciones al empezar: sirven para detectar que se atraveso un contacto en este paso
   let off = finiteOff(doc), r;
   for (let it = 0; it < 3; it++) { // si al resolver cambia que relaciones finitas valen, se resuelve de nuevo con el conjunto nuevo
     r = solveCore(doc, F0, G.targets, G, S, off, it > 0);
     if (!r.ok) break;
-    const off2 = finiteOff(doc);
+    const off2 = finiteOff(doc, gap0);
     if (sameSet(off, off2)) break;
     off = off2;
   }
