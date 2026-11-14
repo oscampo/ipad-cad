@@ -1,7 +1,7 @@
 // Puente entre el documento y el solver de restricciones (planegcs, de FreeCAD, en WASM).
 import { init_planegcs_module, GcsWrapper } from '@salusoft89/planegcs';
 import { conRefs, addCon, ellipseOf, ellipseParam, isPartial } from './model.js';
-import { arcSweepOf, closestOnPolyline } from './geom.js';
+import { arcSweepOf, closestOnPolyline, inSweep } from './geom.js';
 import { bsplineThrough, bsplineSamples, bsplinePoint, bsplineTangent, sampleParam, chordParams, validParams } from './bspline.js';
 
 let g = null;
@@ -11,7 +11,8 @@ let g = null;
 // elipses con relaciones) cuesta mas en JavaScript que la propia resolucion, asi que se hace una vez por arrastre y se
 // reutiliza. Si cambia el dibujo (otro objeto, otro numero de restricciones o de ids) la sesion se descarta sola.
 let session = null;
-export function beginSession(doc) { session = { doc, n: doc.n, nc: Object.keys(doc.cons).length, memo: new Map() }; }
+// scoped: solo se resuelve lo conectado a lo arrastrado (el que llama garantiza que no hay formulas que lean medidas: con ellas, una cota lejana puede cambiar de valor)
+export function beginSession(doc, scoped = false) { session = { doc, n: doc.n, nc: Object.keys(doc.cons).length, memo: new Map(), scoped }; }
 export function endSession() { session = null; }
 const fixedSig = (doc) => { let s = ''; for (const id in doc.pts) if (doc.pts[id].fixed) s += id + ','; return s; };
 // Al empezar cada resolucion: la sesion sigue valida si es el mismo dibujo con la misma estructura; los puntos fijos si pueden
@@ -237,10 +238,10 @@ function initialParam(bs, k, p, hint) {
 }
 
 // Primitivas nativas de los splines con relaciones.
-function nativeSplinePrims(doc, pos, memo) {
+function nativeSplinePrims(doc, pos, memo, F) {
   const out = [], P = (id) => pos?.pts?.[id] || doc.pts[id];
   const used = new Set();
-  for (const k of Object.values(doc.cons)) if (splCon(doc, k)) used.add(k.refs[1]);
+  for (const [cid, k] of Object.entries(doc.cons)) if (splCon(doc, k) && !(F?.scope && !F.scope.conIn(cid))) used.add(k.refs[1]);
   const curves = {};
   for (const sid of used) {
     const sp = doc.splines[sid], bs = curveOf(doc, sid, P, memo);
@@ -307,8 +308,10 @@ function splineResidual(doc, res) {
   for (const [id, k] of Object.entries(doc.cons)) {
     if (!splCon(doc, k)) continue;
     // el punto debe estar sobre la curva en el parametro que encontro el solver (dentro del dominio)
-    const bs = curveOf(doc, k.refs[1], P, memo), u = res.params?.[`__u:${id}`];
-    if (!bs || !Number.isFinite(u)) continue;
+    const u = res.params?.[`__u:${id}`];
+    if (!Number.isFinite(u)) continue; // no entro a esta resolucion (fuera del alcance del arrastre)
+    const bs = curveOf(doc, k.refs[1], P, memo);
+    if (!bs) continue;
     const e = bsplinePoint(bs, u), q = P(splPoint(k));
     worst = Math.max(worst, Math.hypot(e.x - q.x, e.y - q.y));
   }
@@ -322,7 +325,8 @@ function solveLoop(doc, pos, extra, F) {
   const memo = {};
   let cur = pos, res = null;
   for (let i = 0; i < (spl ? 4 : 1); i++) {
-    res = runSolve(build(doc, cur, [...(spl ? nativeSplinePrims(doc, cur, memo) : []), ...(extra || [])], F));
+    const prims = build(doc, cur, [...(spl ? nativeSplinePrims(doc, cur, memo, F) : []), ...(extra || [])], F);
+    res = runSolve(F?.scope ? prunePrims(prims) : prims);
     res.ts = memo;
     if (!spl) break;
     const redo = fixParams(doc, res, memo);
@@ -472,7 +476,7 @@ function build(doc, pos, extra, F) {
   const P = (id) => pos?.pts?.[id] || doc.pts[id];
   for (const [id, p] of Object.entries(doc.pts)) {
     const q = P(id);
-    out.push({ id, type: 'point', x: q.x, y: q.y, fixed: !!p.fixed || isMark(doc, id) || !!F?.map.has(id) }); // la marca de referencia no la mueve el solver; el seguidor se calcula despues
+    out.push({ id, type: 'point', x: q.x, y: q.y, fixed: !!p.fixed || isMark(doc, id) || !!F?.map.has(id) || (!!F?.scope && !F.scope.has(id)) }); // la marca de referencia no la mueve el solver; el seguidor se calcula despues; lo que no esta conectado al arrastre queda fijo
   }
   for (const [id, l] of Object.entries(doc.lines)) out.push({ id, type: 'line', p1_id: l.a, p2_id: l.b });
   for (const [id, c] of Object.entries(doc.circles)) {
@@ -487,7 +491,7 @@ function build(doc, pos, extra, F) {
   const ell = nativeEllipses(doc);
   if (ell.size) out.push(...nativeEllipsePrims(doc, pos, ell));
   const fixedOf = (i) => !!doc.pts[i]?.fixed || isMark(doc, i) || !!F?.map.has(i);
-  for (const [id, k] of Object.entries(doc.cons)) if (!F?.skip.has(id) && !(!k.ref && trivialFixed(doc, k, fixedOf))) out.push(...conPrims(doc, id, k));
+  for (const [id, k] of Object.entries(doc.cons)) if (!F?.skip.has(id) && !(F?.scope && !k.ref && !F.scope.conIn(id)) && !(!k.ref && trivialFixed(doc, k, fixedOf))) out.push(...conPrims(doc, id, k));
   if (F?.gearPrims) out.push(...F.gearPrims);
   if (extra) out.push(...extra);
   return out;
@@ -554,7 +558,7 @@ function bodiesRaw(doc) {
 // desplaza a lo largo de una cremallera); las relaciones ligan el CAMBIO de uno con el del otro.
 function gearPlan(doc, targets) {
   const rels = gearRels(doc);
-  if (!rels.length) return { targets, prims: [] };
+  if (!rels.length) return { targets, prims: [], items: [] };
   // Se propaga el CAMBIO desde la postura actual, no el angulo absoluto: un engranaje que esta en dos relaciones (un tren A-B,
   // B-C, C-D) tendria constantes a0 en vueltas distintas (-180 en una, 180 en otra) y el angulo compuesto saldria desfasado en
   // multiplos de 360 por la razon (la rueda D quedaba 180 grados fuera). Con el cambio no hay ramas que mezclar.
@@ -626,15 +630,15 @@ function gearPlan(doc, targets) {
     }
     if (bodyKey !== null) for (const t of targets) if (bod.of(t.id) === bodyKey) drop.add(t.id);
   }
-  const prims = [];
+  const prims = [], items = []; // items: las mismas primitivas con los puntos que las anclan (para filtrar por alcance)
   for (const [nd, dv] of delta) {
-    if (nd.kind === 'ang') { const l = doc.lines[nd.id]; prims.push({ id: `__gr:${nd.id}`, type: 'p2p_angle', p1_id: l.a, p2_id: l.b, angle: wrapPi(nd.meas + dv) }); }
+    if (nd.kind === 'ang') { const l = doc.lines[nd.id], pr = { id: `__gr:${nd.id}`, type: 'p2p_angle', p1_id: l.a, p2_id: l.b, angle: wrapPi(nd.meas + dv) }; prims.push(pr); items.push({ pids: [l.a, l.b], prims: [pr] }); }
     else {
-      prims.push({ id: `__rt:${nd.id}`, type: 'point', x: nd.pos.x + dv * nd.u.x, y: nd.pos.y + dv * nd.u.y, fixed: true });
-      prims.push({ id: `__rc:${nd.id}`, type: 'p2p_coincident', p1_id: nd.id, p2_id: `__rt:${nd.id}` });
+      const a = { id: `__rt:${nd.id}`, type: 'point', x: nd.pos.x + dv * nd.u.x, y: nd.pos.y + dv * nd.u.y, fixed: true }, b = { id: `__rc:${nd.id}`, type: 'p2p_coincident', p1_id: nd.id, p2_id: `__rt:${nd.id}` };
+      prims.push(a, b); items.push({ pids: [nd.id], prims: [a, b] });
     }
   }
-  return { targets: targets.filter((t) => !drop.has(t.id)), prims };
+  return { targets: targets.filter((t) => !drop.has(t.id)), prims, items };
 }
 // Tras resolver: el angulo continuo de cada relacion sigue a la geometria.
 function trackGears(doc) {
@@ -659,6 +663,150 @@ export function checkRack(doc, wheelLine, q, rackLine, ratio) {
 export function makeGear(doc, lineA, lineB, ratio) {
   const a = lineDir(doc, lineA), b = lineDir(doc, lineB);
   return { t: 'GEAR', refs: [lineA, lineB], ratio, a0: [a, b], cur: [a, b] };
+}
+
+// ---------------------------------------------------------------- relaciones finitas
+// Una relacion con k.finite = true solo vale mientras su punto de contacto cae dentro de los limites graficos de los elementos (el
+// segmento entre sus extremos, el barrido del arco). Fuera de ellos deja de existir: no se manda al solver y los elementos quedan
+// libres. Para el solver las lineas y los circulos son infinitos, asi que sin esto una tangencia con un segmento que no se ve en
+// contacto seguiria tirando de la geometria. Se decide con la postura actual antes de resolver y se repite si al resolver cambia.
+export const FINITE_TYPES = ['PONL', 'PONC', 'TANLC', 'TANCC'];
+const finiteIds = (doc) => structural(doc, 'finIds', () => Object.keys(doc.cons).filter((id) => doc.cons[id].finite && !doc.cons[id].ref && FINITE_TYPES.includes(doc.cons[id].t)));
+function finiteHolds(doc, k) {
+  const P = (id) => doc.pts[id], eps = 1e-6;
+  const centerOf = (id) => P((doc.circles[id] || doc.arcs[id]).c);
+  const radiusOf = (id) => (id in doc.circles ? doc.circles[id].r : Math.hypot(P(doc.arcs[id].a).x - P(doc.arcs[id].c).x, P(doc.arcs[id].a).y - P(doc.arcs[id].c).y));
+  const onCurve = (id, p) => { // un circulo entero siempre; un arco, solo dentro de su barrido
+    const a = doc.arcs[id];
+    if (!a) return true;
+    const sw = arcSweepOf(P(a.c), P(a.a), P(a.b));
+    return inSweep(P(a.c), sw.a0, sw.sweep, p, eps);
+  };
+  const segParam = (lid, x, y) => { const l = doc.lines[lid], a = P(l.a), b = P(l.b), dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy; return L2 > 0 ? ((x - a.x) * dx + (y - a.y) * dy) / L2 : 0.5; };
+  switch (k.t) {
+    case 'PONL': { const p = P(k.refs[0]), t = segParam(k.refs[1], p.x, p.y); return t >= -eps && t <= 1 + eps; }
+    case 'PONC': return onCurve(k.refs[1], P(k.refs[0]));
+    case 'TANLC': {
+      const [lid, cid] = k.refs, c = centerOf(cid), l = doc.lines[lid], a = P(l.a), b = P(l.b), dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy || 1;
+      const t = ((c.x - a.x) * dx + (c.y - a.y) * dy) / L2; // pie de la perpendicular desde el centro: el punto de contacto
+      return t >= -eps && t <= 1 + eps && onCurve(cid, { x: a.x + t * dx, y: a.y + t * dy });
+    }
+    case 'TANCC': {
+      const [c1, c2] = k.refs, C1 = centerOf(c1), C2 = centerOf(c2), d = Math.hypot(C2.x - C1.x, C2.y - C1.y);
+      if (d < 1e-12) return true;
+      const r1 = radiusOf(c1), r2 = radiusOf(c2), u = { x: (C2.x - C1.x) / d, y: (C2.y - C1.y) / d };
+      const external = Math.abs(d - (r1 + r2)) <= Math.abs(d - Math.abs(r1 - r2));
+      const s1 = external || r1 >= r2 ? 1 : -1, s2 = external ? -1 : r1 >= r2 ? 1 : -1; // lado del contacto en cada circulo
+      return onCurve(c1, { x: C1.x + s1 * u.x * r1, y: C1.y + s1 * u.y * r1 }) && onCurve(c2, { x: C2.x + s2 * u.x * r2, y: C2.y + s2 * u.y * r2 });
+    }
+    default: return true;
+  }
+}
+// Ids de las relaciones finitas que ahora mismo no valen.
+function finiteOff(doc) {
+  const out = new Set();
+  for (const id of finiteIds(doc)) { try { if (!finiteHolds(doc, doc.cons[id])) out.add(id); } catch { /* geometria incompleta: se deja valer */ } }
+  return out;
+}
+export const finiteInactive = (doc) => finiteOff(doc); // para dibujar atenuadas las que no valen
+const sameSet = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
+// F con las relaciones apagadas omitidas
+function withOff(F, off) {
+  if (!off.size) return F;
+  const G = F ? { ...F } : { order: [], skip: new Set(), map: new Map(), idleArcs: new Set() };
+  G.skip = new Set([...G.skip, ...off]);
+  return G;
+}
+
+// ---------------------------------------------------------------- solo lo conectado al arrastre
+// Al arrastrar, solo puede cambiar lo que esta conectado al punto arrastrado por restricciones o formas (sin pasar por puntos
+// fijos). El resto del dibujo ya esta resuelto: si se manda al solver solo suma costo (medido: ~0,1 ms por relacion, aunque no
+// tenga nada que ver con lo que se mueve). Se resuelve solo el componente conectado; lo demas queda fijo.
+// Solo en sesion de arrastre con alcance (sin formulas que lean medidas) y sin elipses nativas.
+const componentsOf = (doc) => structural(doc, 'comp', () => componentsRaw(doc), true);
+function componentsRaw(doc) {
+  const par = new Map();
+  const find = (x) => { while (par.get(x) !== x) { par.set(x, par.get(par.get(x))); x = par.get(x); } return x; };
+  const node = (id) => (id in doc.pts ? (doc.pts[id].fixed || isMark(doc, id) ? null : id) : id); // los fijos no conectan; las curvas si (su radio es una incognita)
+  const nodesOf = (r) => {
+    if (r in doc.pts) return [r];
+    if (r in doc.lines) return [doc.lines[r].a, doc.lines[r].b];
+    if (r in doc.circles) return [r, doc.circles[r].c];
+    if (r in doc.arcs) { const a = doc.arcs[r]; return [r, a.c, a.a, a.b]; }
+    if (doc.splines?.[r]) return doc.splines[r].pts;
+    if (doc.ellipses?.[r]) { const e = doc.ellipses[r]; return [e.c, e.a, e.b, e.p1, e.p2].filter(Boolean); }
+    return [];
+  };
+  const join = (ids) => {
+    let first = null;
+    for (const raw of ids) {
+      const id = node(raw);
+      if (id === null || id === undefined) continue;
+      if (!par.has(id)) par.set(id, id);
+      if (first === null) first = id; else { const a = find(first), b = find(id); if (a !== b) par.set(a, b); }
+    }
+  };
+  for (const k of Object.values(doc.cons)) if (!k.ref) join(k.refs.flatMap(nodesOf));
+  for (const l of Object.values(doc.lines)) join([l.a, l.b]);
+  for (const [id, a] of Object.entries(doc.arcs)) join([id, a.c, a.a, a.b]);
+  for (const [id, c] of Object.entries(doc.circles)) join([id, c.c]);
+  for (const sp of Object.values(doc.splines || {})) join(sp.pts);
+  for (const e of Object.values(doc.ellipses || {})) join([e.c, e.a, e.b, e.p1, e.p2].filter(Boolean));
+  const conRoot = new Map();
+  for (const [cid, k] of Object.entries(doc.cons)) {
+    if (k.ref) continue;
+    const r = k.refs.flatMap(nodesOf).map(node).find((x) => x !== null && x !== undefined && par.has(x));
+    if (r !== undefined) conRoot.set(cid, find(r));
+  }
+  return { of: (id) => { const n = node(id); return n !== null && n !== undefined && par.has(n) ? find(n) : null; }, conRoot };
+}
+function scopeOf(doc, targets) {
+  if (!liveSession(doc) || !session.scoped || !targets.length || nativeEllipses(doc).size) return null;
+  const comp = componentsOf(doc), roots = new Set(), ids = new Set(targets.map((t) => t.id));
+  for (const t of targets) { const r = comp.of(t.id); if (r !== null) roots.add(r); }
+  return {
+    has: (id) => ids.has(id) || (comp.of(id) !== null && roots.has(comp.of(id))),
+    conIn: (cid) => roots.has(comp.conRoot.get(cid)),
+  };
+}
+function liveSession(doc) { return !!session && session.ok && session.doc === doc; }
+
+// ---------------------------------------------------------------- poda
+// Al solver solo le llegan las primitivas que pueden influir en el resultado. Una linea, un circulo o un punto que
+// ninguna restriccion toca no cambia nada (y los seguidores y los puntos fijos que nadie usa tampoco), pero cada
+// primitiva cuesta al pasar por la frontera JS/WASM en cada resolucion, que en un dibujo grande es lo que mas pesa.
+// Se conservan: las restricciones, lo que ellas mencionan (recursivamente), y los arcos con algun extremo movil (su regla
+// mantiene a los extremos sobre la circunferencia).
+const GEOM = new Set(['point', 'line', 'circle', 'arc']);
+function refsOfPrim(p) {
+  const out = [];
+  for (const [k, v] of Object.entries(p)) {
+    if (k === 'id') continue;
+    if (k.endsWith('_id') && typeof v === 'string') out.push(v);
+    else if (k.endsWith('_ids') && Array.isArray(v)) out.push(...v);
+    else if (k === 'distance' && v && typeof v === 'object' && v.o_id) out.push(v.o_id);
+  }
+  return out;
+}
+function prunePrims(prims) {
+  const geo = new Map(), roots = [];
+  for (const p of prims) {
+    if (p.type === 'param') continue;
+    if (GEOM.has(p.type)) geo.set(p.id, p);
+    else if (p.type === 'arc_rules') continue; // sigue a su arco
+    else roots.push(p);
+  }
+  const point = (id) => geo.get(id);
+  for (const p of geo.values()) { // arcos con algun extremo movil
+    if (p.type !== 'arc') continue;
+    if ([p.c_id, p.start_id, p.end_id].some((q) => point(q) && !point(q).fixed)) roots.push(p);
+  }
+  const need = new Set(), stack = [];
+  const want = (id) => { if (!need.has(id)) { need.add(id); stack.push(id); } };
+  for (const p of roots) { if (geo.has(p.id)) want(p.id); for (const r of refsOfPrim(p)) want(r); }
+  while (stack.length) { const g = geo.get(stack.pop()); if (g) for (const r of refsOfPrim(g)) want(r); }
+  const keep = (p) => p.type === 'param' || (p.type === 'arc_rules' ? need.has(p.a_id) : GEOM.has(p.type) ? need.has(p.id) : true);
+  return prims.filter(keep);
 }
 
 // Tiempos acumulados (ms) de las tres partes de cada llamada al solver, para el medidor ?perf: pasar las primitivas a WASM,
@@ -761,7 +909,7 @@ function commit(doc, res) {
 export function redundantCons(doc) {
   if (!g) return [];
   touchSession(doc);
-  const F = prepare(doc);
+  const F = withOff(prepare(doc), finiteOff(doc));
   const res = solveLoop(doc, null, null, F);
   const red = new Set(res.redundant || []);
   if (!red.size) return [];
@@ -780,10 +928,32 @@ export function redundantCons(doc) {
 export function solve(doc, targets = []) {
   if (!g) return { ok: true, conflicts: [] };
   touchSession(doc);
-  let F = prepare(doc);
-  targets = retarget(doc, F, targets);
-  const G = gearPlan(doc, targets);
-  if (G.prims.length) { F ||= { order: [], skip: new Set(), map: new Map(), idleArcs: new Set() }; F.gearPrims = G.prims; targets = G.targets; }
+  const F0 = prepare(doc);
+  const tg0 = retarget(doc, F0, targets);
+  const G = gearPlan(doc, tg0);
+  const S = scopeOf(doc, tg0);
+  let off = finiteOff(doc), r;
+  for (let it = 0; it < 3; it++) { // si al resolver cambia que relaciones finitas valen, se resuelve de nuevo con el conjunto nuevo
+    r = solveCore(doc, F0, G.targets, G, S, off, it > 0);
+    if (!r.ok) break;
+    const off2 = finiteOff(doc);
+    if (sameSet(off, off2)) break;
+    off = off2;
+  }
+  return r;
+}
+function solveCore(doc, F0, targets, G, S, off, refine) {
+  let F = F0 ? { ...F0 } : null;
+  // en las repeticiones, un destino que el punto ya alcanzo no se usa: con el punto justo encima, la atraccion de distancia cero se indefine
+  if (refine) targets = targets.filter((t) => !doc.pts[t.id] || Math.hypot(t.x - doc.pts[t.id].x, t.y - doc.pts[t.id].y) > 1e-7);
+  if (off.size) F = withOff(F, off);
+  if (S) { F ||= { order: [], skip: new Set(), map: new Map(), idleArcs: new Set() }; F.scope = S; }
+  const gearPrims = G.items.filter((it) => !S || it.pids.some((id) => S.has(id))).flatMap((it) => it.prims);
+  if (gearPrims.length) { F ||= { order: [], skip: new Set(), map: new Map(), idleArcs: new Set() }; F.gearPrims = gearPrims; }
+  if (S) { // los arcos fuera del alcance (sus extremos quedan fijos) no hacen falta: solo sumarian reglas redundantes
+    F.idleArcs = new Set(F.idleArcs);
+    for (const [id, a] of Object.entries(doc.arcs)) if (!S.has(id) && ![a.c, a.a, a.b].some((q) => S.has(q))) F.idleArcs.add(id);
+  }
   let pos = null;
   const live = targets.filter((t) => doc.pts[t.id] && !doc.pts[t.id].fixed && !isMark(doc, t.id));
   if (live.length) {

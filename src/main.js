@@ -1,5 +1,5 @@
 import wasmUrl from '@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url';
-import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark, assignMark, setMarkRef, resetMarks, ensureMarkRefs, redundantCons, makeGear, makeRack, checkRack, beginSession, endSession, perfStats } from './solver.js';
+import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark, assignMark, setMarkRef, resetMarks, ensureMarkRefs, redundantCons, makeGear, makeRack, checkRack, FINITE_TYPES, beginSession, endSession, perfStats } from './solver.js';
 import {
   newDoc, addLayer, deleteLayer, layerCount, shownEntries, shownValues, layerHiddenPoints, consHidden, visibleDoc, isHidden, addPoint, addLine, addCircle, addArc, addText, addSpline, splinePolyline, addCon, cleanup, deleteItems, clone, hatchLoops,
   allLtypes, PALETTE, arcOf, conTag, ensureNumbers, addEllipse, ellipsePolyline, ellipseOf, ellipsePoint, ellipseParam, ellipseRange, isPartial, DIM_TYPES,
@@ -1525,7 +1525,7 @@ function toolMove(p) {
   if (!drag.hit || !drag.orig) return;
   if (!drag.started) {
     if (dist(p, drag.p0) < 6) return;
-    drag.started = true; pushUndo(); beginSession(doc);
+    drag.started = true; pushUndo(); beginSession(doc, !hasReactive(doc));
   }
   const m = toModel(p.x, p.y);
   const h = drag.hit;
@@ -2843,7 +2843,21 @@ function renderPropCons() {
     const del = document.createElement('button');
     del.type = 'button'; del.textContent = 'Quitar'; del.title = 'Quitar esta restricción';
     del.onclick = () => { pushUndo(); delete doc.cons[kid]; afterChange(); renderPropCons(); };
-    row.append(lb, del);
+    if (FINITE_TYPES.includes(k.t) && !k.ref) { // «solo dentro de los limites»: la relacion deja de valer fuera del segmento o del arco
+      const lab = document.createElement('label'), cb = document.createElement('input');
+      lab.style.cssText = 'display:flex;gap:6px;align-items:center;font-size:12px;flex:none';
+      lab.title = 'La relación solo vale mientras el punto de contacto cae dentro de los límites del segmento o del arco; fuera, los elementos quedan libres';
+      cb.type = 'checkbox'; cb.checked = !!k.finite; cb.style.cssText = 'width:20px;height:20px;min-height:20px;margin:0';
+      cb.onchange = () => {
+        pushUndo();
+        if (cb.checked) k.finite = true; else delete k.finite;
+        const ok = (hasReactive(doc) ? settle(doc, solve, []) : solve(doc, [])).ok;
+        if (!ok) { rollback(); toast('No se pudo: entra en conflicto con otras restricciones'); }
+        afterChange(); renderPropCons();
+      };
+      lab.append(cb, document.createTextNode('Solo en los límites'));
+      row.append(lb, lab, del);
+    } else row.append(lb, del);
     box.appendChild(row);
   }
 }

@@ -15,7 +15,7 @@ import { trimAt, extendEnd, cutsOf, curveCuts, linearArray, mirrorCopy, circular
 import { CLINE_STYLE, circleThrough3, addRectangle, polygonVertices, addPolygon, arcIsClockwise, constructionArcDash } from '../src/shapes.js';
 import { FONTS, fontCss } from '../src/text.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from '../src/lock.js';
-import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark, assignMark, setMarkRef, resetMarks, ensureMarkRefs, redundantCons, makeGear, makeRack, checkRack, beginSession, endSession } from '../src/solver.js';
+import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark, assignMark, setMarkRef, resetMarks, ensureMarkRefs, redundantCons, makeGear, makeRack, checkRack, beginSession, endSession, finiteInactive } from '../src/solver.js';
 import { readFileSync } from 'node:fs';
 import { bsplineThrough, bsplinePoint } from '../src/bspline.js';
 import { boxSelect } from '../src/boxsel.js';
@@ -2043,6 +2043,79 @@ t('rueda y cremallera: el punto que avanza debe ser el centro de la rueda o un p
   addCon(d, makeRack(d, wheel, c, ground, -10)); // con el centro, funciona
   assert.ok(solve(d, [{ id: c, x: -135, y: 6 }]).ok);
   near(d.pts[c].x, -135, 1e-6);
+});
+
+t('relacion finita: un punto sobre un segmento solo esta ligado dentro de los extremos del segmento', () => {
+  const mk = (finite) => {
+    const d = newDoc();
+    const A = addPoint(d, 0, 0, false), B = addPoint(d, 10, 0, false); d.pts[A].fixed = true; d.pts[B].fixed = true;
+    const l = addLine(d, A, B, {}), P = addPoint(d, 5, 0, false);
+    const k = addCon(d, { t: 'PONL', refs: [P, l], ...(finite ? { finite: true } : {}) });
+    return { d, P, k };
+  };
+  // por defecto la linea es infinita: P se queda sobre ella aunque pase del extremo
+  const a = mk(false);
+  assert.ok(solve(a.d, [{ id: a.P, x: 15, y: 3 }]).ok);
+  near(a.d.pts[a.P].y, 0, 1e-6); near(a.d.pts[a.P].x, 15, 1e-3);
+  // finita: dentro del segmento esta ligado; fuera, libre
+  const b = mk(true);
+  assert.ok(solve(b.d, [{ id: b.P, x: 5, y: 3 }]).ok);
+  near(b.d.pts[b.P].y, 0, 1e-6, 'dentro del segmento sigue sobre la linea');
+  assert.ok(solve(b.d, [{ id: b.P, x: 15, y: 3 }]).ok);
+  near(b.d.pts[b.P].x, 15, 1e-3); near(b.d.pts[b.P].y, 3, 1e-3, 'pasado el extremo queda libre');
+  assert.ok(finiteInactive(b.d).has(b.k));
+  assert.ok(solve(b.d, [{ id: b.P, x: 5, y: 3 }]).ok);
+  near(b.d.pts[b.P].y, 0, 1e-6, 'al volver al segmento se liga otra vez');
+  assert.ok(!finiteInactive(b.d).has(b.k));
+});
+t('relacion finita: tangencia circulo-segmento y punto sobre arco solo valen dentro de sus limites', () => {
+  // tangencia con un segmento: el centro Q solo esta a r de la recta mientras el pie de la perpendicular cae en el segmento
+  const d = newDoc();
+  const A = addPoint(d, 0, 0, false), B = addPoint(d, 10, 0, false); d.pts[A].fixed = true; d.pts[B].fixed = true;
+  const l = addLine(d, A, B, {}), Q = addPoint(d, 5, 4, false), c = addCircle(d, Q, 4, {});
+  addCon(d, { t: 'RAD', refs: [c], v: 4, hidden: true }); addCon(d, { t: 'TANLC', refs: [l, c], finite: true });
+  assert.ok(solve(d, [{ id: Q, x: 5, y: 6 }]).ok);
+  near(d.pts[Q].y, 4, 1e-4, 'sobre el segmento: tangente, el centro se queda a r');
+  assert.ok(solve(d, [{ id: Q, x: 15, y: 6 }]).ok);
+  near(d.pts[Q].x, 15, 1e-3); near(d.pts[Q].y, 6, 1e-3, 'pasado el extremo: sin tangencia, libre');
+  // punto sobre un arco de 90 grados: solo dentro del barrido
+  const e = newDoc();
+  const O = addPoint(e, 0, 0, false), S = addPoint(e, 10, 0, false), E = addPoint(e, 0, 10, false); e.pts[O].fixed = true; // (con el arco entero fijo, planegcs reporta conflicto en su regla: no es de esta prueba)
+  const arc = addArc(e, O, S, E, 10, {}), P = addPoint(e, 7, 7, false);
+  addCon(e, { t: 'RAD', refs: [arc], v: 10, hidden: true }); addCon(e, { t: 'PONC', refs: [P, arc], finite: true });
+  assert.ok(solve(e, [{ id: P, x: 9, y: 9 }]).ok);
+  near(Math.hypot(e.pts[P].x, e.pts[P].y), 10, 1e-6, 'dentro del barrido: sobre el arco');
+  assert.ok(solve(e, [{ id: P, x: -8, y: -8 }]).ok);
+  near(e.pts[P].x, -8, 1e-2); near(e.pts[P].y, -8, 1e-2, 'fuera del barrido: libre');
+});
+t('solo lo conectado al arrastre: con muchas relaciones sin relacion con el mecanismo el resultado es el mismo y lo demas no se toca', () => {
+  const mk = () => {
+    const d = newDoc();
+    const c = addPoint(d, 0, 0, false); d.pts[c].fixed = true;
+    const m = addPoint(d, 10, 0, false), n = addPoint(d, 20, 0, false);
+    addCon(d, { t: 'DIST', refs: [c, m], v: 10 }); addCon(d, { t: 'DIST', refs: [m, n], v: 10 });
+    const ajenas = [];
+    for (let i = 0; i < 40; i++) { // tangencias y distancias lejanas, sin ninguna conexion con la manivela
+      const a = addPoint(d, 100 + i * 7, 50, false), b = addPoint(d, 100 + i * 7, 70, false); d.pts[a].fixed = true; d.pts[b].fixed = true;
+      const l = addLine(d, a, b, {}), q = addPoint(d, 104 + i * 7, 60, false), ci = addCircle(d, q, 4, {});
+      addCon(d, { t: 'TANLC', refs: [l, ci] }); addCon(d, { t: 'DIST', refs: [a, q], v: Math.hypot(4, 10) });
+      ajenas.push(q);
+    }
+    return { d, m, n, ajenas };
+  };
+  const a = mk(), b = mk();
+  assert.ok(solve(a.d, []).ok && solve(b.d, []).ok);
+  const antes = JSON.stringify(a.ajenas.map((q) => a.d.pts[q]));
+  beginSession(a.d, true);
+  for (let i = 1; i <= 24; i++) { // a: con sesion (solo se resuelve la manivela); b: todo el dibujo
+    const ang = (i * 7 * Math.PI) / 180, T = [{ id: a.m, x: 14 * Math.cos(ang), y: 14 * Math.sin(ang) }], T2 = [{ id: b.m, x: 14 * Math.cos(ang), y: 14 * Math.sin(ang) }];
+    assert.ok(solve(a.d, T).ok && solve(b.d, T2).ok);
+  }
+  endSession();
+  for (const id of [a.m, a.n]) { near(a.d.pts[id].x, b.d.pts[id === a.m ? b.m : b.n].x, 1e-6); near(a.d.pts[id].y, b.d.pts[id === a.m ? b.m : b.n].y, 1e-6); }
+  assert.equal(JSON.stringify(a.ajenas.map((q) => a.d.pts[q])), antes, 'las partes sin relacion no se tocan');
+  // una parte conectada si se resuelve: la manivela es un cuerpo con dos puntos
+  assert.ok(Math.hypot(a.d.pts[a.m].x, a.d.pts[a.m].y) > 9.99 && Math.hypot(a.d.pts[a.m].x - a.d.pts[a.n].x, a.d.pts[a.m].y - a.d.pts[a.n].y) > 9.99);
 });
 
 t('yugo escoces: una manivela con su perno en una ranura se resuelve con las restricciones de siempre, vueltas completas', () => {
