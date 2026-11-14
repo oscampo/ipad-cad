@@ -1957,6 +1957,30 @@ t('engranaje: sin arrastre conserva la postura y un punto del cuerpo que no es l
   assert.ok(Math.abs(girado1 - 0.5) < 1e-6, 'm1 giro 0.5 con q1');
   near(Math.atan2(d.pts[m2].y, d.pts[m2].x - g.D), 0.4 - 0.25, 1e-6, 'el 2 giro -0.25');
 });
+t('engranaje: un tren A-B, B-C, C-D con constantes en vueltas distintas no desfasa la rueda de salida', () => {
+  // cuatro ruedas de centro fijo en fila (A y D fijas por su centro, B y C solidarias por la linea de B a C); cada rueda se representa
+  // por una linea radial. Las constantes a0 de B estan en vueltas distintas en cada relacion (180 y -180), como en un archivo real.
+  const d = newDoc();
+  const mk = (cx, r, a) => { const c = addPoint(d, cx, 0, false); d.pts[c].fixed = true; const m = addPoint(d, cx + r * Math.cos(a), r * Math.sin(a), false); addCon(d, { t: 'DIST', refs: [c, m], v: r, hidden: true }); return { c, m, l: addLine(d, c, m, {}) }; };
+  const A = mk(0, 10, 0), B = mk(30, 20, Math.PI), C = mk(30 + 1e-9, 10, 0), D = mk(60, 20, Math.PI); // D esta a 180 grados: con las constantes en ramas distintas la formula absoluta la mandaba a 0
+  addCon(d, { t: 'GEAR', refs: [A.l, B.l], ratio: -0.5, a0: [0, Math.PI], cur: [0, Math.PI] });
+  addCon(d, { t: 'GEAR', refs: [B.l, C.l], ratio: 1, a0: [-Math.PI, 0], cur: [-Math.PI, 0] });
+  addCon(d, { t: 'GEAR', refs: [C.l, D.l], ratio: -0.5, a0: [0, Math.PI], cur: [0, Math.PI] });
+  const dir = (g) => (Math.atan2(d.pts[g.m].y - d.pts[g.c].y, d.pts[g.m].x - d.pts[g.c].x) * 180) / Math.PI;
+  const wrapD = (x) => x - 360 * Math.round(x / 360);
+  assert.ok(solve(d, []).ok);
+  near(wrapD(dir(D) - 180), 0, 1e-6, 'en reposo nada se mueve (la postura actual es la referencia)');
+  for (let grados = 5; grados <= 400; grados += 5) { // el arrastre avanza en pasos cortos (un salto de mas de 180 grados es ambiguo)
+    const ang = (grados * Math.PI) / 180;
+    assert.ok(solve(d, [{ id: A.m, x: 12 * Math.cos(ang), y: 12 * Math.sin(ang) }]).ok, 'A a ' + grados);
+    if (grados % 40 !== 0 && grados !== 400) continue;
+    near(wrapD(dir(A) - grados), 0, 1e-6);
+    near(wrapD(dir(B) - (180 - 0.5 * grados)), 0, 1e-6, 'B a ' + grados);
+    near(wrapD(dir(C) - (-0.5 * grados)), 0, 1e-6, 'C a ' + grados);
+    near(wrapD(dir(D) - (180 + 0.25 * grados)), 0, 1e-6, 'D a ' + grados);
+  }
+});
+
 t('engranaje: conserva sus datos al copiar el archivo y se borra con sus lineas', () => {
   const g = dosEngranes(-1);
   const copia = JSON.parse(JSON.stringify(g.d));

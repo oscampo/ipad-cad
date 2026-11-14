@@ -544,15 +544,15 @@ function bodiesRaw(doc) {
 function gearPlan(doc, targets) {
   const rels = gearRels(doc);
   if (!rels.length) return { targets, prims: [] };
+  // Se propaga el CAMBIO de angulo desde la postura actual, no el angulo absoluto: un engranaje que esta en dos relaciones (un
+  // tren A-B, B-C, C-D) tendria constantes a0 en vueltas distintas (-180 en una, 180 en otra) y el angulo compuesto saldria
+  // desfasado en multiplos de 360 por la razon (la rueda D quedaba 180 grados fuera). Con el cambio no hay ramas que mezclar.
   const lines = new Map(); // linea -> { meas, rels: [] }
-  for (const k of rels) k.refs.forEach((lid, i) => { if (!lines.has(lid)) lines.set(lid, { meas: nearAng(lineDir(doc, lid), Array.isArray(k.cur) && Number.isFinite(k.cur[i]) ? k.cur[i] : lineDir(doc, lid)), rels: [] }); });
-  const edge = (k, from) => { // angulo de la otra linea a partir del de `from`
-    const [A, B] = k.refs, [a0, b0] = k.a0;
-    return from === A ? { to: B, f: (x) => b0 + k.ratio * (x - a0) } : { to: A, f: (x) => a0 + (x - b0) / k.ratio };
-  };
+  for (const k of rels) for (const lid of k.refs) if (!lines.has(lid)) lines.set(lid, { meas: lineDir(doc, lid), rels: [] });
+  const edge = (k, from) => (from === k.refs[0] ? { to: k.refs[1], r: k.ratio } : { to: k.refs[0], r: 1 / k.ratio }); // cambio de la otra linea = r * cambio de `from`
   for (const k of rels) for (const lid of k.refs) lines.get(lid).rels.push(k);
   const bod = targets.length ? bodies(doc) : null;
-  const angle = new Map(), drop = new Set();
+  const delta = new Map(), drop = new Set();
   const pivotOf = (lid) => structural(doc, 'pivot:' + lid, () => pivotRaw(lid), true);
   const pivotRaw = (lid) => { // extremo de la linea que coincide con un punto fijo: el centro de giro
     const l = doc.lines[lid];
@@ -570,7 +570,7 @@ function gearPlan(doc, targets) {
     const comp = [], stack = [lid0]; seen.add(lid0);
     while (stack.length) { const x = stack.pop(); comp.push(x); for (const k of lines.get(x).rels) for (const y of k.refs) if (!seen.has(y)) { seen.add(y); stack.push(y); } }
     // maestro: la linea cuyo cuerpo contiene un punto arrastrado (y que tiene centro de giro); si no, la primera
-    let master = comp[0], value = lines.get(comp[0]).meas, bodyKey = null;
+    let master = comp[0], d0 = 0, bodyKey = null;
     outer: for (const t of targets) {
       const key = bod.of(t.id);
       if (key === null) continue;
@@ -581,24 +581,24 @@ function gearPlan(doc, targets) {
         if (cid === null) continue;
         const c = doc.pts[cid], p = doc.pts[t.id];
         if (Math.hypot(p.x - c.x, p.y - c.y) < 1e-9 || Math.hypot(t.x - c.x, t.y - c.y) < 1e-9) continue;
-        const delta = Math.atan2(p.y - c.y, p.x - c.x) - lines.get(lid).meas; // posicion del punto respecto a la linea (rigido)
-        master = lid; value = nearAng(Math.atan2(t.y - c.y, t.x - c.x) - delta, lines.get(lid).meas); bodyKey = key;
+        const off = Math.atan2(p.y - c.y, p.x - c.x) - lines.get(lid).meas; // posicion del punto respecto a la linea (rigido)
+        master = lid; d0 = wrapPi(Math.atan2(t.y - c.y, t.x - c.x) - off - lines.get(lid).meas); bodyKey = key;
         break outer;
       }
     }
-    angle.set(master, value);
+    delta.set(master, d0);
     const queue = [master];
     while (queue.length) {
       const x = queue.shift();
       for (const k of lines.get(x).rels) {
-        const { to, f } = edge(k, x), v = f(angle.get(x));
-        if (!angle.has(to)) { angle.set(to, v); queue.push(to); }
+        const { to, r } = edge(k, x);
+        if (!delta.has(to)) { delta.set(to, r * delta.get(x)); queue.push(to); }
       }
     }
     if (bodyKey !== null) for (const t of targets) if (bod.of(t.id) === bodyKey) drop.add(t.id);
   }
   const prims = [];
-  for (const [lid, v] of angle) { const l = doc.lines[lid]; prims.push({ id: `__gr:${lid}`, type: 'p2p_angle', p1_id: l.a, p2_id: l.b, angle: wrapPi(v) }); }
+  for (const [lid, dv] of delta) { const l = doc.lines[lid]; prims.push({ id: `__gr:${lid}`, type: 'p2p_angle', p1_id: l.a, p2_id: l.b, angle: wrapPi(lines.get(lid).meas + dv) }); }
   return { targets: targets.filter((t) => !drop.has(t.id)), prims };
 }
 // Tras resolver: el angulo continuo de cada relacion sigue a la geometria.
