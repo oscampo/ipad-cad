@@ -2154,6 +2154,28 @@ t('cruz de malta: 4 ranuras como relaciones finitas, el impulsor da vueltas y la
   near(acc, -180, 0.5, 'tras 2 vueltas, dos ranuras (en sentido contrario al impulsor)');
 });
 
+t('arrastre con alcance: un punto libre sin restricciones (el ancla de un texto) se mueve', () => {
+  const d = newDoc();
+  const c = addPoint(d, 0, 0, false); d.pts[c].fixed = true;
+  const m = addPoint(d, 10, 0, false); addCon(d, { t: 'DIST', refs: [c, m], v: 10 });
+  const libre = addPoint(d, -20, 5, false); // sin ninguna restriccion
+  assert.ok(solve(d, []).ok);
+  beginSession(d, true);
+  for (let i = 1; i <= 5; i++) assert.ok(solve(d, [{ id: libre, x: -20 + 2 * i, y: 5 + i }]).ok);
+  endSession();
+  near(d.pts[libre].x, -10, 1e-2); near(d.pts[libre].y, 10, 1e-2, 'el punto libre llego a donde se arrastro');
+});
+t('indicadores: engranaje (G) y cremallera (Cr) tienen etiqueta numerada, tambien en archivos que ya las tenian', () => {
+  const d = newDoc();
+  const c1 = addPoint(d, 0, 0, false), m1 = addPoint(d, 10, 0, false), c2 = addPoint(d, 30, 0, false), m2 = addPoint(d, 40, 0, false);
+  const l1 = addLine(d, c1, m1, {}), l2 = addLine(d, c2, m2, {});
+  const g = addCon(d, makeGear(d, l1, l2, -1)), r = addCon(d, makeRack(d, l1, m1, l2, -10));
+  assert.equal(conTag(d.cons[g]), 'G1'); assert.equal(conTag(d.cons[r]), 'Cr1');
+  delete d.cons[g].n; delete d.cons[r].n; d.cn = {}; // un archivo guardado antes de tener etiqueta
+  ensureNumbers(d);
+  assert.equal(conTag(d.cons[g]), 'G1'); assert.equal(conTag(d.cons[r]), 'Cr1');
+});
+
 t('yugo escoces: una manivela con su perno en una ranura se resuelve con las restricciones de siempre, vueltas completas', () => {
   const d = newDoc(), r = 10;
   const c = addPoint(d, 0, 0, false); d.pts[c].fixed = true;

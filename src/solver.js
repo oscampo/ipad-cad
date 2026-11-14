@@ -1008,6 +1008,11 @@ function solveCore(doc, F0, targets, G, S, off, refine) {
     pos = { pts: r1.pts, circles: r1.circles, arcs: r1.arcs, u };
   }
   const res = solveLoop(doc, pos, null, F);
+  if (pos && F?.scope) { // con alcance se podan las primitivas sin restricciones: un punto libre (el ancla de un texto) solo esta en la 1.a pasada, la del destino
+    for (const id of Object.keys(pos.pts)) if (!(id in res.pts)) res.pts[id] = pos.pts[id];
+    for (const id of Object.keys(pos.circles || {})) if (!(id in res.circles)) res.circles[id] = pos.circles[id];
+    for (const id of Object.keys(pos.arcs || {})) if (!(id in res.arcs)) res.arcs[id] = pos.arcs[id];
+  }
   if (F) {
     applyFollowers(doc, F, (id) => doc.pts[id], res.pts);
     for (const id of F.idleArcs) { const a = doc.arcs[id], c = res.pts[a.c] || doc.pts[a.c], q = res.pts[a.a] || doc.pts[a.a]; res.arcs[id] = Math.hypot(q.x - c.x, q.y - c.y); }

@@ -205,8 +205,8 @@ export function addText(doc, pt, text, opts = {}) {
 // Numeracion de restricciones: cada tipo cuenta aparte (V1, V2, ⟂1, ∥1...). Las que involucran varios
 // elementos comparten un solo numero. "Punto sobre" y "coincidente" son la misma familia (●). Las ocultas
 // y las cotas no se numeran. El numero no se reutiliza al borrar.
-export const CON_GROUP = { H: 'H', V: 'V', PAR: 'PAR', PERP: 'PERP', EQL: 'EQ', EQR: 'EQ', COI: 'COI', PONL: 'COI', PONC: 'COI', PONS: 'COI', PONE: 'COI', COL: 'COL', MID: 'MID', CONC: 'CONC', TANLC: 'TAN', TANCC: 'TAN', TANLS: 'TAN', TANCS: 'TAN', TANLE: 'TAN', TANCE: 'TAN', TANEE: 'TAN' };
-export const CON_GLYPH = { H: 'H', V: 'V', PAR: '∥', PERP: '⟂', EQ: '=', COI: '●', COL: 'Col', MID: 'M', CONC: '◎', TAN: 'T' };
+export const CON_GROUP = { H: 'H', V: 'V', PAR: 'PAR', PERP: 'PERP', EQL: 'EQ', EQR: 'EQ', COI: 'COI', PONL: 'COI', PONC: 'COI', PONS: 'COI', PONE: 'COI', COL: 'COL', MID: 'MID', CONC: 'CONC', TANLC: 'TAN', TANCC: 'TAN', TANLS: 'TAN', TANCS: 'TAN', TANLE: 'TAN', TANCE: 'TAN', TANEE: 'TAN', GEAR: 'GEAR', RACK: 'RACK' };
+export const CON_GLYPH = { H: 'H', V: 'V', PAR: '∥', PERP: '⟂', EQ: '=', COI: '●', COL: 'Col', MID: 'M', CONC: '◎', TAN: 'T', GEAR: 'G', RACK: 'Cr' };
 export const conTag = (k) => (CON_GROUP[k.t] ? CON_GLYPH[CON_GROUP[k.t]] + (k.n ?? '') : '');
 // Cotas con nombre: D (distancia), A (angulo), R (radio de arco), O (diametro de circulo), numeradas por letra
 // y sin reutilizar numeros. El nombre se puede cambiar; las formulas de otras cotas lo usan como variable.

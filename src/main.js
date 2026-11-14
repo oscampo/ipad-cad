@@ -849,18 +849,6 @@ function label(c, text, x, y, id, color, italic = false) {
   if (id) labelHits.push({ x: bx, y: by, w, h, id });
 }
 
-function midOf(refs) {
-  const pts = [];
-  for (const r of refs) {
-    if (r in doc.pts) pts.push(doc.pts[r]);
-    else if (r in doc.lines) pts.push(doc.pts[doc.lines[r].a], doc.pts[doc.lines[r].b]);
-    else if (r in doc.circles) pts.push(doc.pts[doc.circles[r].c]);
-    else if (r in doc.arcs) pts.push(doc.pts[doc.arcs[r].c]);
-  }
-  if (!pts.length) return null;
-  return { x: pts.reduce((s, p) => s + p.x, 0) / pts.length, y: pts.reduce((s, p) => s + p.y, 0) / pts.length };
-}
-
 // Posicion cercana a un elemento (punto, linea, circulo, arco, spline) donde se rotula una relacion.
 function anchorOf(r) {
   if (r in doc.pts) return doc.pts[r];
@@ -871,14 +859,14 @@ function anchorOf(r) {
   if (r in (doc.ellipses || {})) { const P = ellipsePolyline(doc, doc.ellipses[r], 48); return P[Math.min(6, P.length >> 1)]; }
   return null;
 }
-// Donde se rotula una relacion: junto a cada elemento que involucra (el mismo numero en todos); las de un
-// punto con un elemento, junto al punto.
+// Donde se rotula una relacion: junto a cada elemento que involucra (el mismo numero en todos), tambien las de un punto con un
+// elemento (punto y elemento) y las horizontales o verticales entre 2 puntos (los dos).
 function conAnchors(k) {
   const r = k.refs;
-  if (['COI', 'PONL', 'PONC', 'PONS', 'PONE'].includes(k.t)) return [anchorOf(r[0])];
+  if (['PONL', 'PONC', 'PONS', 'PONE'].includes(k.t)) return [anchorOf(r[0]), anchorOf(r[1])]; // el punto Y el elemento: se ve con cual se relaciona
+  if (k.t === 'COI') return [anchorOf(r[0])];
   if (k.t === 'MID') return [anchorOf(r[2])];
-  if ((k.t === 'H' || k.t === 'V') && r.length === 2) return [midOf(r)];
-  return r.map(anchorOf);
+  return r.map(anchorOf); // horizontal o vertical entre 2 puntos: junto a los dos
 }
 
 const FONT = '-apple-system, system-ui, "Segoe UI", sans-serif';
