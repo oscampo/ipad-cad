@@ -15,7 +15,7 @@ import { trimAt, extendEnd, cutsOf, curveCuts, linearArray, mirrorCopy, circular
 import { CLINE_STYLE, circleThrough3, addRectangle, polygonVertices, addPolygon, arcIsClockwise, constructionArcDash } from '../src/shapes.js';
 import { FONTS, fontCss } from '../src/text.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from '../src/lock.js';
-import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark, assignMark, setMarkRef, resetMarks, ensureMarkRefs, redundantCons, makeGear, beginSession, endSession } from '../src/solver.js';
+import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark, assignMark, setMarkRef, resetMarks, ensureMarkRefs, redundantCons, makeGear, makeRack, beginSession, endSession } from '../src/solver.js';
 import { readFileSync } from 'node:fs';
 import { bsplineThrough, bsplinePoint } from '../src/bspline.js';
 import { boxSelect } from '../src/boxsel.js';
@@ -1978,6 +1978,67 @@ t('engranaje: un tren A-B, B-C, C-D con constantes en vueltas distintas no desfa
     near(wrapD(dir(B) - (180 - 0.5 * grados)), 0, 1e-6, 'B a ' + grados);
     near(wrapD(dir(C) - (-0.5 * grados)), 0, 1e-6, 'C a ' + grados);
     near(wrapD(dir(D) - (180 + 0.25 * grados)), 0, 1e-6, 'D a ' + grados);
+  }
+});
+
+t('rueda y cremallera: una rueda que rueda sin deslizar por el suelo; arrastrar la rueda la hace girar lo que avanza', () => {
+  const d = newDoc(), r = 10;
+  const g1 = addPoint(d, -200, 0, false), g2 = addPoint(d, 200, 0, false); d.pts[g1].fixed = true; d.pts[g2].fixed = true;
+  const ground = addLine(d, g1, g2, {});
+  const f = addPoint(d, 0, r, false); d.pts[f].fixed = true;
+  const q = addPoint(d, 0, r, false), m = addPoint(d, 0, 2 * r, false); // centro de la rueda y un punto de su borde (arriba)
+  addCon(d, { t: 'H', refs: [q, f], hidden: true }); addCon(d, { t: 'DIST', refs: [q, m], v: r, hidden: true });
+  const wheel = addLine(d, q, m, {});
+  const k = addCon(d, makeRack(d, wheel, q, ground, -r)); // avanza hacia +x girando en sentido horario
+  assert.ok(solve(d, []).ok);
+  const th0 = Math.atan2(d.pts[m].y - d.pts[q].y, d.pts[m].x - d.pts[q].x);
+  let mx = d.pts[m].x, my = d.pts[m].y;
+  for (let i = 1; i <= 30; i++) { // el raton arrastra el punto del borde hacia +x, 2 unidades por paso (60 en total: casi 6 radios)
+    assert.ok(solve(d, [{ id: m, x: mx + 2, y: my }]).ok, 'paso ' + i);
+    mx = d.pts[m].x; my = d.pts[m].y;
+  }
+  near(d.pts[q].x, 60, 1e-6, 'el centro avanzo lo que el raton');
+  near(d.pts[q].y, r, 1e-6, 'sigue sobre el suelo');
+  const th = Math.atan2(d.pts[m].y - d.pts[q].y, d.pts[m].x - d.pts[q].x);
+  const giro = th - th0 + 2 * Math.PI * Math.round((-60 / r - (th - th0)) / (2 * Math.PI));
+  near(giro, -60 / r, 1e-6, 'gira -avance/radio (sin deslizar: el punto de contacto no se mueve)');
+  assert.equal(d.cons[k].t, 'RACK');
+});
+t('rueda y cremallera: un piñon de centro fijo mueve la cremallera y la cremallera mueve al piñon', () => {
+  const d = newDoc(), r = 10;
+  const c = addPoint(d, 0, 0, false); d.pts[c].fixed = true;
+  const m = addPoint(d, r, 0, false); addCon(d, { t: 'DIST', refs: [c, m], v: r, hidden: true });
+  const pinion = addLine(d, c, m, {});
+  const r1 = addPoint(d, -100, -r, false), r2 = addPoint(d, 100, -r, false); d.pts[r1].fixed = true; d.pts[r2].fixed = true;
+  const rack = addLine(d, r1, r2, {});
+  const q = addPoint(d, 0, -r, false); addCon(d, { t: 'PONL', refs: [q, rack], hidden: true });
+  addCon(d, makeRack(d, pinion, q, rack, r)); // cremallera debajo: el piñon antihorario la mueve hacia +x
+  assert.ok(solve(d, []).ok);
+  // se gira el piñon 90 grados en pasos de 5: la cremallera avanza r * pi/2
+  for (let i = 1; i <= 18; i++) { const a = (i * 5 * Math.PI) / 180; assert.ok(solve(d, [{ id: m, x: r * 1.2 * Math.cos(a), y: r * 1.2 * Math.sin(a) }]).ok); }
+  near(d.pts[q].x, (r * Math.PI) / 2, 1e-6, 'la cremallera avanza r*theta');
+  near(Math.atan2(d.pts[m].y, d.pts[m].x), Math.PI / 2, 1e-6);
+  // ahora se arrastra la cremallera 10 unidades hacia -x: el piñon gira -1 rad
+  const q0 = d.pts[q].x, a0 = Math.atan2(d.pts[m].y, d.pts[m].x);
+  for (let i = 1; i <= 5; i++) assert.ok(solve(d, [{ id: q, x: d.pts[q].x - 2, y: -r }]).ok);
+  near(d.pts[q].x, q0 - 10, 1e-6);
+  near(Math.atan2(d.pts[m].y, d.pts[m].x) - a0, -1, 1e-6, 'el piñon gira -avance/r');
+});
+t('yugo escoces: una manivela con su perno en una ranura se resuelve con las restricciones de siempre, vueltas completas', () => {
+  const d = newDoc(), r = 10;
+  const c = addPoint(d, 0, 0, false); d.pts[c].fixed = true;
+  const p = addPoint(d, r, 0, false); addCon(d, { t: 'DIST', refs: [c, p], v: r }); addLine(d, c, p, {});
+  const y = addPoint(d, r, 0, false), z = addPoint(d, r, 15, false); // el yugo: Y en el eje x, la ranura vertical de Y a Z
+  addCon(d, { t: 'H', refs: [y, c] });
+  const slot = addLine(d, y, z, {}); addCon(d, { t: 'V', refs: [slot] }); addCon(d, { t: 'DIST', refs: [y, z], v: 15 });
+  addCon(d, { t: 'PONL', refs: [p, slot] });
+  assert.ok(solve(d, []).ok);
+  for (let i = 1; i <= 144; i++) { // dos vueltas
+    const a = (i * 5 * Math.PI) / 180;
+    assert.ok(solve(d, [{ id: p, x: 12 * Math.cos(a), y: 12 * Math.sin(a) }]).ok, 'paso ' + i);
+    near(d.pts[y].x, d.pts[p].x, 1e-6, 'el yugo sigue al perno (paso ' + i + ')');
+    near(d.pts[y].x, r * Math.cos(Math.atan2(d.pts[p].y, d.pts[p].x)), 1e-6);
+    near(Math.atan2(d.pts[p].y, d.pts[p].x) - a + 2 * Math.PI * Math.round((a - Math.atan2(d.pts[p].y, d.pts[p].x)) / (2 * Math.PI)), 0, 1e-3, 'el perno sigue al raton');
   }
 });
 

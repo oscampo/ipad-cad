@@ -1,5 +1,5 @@
 import wasmUrl from '@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url';
-import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark, assignMark, setMarkRef, resetMarks, ensureMarkRefs, redundantCons, makeGear, beginSession, endSession, perfStats } from './solver.js';
+import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark, assignMark, setMarkRef, resetMarks, ensureMarkRefs, redundantCons, makeGear, makeRack, beginSession, endSession, perfStats } from './solver.js';
 import {
   newDoc, addLayer, deleteLayer, layerCount, shownEntries, shownValues, layerHiddenPoints, consHidden, visibleDoc, isHidden, addPoint, addLine, addCircle, addArc, addText, addSpline, splinePolyline, addCon, cleanup, deleteItems, clone, hatchLoops,
   allLtypes, PALETTE, arcOf, conTag, ensureNumbers, addEllipse, ellipsePolyline, ellipseOf, ellipsePoint, ellipseParam, ellipseRange, isPartial, DIM_TYPES,
@@ -27,7 +27,8 @@ import { parseValue, isPlainNumber } from './expr.js';
 import { HELP_HTML } from './help.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from './lock.js';
 
-const VERSION = '1.6.1', RELEASE_DATE = '2026-11-13'; // fecha de la release: se ve en la esquina inferior izquierda del dibujo
+const VERSION = '1.6.1';
+const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : 'dev'; // commit de la compilacion: junto a la version, abajo a la izquierda del dibujo
 const STORE = 'ipad-cad-v1';
 const $ = (id) => document.getElementById(id);
 const cv = $('cv');
@@ -103,7 +104,12 @@ function persist() {
   }, 300);
 }
 // afterChange tambien mantiene al dia las cotas que leen medidas (si no se estabilizan, se deja como estaba)
-function afterChange() { syncVectors(doc); trackAngles(doc); const fz = pruneFormulas(doc); if (hasReactive(doc)) { const bak = snapshot(), st = settle(doc, solve, []); if (!st.ok) doc = JSON.parse(bak); } if (fz.length) toast(`${fz.join(', ')}: la cota de la que dependía ya no existe o es de referencia; queda con su valor actual`); layerBtn(); updateButtons(); updateEnabled(); syncPanel(); persist(); draw(); renderTree(); }
+// Nombre del archivo actual, arriba a la derecha del dibujo (con el estilo de la version). Se actualiza al abrir, guardar y empezar uno nuevo.
+function updateFileTag() {
+  const el = $('fileTag'), t = opts.fileBase ? opts.fileBase + '.json' : 'sin nombre';
+  if (el && el.textContent !== t) el.textContent = t;
+}
+function afterChange() { updateFileTag(); syncVectors(doc); trackAngles(doc); const fz = pruneFormulas(doc); if (hasReactive(doc)) { const bak = snapshot(), st = settle(doc, solve, []); if (!st.ok) doc = JSON.parse(bak); } if (fz.length) toast(`${fz.join(', ')}: la cota de la que dependía ya no existe o es de referencia; queda con su valor actual`); layerBtn(); updateButtons(); updateEnabled(); syncPanel(); persist(); draw(); renderTree(); }
 
 // Un boton de restriccion solo se activa si la seleccion actual le sirve (mismas reglas que applyCon).
 function updateEnabled() {
@@ -125,6 +131,7 @@ function updateEnabled() {
     DIM: (pt === 2 && !ln) || (ln === 1 && !pt) || (pt === 1 && ln === 1) || (ln === 2 && !pt && !crv && !n.sp && !n.el) || (crv >= 1 && pt + ln + crv + n.el === 2 && !n.sp),
     ANG: ln === 2,
     GEAR: ln === 2 && !pt && !crv && !n.sp && !n.el,
+    RACK: ln === 2 && pt === 1 && !crv && !n.sp && !n.el,
     RAD: crv >= 1,
   };
   document.querySelectorAll('[data-con]').forEach((b) => { b.disabled = !rules[b.dataset.con]; });
@@ -2030,6 +2037,15 @@ async function applyCon(kind) {
       toast('Engranaje: la postura actual es el punto de partida; arrastra cualquiera de los dos');
       break;
     }
+    case 'RACK': {
+      if (lns.length !== 2 || pts.length !== 1) return bad('Selecciona la línea radial de la rueda, luego la línea de la cremallera (o el suelo) y el punto que avanza (el centro de la rueda, o un punto de la cremallera)');
+      const [wl, rl] = lns, [wa, wb] = lineEnds(wl).map((i) => doc.pts[i]);
+      const val = await askNumber('Avance del punto por cada radián que gira la rueda (con signo: radio de la rueda; una rueda que rueda hacia la derecha por el suelo, −radio; admite fórmula)', -Math.round(dist(wa, wb) * 1000) / 1000);
+      if (val === null || !Number.isFinite(val) || val === 0) return;
+      list.push(makeRack(doc, wl, pts[0], rl, val));
+      toast('Rueda y cremallera: arrastra la rueda, la cremallera o el punto; el otro se mueve con la razón');
+      break;
+    }
     case 'COL':
       if (lns.length < 2) return bad('Selecciona 2 o más líneas');
       for (let i = 1; i < lns.length; i++) list.push({ t: 'COL', refs: [lns[0], lns[i]] });
@@ -3387,7 +3403,7 @@ $('ltDel').onclick = () => {
   fillLtypes(); afterChange();
 };
 
-$('fNew').onclick = () => { if (confirm('¿Empezar un dibujo nuevo? Se pierde lo no guardado.')) { loadDoc(newDoc()); fitView(); afterChange(); } };
+$('fNew').onclick = () => { if (confirm('¿Empezar un dibujo nuevo? Se pierde lo no guardado.')) { loadDoc(newDoc()); opts.fileBase = ''; fitView(); afterChange(); } };
 $('fSave').onclick = () => saveFile('json', '', () => new Blob([JSON.stringify({ app: 'ipad-cad', version: VERSION, doc }, null, 1)], { type: 'application/json' }));
 $('fLoad').onclick = () => $('fileIn').click();
 $('fileIn').onchange = async (e) => {
@@ -3508,7 +3524,8 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { re
 // ---------------------------------------------------------------- arranque
 async function boot() {
   $('ver').textContent = VERSION;
-  $('relTag').textContent = `v${VERSION} ${RELEASE_DATE}`;
+  $('relTag').textContent = `v${VERSION} ${BUILD}`;
+  updateFileTag();
   readTheme();
   buildSwatches();
   buildAnchors();

@@ -506,9 +506,18 @@ const TWO_PI = 2 * Math.PI;
 const wrapPi = (x) => x - TWO_PI * Math.round(x / TWO_PI);
 const nearAng = (a, ref) => ref + wrapPi(a - ref);
 const lineDir = (doc, lid) => { const l = doc.lines[lid], a = doc.pts[l.a], b = doc.pts[l.b]; return Math.atan2(b.y - a.y, b.x - a.x); };
-const gearRelIds = (doc) => structural(doc, 'gearIds', () => Object.keys(doc.cons).filter((id) => gearOk(doc, doc.cons[id])));
+const gearRelIds = (doc) => structural(doc, 'gearIds', () => Object.keys(doc.cons).filter((id) => relOk(doc, doc.cons[id])));
 const gearRels = (doc) => gearRelIds(doc).map((id) => doc.cons[id]);
-const gearOk = (doc, k) => k.t === 'GEAR' && !k.ref && k.refs.length === 2 && doc.lines[k.refs[0]] && doc.lines[k.refs[1]] && Number.isFinite(k.ratio) && k.ratio !== 0 && k.refs[0] !== k.refs[1];
+// RACK (rueda y cremallera, o rueda que rueda sin deslizar): { t: 'RACK', refs: [lineaDeLaRueda, puntoQ, lineaCremallera], ratio }
+// El avance s de Q a lo largo de la cremallera (de su extremo a hacia b) cambia ratio veces lo que gira la linea de la rueda:
+// ds = ratio * dtheta. En una rueda que rueda por el suelo, Q es su centro y ratio = -radio (avanza hacia +x girando en sentido horario).
+const relOk = (doc, k) => {
+  if ((k.t !== 'GEAR' && k.t !== 'RACK') || k.ref || !Number.isFinite(k.ratio) || k.ratio === 0) return false;
+  if (k.t === 'GEAR') return k.refs.length === 2 && !!doc.lines[k.refs[0]] && !!doc.lines[k.refs[1]] && k.refs[0] !== k.refs[1];
+  if (k.refs.length !== 3 || !doc.lines[k.refs[0]] || !doc.pts[k.refs[1]] || !doc.lines[k.refs[2]] || k.refs[0] === k.refs[2]) return false;
+  const r = doc.lines[k.refs[2]], a = doc.pts[r.a], b = doc.pts[r.b];
+  return Math.hypot(b.x - a.x, b.y - a.y) > 1e-9;
+};
 
 // Cuerpos: puntos que se mueven juntos (unidos por alguna restriccion o forma) sin pasar por puntos fijos.
 const bodies = (doc) => structural(doc, 'bodies', () => bodiesRaw(doc), true);
@@ -533,79 +542,108 @@ function bodiesRaw(doc) {
     if (doc.ellipses?.[r]) { const e = doc.ellipses[r]; return [e.c, e.a, e.b, e.p1, e.p2].filter(Boolean); }
     return [];
   };
-  for (const k of Object.values(doc.cons)) if (!k.ref && k.t !== 'GEAR') join(k.refs.flatMap(ptsOf));
+  for (const k of Object.values(doc.cons)) if (!k.ref && k.t !== 'GEAR' && k.t !== 'RACK') join(k.refs.flatMap(ptsOf));
   for (const l of Object.values(doc.lines)) join([l.a, l.b]);
   for (const a of Object.values(doc.arcs)) join([a.c, a.a, a.b]);
   for (const sp of Object.values(doc.splines || {})) join(sp.pts);
   return { of: (id) => (par.has(id) ? find(id) : null) };
 }
 
-// Plan de una resolucion: angulos fijos para las lineas de los engranajes y los destinos que ya no hacen falta.
+// Plan de una resolucion: angulos fijos para las lineas de los engranajes y avances fijos para los puntos de las cremalleras, y los
+// destinos del raton que ya no hacen falta. Los nodos son giros (una linea rigida con su rueda) y avances (un punto que se
+// desplaza a lo largo de una cremallera); las relaciones ligan el CAMBIO de uno con el del otro.
 function gearPlan(doc, targets) {
   const rels = gearRels(doc);
   if (!rels.length) return { targets, prims: [] };
-  // Se propaga el CAMBIO de angulo desde la postura actual, no el angulo absoluto: un engranaje que esta en dos relaciones (un
-  // tren A-B, B-C, C-D) tendria constantes a0 en vueltas distintas (-180 en una, 180 en otra) y el angulo compuesto saldria
-  // desfasado en multiplos de 360 por la razon (la rueda D quedaba 180 grados fuera). Con el cambio no hay ramas que mezclar.
-  const lines = new Map(); // linea -> { meas, rels: [] }
-  for (const k of rels) for (const lid of k.refs) if (!lines.has(lid)) lines.set(lid, { meas: lineDir(doc, lid), rels: [] });
-  const edge = (k, from) => (from === k.refs[0] ? { to: k.refs[1], r: k.ratio } : { to: k.refs[0], r: 1 / k.ratio }); // cambio de la otra linea = r * cambio de `from`
-  for (const k of rels) for (const lid of k.refs) lines.get(lid).rels.push(k);
+  // Se propaga el CAMBIO desde la postura actual, no el angulo absoluto: un engranaje que esta en dos relaciones (un tren A-B,
+  // B-C, C-D) tendria constantes a0 en vueltas distintas (-180 en una, 180 en otra) y el angulo compuesto saldria desfasado en
+  // multiplos de 360 por la razon (la rueda D quedaba 180 grados fuera). Con el cambio no hay ramas que mezclar.
+  const nodes = new Map(); // clave -> { kind: 'ang' | 'tr', id, rels: [], meas | pos, u }
+  const node = (key, make) => { if (!nodes.has(key)) nodes.set(key, { ...make(), rels: [] }); return nodes.get(key); };
+  const links = []; // { k, a, b }: cambio de b = ratio * cambio de a
+  for (const k of rels) {
+    const A = node('L:' + k.refs[0], () => ({ kind: 'ang', id: k.refs[0], meas: lineDir(doc, k.refs[0]) }));
+    let B;
+    if (k.t === 'GEAR') B = node('L:' + k.refs[1], () => ({ kind: 'ang', id: k.refs[1], meas: lineDir(doc, k.refs[1]) }));
+    else {
+      const r = doc.lines[k.refs[2]], a = doc.pts[r.a], b = doc.pts[r.b], len = Math.hypot(b.x - a.x, b.y - a.y), q = doc.pts[k.refs[1]];
+      B = node('T:' + k.refs[1], () => ({ kind: 'tr', id: k.refs[1], pos: { x: q.x, y: q.y }, u: { x: (b.x - a.x) / len, y: (b.y - a.y) / len } }));
+    }
+    A.rels.push({ k, to: B, r: k.ratio }); B.rels.push({ k, to: A, r: 1 / k.ratio });
+    links.push({ k, a: A, b: B });
+  }
   const bod = targets.length ? bodies(doc) : null;
   const delta = new Map(), drop = new Set();
   const pivotOf = (lid) => structural(doc, 'pivot:' + lid, () => pivotRaw(lid), true);
-  const pivotRaw = (lid) => { // extremo de la linea que coincide con un punto fijo: el centro de giro
+  const pivotRaw = (lid) => { // extremo de la linea que es un punto fijo o esta ligado a uno por una coincidencia: el centro de giro
+    // (una simple coincidencia de posiciones no cuenta: una rueda que rueda puede pasar por donde hay un punto fijo)
     const l = doc.lines[lid];
     for (const id of [l.a, l.b]) {
-      const p = doc.pts[id];
-      if (p.fixed) return id;
-      for (const q of Object.values(doc.pts)) if (q.fixed && Math.hypot(q.x - p.x, q.y - p.y) < 1e-6) return id;
+      if (doc.pts[id].fixed) return id;
+      for (const k of Object.values(doc.cons)) if (k.t === 'COI' && !k.ref && k.refs.includes(id) && k.refs.some((x) => x !== id && doc.pts[x]?.fixed)) return id;
     }
     return null;
   };
   const seen = new Set();
-  for (const lid0 of lines.keys()) {
-    if (seen.has(lid0)) continue;
-    // componente de lineas ligadas por relaciones
-    const comp = [], stack = [lid0]; seen.add(lid0);
-    while (stack.length) { const x = stack.pop(); comp.push(x); for (const k of lines.get(x).rels) for (const y of k.refs) if (!seen.has(y)) { seen.add(y); stack.push(y); } }
-    // maestro: la linea cuyo cuerpo contiene un punto arrastrado (y que tiene centro de giro); si no, la primera
+  for (const n0 of nodes.values()) {
+    if (seen.has(n0)) continue;
+    // componente de nodos ligados por relaciones
+    const comp = [], stack = [n0]; seen.add(n0);
+    while (stack.length) { const x = stack.pop(); comp.push(x); for (const e of x.rels) if (!seen.has(e.to)) { seen.add(e.to); stack.push(e.to); } }
+    // maestro: primero una rueda que gira alrededor de un centro fijo y cuyo cuerpo contiene un punto arrastrado (su angulo sale del
+    // raton); si no, un punto de avance cuyo cuerpo contiene el punto arrastrado (avanza lo que el raton, a lo largo de la cremallera);
+    // si no, el primero, sin cambio
     let master = comp[0], d0 = 0, bodyKey = null;
-    outer: for (const t of targets) {
-      const key = bod.of(t.id);
-      if (key === null) continue;
-      for (const lid of comp) {
-        const l = doc.lines[lid], inBody = [l.a, l.b].some((id) => bod.of(id) === key);
-        if (!inBody) continue;
-        const cid = pivotOf(lid);
-        if (cid === null) continue;
-        const c = doc.pts[cid], p = doc.pts[t.id];
-        if (Math.hypot(p.x - c.x, p.y - c.y) < 1e-9 || Math.hypot(t.x - c.x, t.y - c.y) < 1e-9) continue;
-        const off = Math.atan2(p.y - c.y, p.x - c.x) - lines.get(lid).meas; // posicion del punto respecto a la linea (rigido)
-        master = lid; d0 = wrapPi(Math.atan2(t.y - c.y, t.x - c.x) - off - lines.get(lid).meas); bodyKey = key;
-        break outer;
+    outer: for (const pass of ['ang', 'tr']) {
+      for (const t of targets) {
+        const key = bod.of(t.id);
+        if (key === null) continue;
+        const p = doc.pts[t.id];
+        for (const nd of comp) {
+          if (nd.kind !== pass) continue;
+          if (nd.kind === 'ang') {
+            const l = doc.lines[nd.id];
+            if (![l.a, l.b].some((id) => bod.of(id) === key)) continue;
+            const cid = pivotOf(nd.id);
+            if (cid === null) continue;
+            const c = doc.pts[cid];
+            if (Math.hypot(p.x - c.x, p.y - c.y) < 1e-9 || Math.hypot(t.x - c.x, t.y - c.y) < 1e-9) continue;
+            const off = Math.atan2(p.y - c.y, p.x - c.x) - nd.meas; // posicion del punto respecto a la linea (rigido)
+            master = nd; d0 = wrapPi(Math.atan2(t.y - c.y, t.x - c.x) - off - nd.meas); bodyKey = key;
+          } else {
+            if (bod.of(nd.id) !== key) continue;
+            master = nd; d0 = (t.x - p.x) * nd.u.x + (t.y - p.y) * nd.u.y; bodyKey = key;
+          }
+          break outer;
+        }
       }
     }
     delta.set(master, d0);
     const queue = [master];
     while (queue.length) {
       const x = queue.shift();
-      for (const k of lines.get(x).rels) {
-        const { to, r } = edge(k, x);
-        if (!delta.has(to)) { delta.set(to, r * delta.get(x)); queue.push(to); }
-      }
+      for (const e of x.rels) if (!delta.has(e.to)) { delta.set(e.to, e.r * delta.get(x)); queue.push(e.to); }
     }
     if (bodyKey !== null) for (const t of targets) if (bod.of(t.id) === bodyKey) drop.add(t.id);
   }
   const prims = [];
-  for (const [lid, dv] of delta) { const l = doc.lines[lid]; prims.push({ id: `__gr:${lid}`, type: 'p2p_angle', p1_id: l.a, p2_id: l.b, angle: wrapPi(lines.get(lid).meas + dv) }); }
+  for (const [nd, dv] of delta) {
+    if (nd.kind === 'ang') { const l = doc.lines[nd.id]; prims.push({ id: `__gr:${nd.id}`, type: 'p2p_angle', p1_id: l.a, p2_id: l.b, angle: wrapPi(nd.meas + dv) }); }
+    else {
+      prims.push({ id: `__rt:${nd.id}`, type: 'point', x: nd.pos.x + dv * nd.u.x, y: nd.pos.y + dv * nd.u.y, fixed: true });
+      prims.push({ id: `__rc:${nd.id}`, type: 'p2p_coincident', p1_id: nd.id, p2_id: `__rt:${nd.id}` });
+    }
+  }
   return { targets: targets.filter((t) => !drop.has(t.id)), prims };
 }
 // Tras resolver: el angulo continuo de cada relacion sigue a la geometria.
 function trackGears(doc) {
-  for (const k of gearRels(doc)) k.cur = k.refs.map((lid, i) => nearAng(lineDir(doc, lid), Array.isArray(k.cur) && Number.isFinite(k.cur[i]) ? k.cur[i] : lineDir(doc, lid)));
+  for (const k of gearRels(doc)) if (k.t === 'GEAR') k.cur = k.refs.map((lid, i) => nearAng(lineDir(doc, lid), Array.isArray(k.cur) && Number.isFinite(k.cur[i]) ? k.cur[i] : lineDir(doc, lid)));
 }
 // Datos de una relacion nueva con la postura actual como punto de partida.
+// Rueda y cremallera: lineaRueda es una linea rigida con la rueda, q el punto que avanza (el centro de una rueda que rueda, o un
+// punto de la cremallera) y lineaCremallera la direccion del avance.
+export function makeRack(doc, wheelLine, pointQ, rackLine, ratio) { return { t: 'RACK', refs: [wheelLine, pointQ, rackLine], ratio }; }
 export function makeGear(doc, lineA, lineB, ratio) {
   const a = lineDir(doc, lineA), b = lineDir(doc, lineB);
   return { t: 'GEAR', refs: [lineA, lineB], ratio, a0: [a, b], cur: [a, b] };

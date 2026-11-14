@@ -1,0 +1,138 @@
+{
+ "app": "ipad-cad",
+ "version": "1.6.1",
+ "doc": {
+  "n": 13,
+  "pts": {
+   "p1": {
+    "x": -120,
+    "y": 0,
+    "fixed": true,
+    "auto": false
+   },
+   "p2": {
+    "x": 380,
+    "y": 0,
+    "fixed": true,
+    "auto": false
+   },
+   "p4": {
+    "x": 0,
+    "y": 30,
+    "fixed": false,
+    "auto": false
+   },
+   "p5": {
+    "x": 0,
+    "y": 0,
+    "fixed": false,
+    "auto": false
+   },
+   "p12": {
+    "x": -100,
+    "y": 90,
+    "fixed": false,
+    "auto": false
+   }
+  },
+  "lines": {
+   "l3": {
+    "a": "p1",
+    "b": "p2",
+    "color": "auto",
+    "ltype": "continua",
+    "w": 2,
+    "ls": 1
+   },
+   "l10": {
+    "a": "p4",
+    "b": "p5",
+    "color": "#C3C3C3",
+    "ltype": "constructiva",
+    "w": 1,
+    "ls": 1
+   }
+  },
+  "circles": {
+   "c6": {
+    "c": "p4",
+    "r": 30,
+    "color": "auto",
+    "ltype": "continua",
+    "w": 2,
+    "ls": 1
+   }
+  },
+  "arcs": {},
+  "ellipses": {},
+  "texts": {
+   "t13": {
+    "pt": {
+     "pt": "p12",
+     "text": "Rueda sin deslizar: arrastra la rueda hacia la derecha; el punto del borde traza la cicloide",
+     "h": 6,
+     "ang": 0,
+     "anchor": "bl",
+     "color": "auto",
+     "readable": true,
+     "font": "futura"
+    },
+    "h": 4,
+    "ang": 0,
+    "anchor": "bl",
+    "color": "auto",
+    "readable": true
+   }
+  },
+  "splines": {},
+  "traces": {
+   "p5": {
+    "pts": [
+     {
+      "x": 0,
+      "y": 0
+     }
+    ],
+    "color": "#db2777",
+    "ltype": "continua",
+    "w": 1.5,
+    "ls": 1
+   }
+  },
+  "cons": {
+   "k7": {
+    "t": "TANLC",
+    "refs": [
+     "l3",
+     "c6"
+    ],
+    "n": 1
+   },
+   "k8": {
+    "t": "DIST",
+    "refs": [
+     "p4",
+     "p5"
+    ],
+    "v": 30,
+    "hidden": true
+   },
+   "k11": {
+    "t": "RACK",
+    "refs": [
+     "l10",
+     "p4",
+     "l3"
+    ],
+    "ratio": -30
+   }
+  },
+  "hatches": {},
+  "ltypes": {},
+  "cn": {
+   "TAN": 1
+  },
+  "layers": {},
+  "curLayer": null
+ }
+}
