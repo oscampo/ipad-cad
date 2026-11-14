@@ -1,5 +1,5 @@
 import wasmUrl from '@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url';
-import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark, assignMark, setMarkRef, resetMarks, ensureMarkRefs, redundantCons, makeGear, makeRack, beginSession, endSession, perfStats } from './solver.js';
+import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark, assignMark, setMarkRef, resetMarks, ensureMarkRefs, redundantCons, makeGear, makeRack, checkRack, beginSession, endSession, perfStats } from './solver.js';
 import {
   newDoc, addLayer, deleteLayer, layerCount, shownEntries, shownValues, layerHiddenPoints, consHidden, visibleDoc, isHidden, addPoint, addLine, addCircle, addArc, addText, addSpline, splinePolyline, addCon, cleanup, deleteItems, clone, hatchLoops,
   allLtypes, PALETTE, arcOf, conTag, ensureNumbers, addEllipse, ellipsePolyline, ellipseOf, ellipsePoint, ellipseParam, ellipseRange, isPartial, DIM_TYPES,
@@ -2042,8 +2042,10 @@ async function applyCon(kind) {
       const [wl, rl] = lns, [wa, wb] = lineEnds(wl).map((i) => doc.pts[i]);
       const val = await askNumber('Avance del punto por cada radián que gira la rueda (con signo: radio de la rueda; una rueda que rueda hacia la derecha por el suelo, −radio; admite fórmula)', -Math.round(dist(wa, wb) * 1000) / 1000);
       if (val === null || !Number.isFinite(val) || val === 0) return;
-      list.push(makeRack(doc, wl, pts[0], rl, val));
-      toast('Rueda y cremallera: arrastra la rueda, la cremallera o el punto; el otro se mueve con la razón');
+      const chk = checkRack(doc, wl, pts[0], rl, val);
+      if (!chk.ok) return bad(`El punto que avanza debe ser el centro de la rueda (a ${Math.round(Math.abs(val) * 1000) / 1000} de la línea de la cremallera) o un punto de la cremallera; el elegido está a ${Math.round(chk.dist * 1000) / 1000}. Un punto del borde no sirve`);
+      list.push(makeRack(doc, wl, chk.q, rl, val));
+      toast(chk.changed ? `Se usó el otro extremo de la línea de la rueda (${chk.q}): es su centro, y el punto del borde no avanza a ritmo uniforme` : 'Rueda y cremallera: arrastra la rueda, la cremallera o el punto; el otro se mueve con la razón');
       break;
     }
     case 'COL':

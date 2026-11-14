@@ -644,6 +644,18 @@ function trackGears(doc) {
 // Rueda y cremallera: lineaRueda es una linea rigida con la rueda, q el punto que avanza (el centro de una rueda que rueda, o un
 // punto de la cremallera) y lineaCremallera la direccion del avance.
 export function makeRack(doc, wheelLine, pointQ, rackLine, ratio) { return { t: 'RACK', refs: [wheelLine, pointQ, rackLine], ratio }; }
+// El punto que avanza solo tiene sentido si es el centro de una rueda que rueda sobre la cremallera (a |ratio| = radio de ella) o un punto
+// de la propia cremallera (a 0): un punto del borde no avanza a ritmo uniforme y el sistema queda imposible. Devuelve el punto valido (si el
+// elegido es un extremo de la linea de la rueda y su otro extremo si lo es, se usa ese: era el centro) o el error con la distancia medida.
+export function checkRack(doc, wheelLine, q, rackLine, ratio) {
+  const rl = doc.lines[rackLine], a = doc.pts[rl.a], b = doc.pts[rl.b], len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  const dist = (id) => { const p = doc.pts[id]; return Math.abs((b.x - a.x) * (a.y - p.y) - (a.x - p.x) * (b.y - a.y)) / len; };
+  const tol = Math.max(1e-6, 1e-3 * Math.abs(ratio)), good = (id) => dist(id) < tol || Math.abs(dist(id) - Math.abs(ratio)) < tol;
+  if (good(q)) return { ok: true, q };
+  const wl = doc.lines[wheelLine], other = wl.a === q ? wl.b : wl.b === q ? wl.a : null;
+  if (other && good(other)) return { ok: true, q: other, changed: true };
+  return { ok: false, dist: dist(q) };
+}
 export function makeGear(doc, lineA, lineB, ratio) {
   const a = lineDir(doc, lineA), b = lineDir(doc, lineB);
   return { t: 'GEAR', refs: [lineA, lineB], ratio, a0: [a, b], cur: [a, b] };

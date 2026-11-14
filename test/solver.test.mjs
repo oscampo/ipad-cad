@@ -15,7 +15,7 @@ import { trimAt, extendEnd, cutsOf, curveCuts, linearArray, mirrorCopy, circular
 import { CLINE_STYLE, circleThrough3, addRectangle, polygonVertices, addPolygon, arcIsClockwise, constructionArcDash } from '../src/shapes.js';
 import { FONTS, fontCss } from '../src/text.js';
 import { lineLock, lockConstraints, originsOfPoint, originsOfSnap } from '../src/lock.js';
-import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark, assignMark, setMarkRef, resetMarks, ensureMarkRefs, redundantCons, makeGear, makeRack, beginSession, endSession } from '../src/solver.js';
+import { initSolver, solve, solveSteps, reparamSplines, addConsSolved, projectMarks, isMark, assignMark, setMarkRef, resetMarks, ensureMarkRefs, redundantCons, makeGear, makeRack, checkRack, beginSession, endSession } from '../src/solver.js';
 import { readFileSync } from 'node:fs';
 import { bsplineThrough, bsplinePoint } from '../src/bspline.js';
 import { boxSelect } from '../src/boxsel.js';
@@ -2024,6 +2024,27 @@ t('rueda y cremallera: un piñon de centro fijo mueve la cremallera y la cremall
   near(d.pts[q].x, q0 - 10, 1e-6);
   near(Math.atan2(d.pts[m].y, d.pts[m].x) - a0, -1, 1e-6, 'el piñon gira -avance/r');
 });
+t('rueda y cremallera: el punto que avanza debe ser el centro de la rueda o un punto de la cremallera (no uno del borde)', () => {
+  // el dibujo del usuario: suelo horizontal, rueda de radio 10 tangente a el, marcador en el borde
+  const d = newDoc();
+  const g1 = addPoint(d, -150, -4, false), g2 = addPoint(d, -60, -4, false); d.pts[g1].fixed = true; d.pts[g2].fixed = true;
+  const ground = addLine(d, g1, g2, {});
+  const c = addPoint(d, -140, 6, false), m = addPoint(d, -130.2, 8.1, false); // m a distancia 10 del centro
+  const wheel = addLine(d, c, m, {});
+  // el marcador (borde) no vale; el centro si
+  const r1 = checkRack(d, wheel, m, ground, -10);
+  assert.ok(r1.ok && r1.q === c && r1.changed, 'el borde se cambia por el centro (el otro extremo de la linea de la rueda)');
+  assert.ok(checkRack(d, wheel, c, ground, -10).ok && !checkRack(d, wheel, c, ground, -10).changed, 'el centro vale tal cual');
+  const rackPt = addPoint(d, -100, -4, false);
+  assert.ok(checkRack(d, wheel, rackPt, ground, 10).ok, 'un punto de la cremallera vale');
+  const lejos = addPoint(d, -100, 30, false);
+  const r2 = checkRack(d, wheel, lejos, ground, -10);
+  assert.ok(!r2.ok && Math.abs(r2.dist - 34) < 1e-9, 'un punto cualquiera no vale y se informa su distancia');
+  addCon(d, makeRack(d, wheel, c, ground, -10)); // con el centro, funciona
+  assert.ok(solve(d, [{ id: c, x: -135, y: 6 }]).ok);
+  near(d.pts[c].x, -135, 1e-6);
+});
+
 t('yugo escoces: una manivela con su perno en una ranura se resuelve con las restricciones de siempre, vueltas completas', () => {
   const d = newDoc(), r = 10;
   const c = addPoint(d, 0, 0, false); d.pts[c].fixed = true;
